@@ -1,0 +1,48 @@
+# Dependabot configuration
+# Keeps Maven dependencies (pom.xml) and GitHub Actions up to date.
+# Docs: https://docs.github.com/code-security/dependabot/dependabot-version-updates
+version: 2
+updates:
+  # --- Maven dependencies (pom.xml) ---
+  - package-ecosystem: "maven"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Europe/Berlin"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+      - "java"
+    commit-message:
+      prefix: "build"
+      include: "scope"
+    # Bundle low-risk minor/patch bumps into a single PR to reduce noise;
+    # major upgrades stay as individual PRs for focused review.
+    groups:
+      maven-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  # --- GitHub Actions used in .github/workflows ---
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Europe/Berlin"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "github-actions"
+    commit-message:
+      prefix: "ci"
+      include: "scope"
+    groups:
+      github-actions:
+        update-types:
+          - "minor"
+          - "patch"
