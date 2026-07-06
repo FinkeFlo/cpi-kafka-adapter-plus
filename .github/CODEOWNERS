@@ -1,0 +1,7 @@
+# Every change to this repository requires review from the maintainer.
+# Combined with branch protection ("Require review from Code Owners"), nothing
+# is merged into main without an explicit approval.
+* @FinkeFlo
+
+# Guardrail config is especially sensitive — call it out explicitly.
+/.github/ @FinkeFlo

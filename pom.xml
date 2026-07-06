@@ -1,0 +1,473 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
+
+    <modelVersion>4.0.0</modelVersion>
+    <groupId>com.finkeflo.cpi.kafka</groupId>
+    <artifactId>sap-cpi-kafka-adapter-plus</artifactId>
+    <version>1.0.3</version>
+    <packaging>bundle</packaging>
+    <name>SAP CPI Kafka Adapter Plus</name>
+    <description>Custom Apache Kafka adapter for SAP Cloud Integration (CPI) with advanced batch processing, Avro/Schema Registry support, and SASL/SSL security.</description>
+
+    <properties>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <maven.compiler.source>1.8</maven.compiler.source>
+        <maven.compiler.target>1.8</maven.compiler.target>
+        <camel.version>3.14.7</camel.version>
+        <adk.version>2.3.0</adk.version>
+        <kafka.version>3.9.1</kafka.version>
+        <avro.version>1.11.5</avro.version>
+        <confluent.version>7.9.5</confluent.version>
+        <jackson.version>2.16.0</jackson.version>
+    </properties>
+
+    <repositories>
+        <repository>
+            <id>confluent</id>
+            <url>https://packages.confluent.io/maven/</url>
+        </repository>
+    </repositories>
+
+    <dependencyManagement>
+        <dependencies>
+            <!-- Force Jackson module version convergence (avoid drift from transitive Avro/Confluent deps) -->
+            <dependency>
+                <groupId>com.fasterxml.jackson</groupId>
+                <artifactId>jackson-bom</artifactId>
+                <version>${jackson.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <dependencies>
+        <!-- SAP ADK -->
+        <dependency>
+            <groupId>com.sap.cloud.adk</groupId>
+            <artifactId>com.sap.cloud.adk.build.archive</artifactId>
+            <version>${adk.version}</version>
+        </dependency>
+
+        <!-- SAP CPI APIs (provided at runtime) -->
+        <dependency>
+            <groupId>com.sap.cloud.adk</groupId>
+            <artifactId>generic.api</artifactId>
+            <version>3.21.0</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.sap.cloud.adk</groupId>
+            <artifactId>adapter.api</artifactId>
+            <version>3.21.0</version>
+            <scope>provided</scope>
+        </dependency>
+
+        <!-- Apache Camel -->
+        <dependency>
+            <groupId>org.apache.camel</groupId>
+            <artifactId>camel-core</artifactId>
+            <version>${camel.version}</version>
+            <scope>provided</scope>
+        </dependency>
+
+        <!-- Kafka Client -->
+        <dependency>
+            <groupId>org.apache.kafka</groupId>
+            <artifactId>kafka-clients</artifactId>
+            <version>${kafka.version}</version>
+        </dependency>
+
+        <!-- Snappy compression codec (required by Kafka consumers reading snappy-compressed batches) -->
+        <dependency>
+            <groupId>org.xerial.snappy</groupId>
+            <artifactId>snappy-java</artifactId>
+            <version>1.1.10.5</version>
+            <scope>runtime</scope>
+        </dependency>
+
+        <!-- Avro -->
+        <dependency>
+            <groupId>org.apache.avro</groupId>
+            <artifactId>avro</artifactId>
+            <version>${avro.version}</version>
+        </dependency>
+
+        <!-- Confluent Schema Registry (kafka-avro-serializer includes KafkaAvroDeserializer) -->
+        <dependency>
+            <groupId>io.confluent</groupId>
+            <artifactId>kafka-avro-serializer</artifactId>
+            <version>${confluent.version}</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.apache.kafka</groupId>
+                    <artifactId>kafka-clients</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>io.confluent</groupId>
+            <artifactId>kafka-schema-registry-client</artifactId>
+            <version>${confluent.version}</version>
+        </dependency>
+
+        <!-- Jackson for JSON serialization -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <version>${jackson.version}</version>
+        </dependency>
+
+        <!-- JSON Schema Validation -->
+        <dependency>
+            <groupId>com.networknt</groupId>
+            <artifactId>json-schema-validator</artifactId>
+            <version>1.0.87</version>
+        </dependency>
+
+        <!-- Logging -->
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+            <version>1.7.36</version>
+            <scope>provided</scope>
+        </dependency>
+
+        <!-- Testing -->
+        <dependency>
+            <groupId>org.apache.camel</groupId>
+            <artifactId>camel-test</artifactId>
+            <version>${camel.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>junit</groupId>
+            <artifactId>junit</artifactId>
+            <version>4.13.2</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-simple</artifactId>
+            <version>1.7.36</version>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- Testcontainers (integration tests) -->
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers</artifactId>
+            <version>1.21.4</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>kafka</artifactId>
+            <version>1.21.4</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.commons</groupId>
+            <artifactId>commons-lang3</artifactId>
+            <version>3.14.0</version>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <defaultGoal>install</defaultGoal>
+        <plugins>
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>license-maven-plugin</artifactId>
+                <version>2.4.0</version>
+                <configuration>
+                    <licenseName>agpl_v3</licenseName>
+                    <licenseFile>${project.basedir}/LICENSE</licenseFile>
+                    <copyrightOwners>Florian Kube</copyrightOwners>
+                    <organizationName>Florian Kube</organizationName>
+                    <inceptionYear>2026</inceptionYear>
+                    <addJavaLicenseAfterPackage>false</addJavaLicenseAfterPackage>
+                    <roots>
+                        <root>src/main/java</root>
+                        <root>src/test/java</root>
+                    </roots>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>check-file-header</id>
+                        <phase>validate</phase>
+                        <goals><goal>check-file-header</goal></goals>
+                    </execution>
+                    <execution>
+                        <id>add-third-party</id>
+                        <phase>generate-resources</phase>
+                        <goals><goal>add-third-party</goal></goals>
+                        <configuration>
+                            <outputDirectory>${project.basedir}</outputDirectory>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.felix</groupId>
+                <artifactId>maven-bundle-plugin</artifactId>
+                <version>5.1.9</version>
+                <extensions>true</extensions>
+                <configuration>
+                    <instructions>
+                        <Bundle-SymbolicName>${project.groupId}.${project.artifactId}</Bundle-SymbolicName>
+                        <Import-Package>
+                            org.apache.camel;version="[3.14,4)",
+                            org.apache.camel.support;version="[3.14,4)",
+                            org.apache.camel.spi;version="[3.14,4)",
+                            org.slf4j;version="[1.7,2)",
+                            org.slf4j.event;resolution:=optional,
+                            org.slf4j.helpers;resolution:=optional,
+                            org.slf4j.spi;resolution:=optional,
+                            com.sap.it.api.*;resolution:=optional,
+                            <!-- JDK security packages - optional for OSGi, resolved via composite classloader -->
+                            org.ietf.jgss;resolution:=optional,
+                            javax.security.*;resolution:=optional,
+                            javax.net.ssl;resolution:=optional,
+                            javax.crypto;resolution:=optional,
+                            javax.crypto.spec;resolution:=optional,
+                            javax.naming.*;resolution:=optional,
+                            javax.management;resolution:=optional,
+                            <!-- Kafka/Avro transitive deps - not available on CPI OSGi, mark optional -->
+                            com.ethlo.time.*;resolution:=optional,
+                            org.jruby.*;resolution:=optional,
+                            com.github.luben.*;resolution:=optional,
+                            com.google.common.*;resolution:=optional,
+                            com.google.errorprone.*;resolution:=optional,
+                            com.ibm.security.*;resolution:=optional,
+                            io.confluent.kafka.serializers.subject;resolution:=optional,
+                            io.grpc.*;resolution:=optional,
+                            io.swagger.*;resolution:=optional,
+                            kafka.*;resolution:=optional,
+                            net.jpountz.*;resolution:=optional,
+                            org.apache.commons.compress.*;resolution:=optional,
+                            org.jose4j.*;resolution:=optional,
+                            sun.misc;resolution:=optional,
+                            sun.security.*;resolution:=optional,
+                            !com.sun.jdmk.*,
+                            !com.sun.management.*,
+                            !com.fasterxml.jackson.*,
+                            *;resolution:=optional
+                        </Import-Package>
+                        <DynamicImport-Package>*</DynamicImport-Package>
+                        <Export-Package>com.finkeflo.cpi.kafka</Export-Package>
+                        <Embed-Dependency>
+                            kafka-clients;scope=compile,
+                            avro;scope=compile,
+                            kafka-avro-serializer;scope=compile,
+                            kafka-schema-serializer;scope=compile,
+                            kafka-schema-registry-client;scope=compile,
+                            common-utils;scope=compile,
+                            jackson-databind;scope=compile,
+                            jackson-core;scope=compile,
+                            jackson-annotations;scope=compile,
+                            jackson-dataformat-csv;scope=compile,
+                            jackson-dataformat-yaml;scope=compile,
+                            jackson-datatype-jdk8;scope=compile,
+                            json-schema-validator;scope=compile,
+                            itu;scope=compile,
+                            guava;scope=compile,
+                            failureaccess;scope=compile,
+                            commons-compress;scope=compile,
+                            commons-codec;scope=compile,
+                            snakeyaml;scope=compile,
+                            logredactor;scope=compile,
+                            logredactor-metrics;scope=compile,
+                            re2j;scope=compile,
+                            minimal-json;scope=compile,
+                            lz4-java;scope=runtime,
+                            zstd-jni;scope=runtime,
+                            snappy-java;scope=runtime
+                        </Embed-Dependency>
+                        <Embed-Transitive>true</Embed-Transitive>
+                    </instructions>
+                    <excludeDependencies>false</excludeDependencies>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.13.0</version>
+                <configuration>
+                    <source>1.8</source>
+                    <target>1.8</target>
+                </configuration>
+            </plugin>
+            <!-- Java 8 API gate: fail the build if any Java 9+ API is referenced.
+                 Needed because compilation uses source/target 1.8 (not release-8 mode), so the
+                 compiler links against the JDK 17/21 rt and does NOT reject newer APIs.
+                 Bound to process-classes for fail-fast (runs on 'mvn test' too, no Docker). -->
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>animal-sniffer-maven-plugin</artifactId>
+                <version>1.24</version>
+                <configuration>
+                    <signature>
+                        <groupId>org.codehaus.mojo.signature</groupId>
+                        <artifactId>java18</artifactId>
+                        <version>1.0</version>
+                    </signature>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>check-java8-api</id>
+                        <phase>process-classes</phase>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <!-- Integration tests (*IT.java) — run during 'mvn verify', skipped during 'mvn test' -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-failsafe-plugin</artifactId>
+                <version>3.2.5</version>
+                <configuration>
+                    <excludes>
+                        <exclude>**/FullVolumeIT.java</exclude>
+                    </excludes>
+                </configuration>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>integration-test</goal>
+                            <goal>verify</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <!-- Dependencies are embedded inside the OSGi bundle via maven-bundle-plugin.
+                 No libs/ folder needed - the ADK ESA contains only our single fat bundle. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-dependency-plugin</artifactId>
+                <version>3.7.1</version>
+                <executions>
+                    <execution>
+                        <id>copy-dependencies</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>copy-dependencies</goal>
+                        </goals>
+                        <configuration>
+                            <outputDirectory>${project.build.directory}/libs</outputDirectory>
+                            <!-- Exclude everything - all deps embedded in bundle -->
+                            <includeScope>runtime</includeScope>
+                            <excludeGroupIds>com.sap.cloud.adk,org.apache.camel,org.slf4j,log4j,org.apache.kafka,org.apache.avro,io.confluent,com.fasterxml.jackson.core,com.fasterxml.jackson.dataformat,com.fasterxml.jackson.datatype,com.google.guava,com.google.errorprone,org.checkerframework,com.google.j2objc,javax.xml.bind,jakarta,org.glassfish,com.sun.xml,commons-codec,commons-io,org.apache.commons,org.lz4,org.xerial,com.github.luben,io.swagger,org.yaml,net.minidev,org.ow2.asm,com.google.re2j,org.apache.aries,org.osgi,org.apache.maven,com.google.code.findbugs,com.networknt,com.ethlo.time,com.eclipsesource.minimal-json,com.sun.activation</excludeGroupIds>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <!-- Stage adapter project without .git for ADK build (avoids ADK copy failure on .git dirs) -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-antrun-plugin</artifactId>
+                <version>3.1.0</version>
+                <executions>
+                    <execution>
+                        <id>stage-adapter-project</id>
+                        <phase>package</phase>
+                        <goals><goal>run</goal></goals>
+                        <configuration>
+                            <target>
+                                <mkdir dir="${project.build.directory}/adapter-staging/target"/>
+                                <copy todir="${project.build.directory}/adapter-staging" overwrite="true">
+                                    <fileset dir="${project.basedir}">
+                                        <exclude name=".git/**"/>
+                                        <exclude name="target/**"/>
+                                        <exclude name="dev/**"/>
+                                        <exclude name=".claude/**"/>
+                                        <exclude name=".venv/**"/>
+                                    </fileset>
+                                </copy>
+                                <copy todir="${project.build.directory}/adapter-staging/target" overwrite="true">
+                                    <fileset dir="${project.build.directory}">
+                                        <include name="*.jar"/>
+                                        <include name="libs/**"/>
+                                        <include name="classes/**"/>
+                                    </fileset>
+                                </copy>
+                            </target>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>com.sap.cloud.adk</groupId>
+                <artifactId>com.sap.cloud.adk.build.archive</artifactId>
+                <version>${adk.version}</version>
+                <dependencies>
+                    <dependency>
+                        <groupId>javax.xml.bind</groupId>
+                        <artifactId>jaxb-api</artifactId>
+                        <version>2.3.1</version>
+                    </dependency>
+                    <dependency>
+                        <groupId>org.glassfish.jaxb</groupId>
+                        <artifactId>jaxb-runtime</artifactId>
+                        <version>2.3.9</version>
+                    </dependency>
+                    <!-- Override old ASM 6.x with ASM 9.x to support Java 11+ class files -->
+                    <dependency>
+                        <groupId>org.ow2.asm</groupId>
+                        <artifactId>asm</artifactId>
+                        <version>9.7</version>
+                    </dependency>
+                </dependencies>
+            </plugin>
+        </plugins>
+        <pluginManagement>
+            <plugins>
+                <plugin>
+                    <groupId>com.sap.cloud.adk</groupId>
+                    <artifactId>com.sap.cloud.adk.build.archive</artifactId>
+                    <executions>
+                        <execution>
+                            <id>execute-checks</id>
+                            <phase>package</phase>
+                            <goals><goal>check</goal></goals>
+                            <configuration>
+                                <adapterProjectDirectory>${project.basedir}</adapterProjectDirectory>
+                            </configuration>
+                        </execution>
+                        <execution>
+                            <id>build-adapter</id>
+                            <phase>install</phase>
+                            <goals>
+                                <goal>build</goal>
+                            </goals>
+                            <configuration>
+                                <adapterProjectDirectory>${project.build.directory}/adapter-staging</adapterProjectDirectory>
+                            </configuration>
+                        </execution>
+                    </executions>
+                </plugin>
+            </plugins>
+        </pluginManagement>
+    </build>
+
+    <profiles>
+        <profile>
+            <id>full-volume</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-failsafe-plugin</artifactId>
+                        <configuration>
+                            <excludes combine.self="override" />
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
+</project>

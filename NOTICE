@@ -1,0 +1,14 @@
+SAP CPI Kafka Adapter Plus
+Copyright 2026 Florian Kube
+
+Licensed under the GNU Affero General Public License, Version 3.0 (AGPL-3.0).
+
+This product includes software developed by third parties.
+See THIRD-PARTY.txt for a complete list of included third-party
+software and their licenses.
+
+Notable third-party licenses used in this project:
+- Apache License 2.0 (Kafka, Avro, Jackson, and others)
+- Confluent Community License v1.0 (Schema Registry Client, Avro Serializer)
+- MIT License (minimal-json)
+- BSD 3-Clause License (re2j, ASM)

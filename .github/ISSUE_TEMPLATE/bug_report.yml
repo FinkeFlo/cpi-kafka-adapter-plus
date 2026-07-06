@@ -1,0 +1,39 @@
+name: Bug report
+description: Report a problem with the adapter
+labels: [bug]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the bug, including what you expected.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Configure the adapter with ...
+        2. Send a message ...
+        3. See error ...
+    validations:
+      required: true
+  - type: input
+    id: adapter-version
+    attributes:
+      label: Adapter version
+      description: See config.adk (Adapter-Version)
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: CPI runtime, Kafka broker/version, security mode (SASL/SSL), etc.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Paste logs (filter for `[CPI-KAFKA-PLUS-DIAG]`). Redact secrets/tenant data!
+      render: text

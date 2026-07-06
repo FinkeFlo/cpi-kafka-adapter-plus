@@ -1,0 +1,723 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<ComponentMetadata ComponentId="ctype::Adapter/cname::kafkaAdapterPlus/vendor::FlorianKube/version::1.0.3"
+                   ComponentName="kafkaAdapterPlus"
+                   UIElementType="Adapter"
+                   IsExtension="false"
+                   IsFinal="true"
+                   IsPreserves="true"
+                   IsDefaultGenerator="true"
+                   ComponentDisplayName="KafkaAdapterPlus"
+                   xmlns:gen="http://www.sap.hci.adk.com/gen"
+                   xmlns:bp="http://www.adk.gen/xmlns/blueprint">
+
+    <!-- ============================================================ -->
+    <!-- RECEIVER VARIANT (CPI -> Kafka Producer)                    -->
+    <!-- ============================================================ -->
+    <Variant VariantName="Kafka_Adapter_Plus_Receiver"
+             VariantId="ctype::AdapterVariant/cname::kafkaAdapterPlus/vendor::FlorianKube/tp::cpi-kafka-plus/mp::cpi-kafka-plus/direction::Receiver/version::1.0.3"
+             MetadataVersion="2.0"
+             gen:RuntimeComponentBaseUri="cpi-kafka-plus"
+             AttachmentBehavior="Preserve"
+             supportsPolling="false">
+        <InputContent Cardinality="1" Scope="outsidepool" MessageCardinality="1" isStreaming="false">
+            <Content>
+                <ContentType>Any</ContentType>
+                <Schema xsi:type="xs:string" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"/>
+            </Content>
+        </InputContent>
+        <OutputContent Cardinality="1" Scope="outsidepool" MessageCardinality="1" isStreaming="false">
+            <Content>
+                <ContentType>Any</ContentType>
+                <Schema xsi:type="xs:string" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"/>
+            </Content>
+        </OutputContent>
+
+        <!-- ===== Tab: Connection ===== -->
+        <Tab id="connection">
+            <GuiLabels guid="a2000001-0000-0000-0000-000000000001">
+                <Label language="EN">Connection</Label>
+            </GuiLabels>
+            <AttributeGroup id="kafkaConnection">
+                <Name xsi:type="xs:string" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">Kafka Connection</Name>
+                <GuiLabels guid="a2000001-0000-0000-0000-000000000010">
+                    <Label language="EN">Kafka Connection</Label>
+                </GuiLabels>
+                <AttributeReference>
+                    <ReferenceName>bootstrapServers</ReferenceName>
+                    <description>Comma-separated list of Kafka bootstrap servers (host:port), e.g. broker1.example.com:9092,broker2.example.com:9092. For Confluent Cloud use the Bootstrap Server from your cluster settings.</description>
+                    <ErrorMessage>Please enter at least one bootstrap server in host:port format (e.g. broker1:9092,broker2:9092)</ErrorMessage>
+                </AttributeReference>
+                <AttributeReference>
+                    <ReferenceName>topic</ReferenceName>
+                    <description>Kafka topic to produce messages to, e.g. orders-outbound. The topic must exist on the Kafka cluster unless auto-creation is enabled on the broker.</description>
+                    <ErrorMessage>Please enter a Kafka topic name</ErrorMessage>
+                </AttributeReference>
+            </AttributeGroup>
+            <AttributeGroup id="kafkaSecurity">
+                <Name xsi:type="xs:string" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">Kafka Security</Name>
+                <GuiLabels guid="a2000002-0000-0000-0000-000000000010">
+                    <Label language="EN">Kafka Security</Label>
+                </GuiLabels>
+                <AttributeReference>
+                    <ReferenceName>securityProtocol</ReferenceName>
+                    <description>Security protocol for broker communication. Use SASL_SSL for Confluent Cloud or any broker requiring encrypted authentication.</description>
+                </AttributeReference>
+                <AttributeReference>
+                    <ReferenceName>saslMechanism</ReferenceName>
+                    <description>SASL authentication mechanism. Use PLAIN for Confluent Cloud (API Key/Secret). SCRAM-SHA-256/512 for self-managed Kafka clusters with SCRAM authentication.</description>
+                </AttributeReference>
+                <AttributeReference>
+                    <ReferenceName>credentialAlias</ReferenceName>
+                    <description>Name of the 'User Credentials' artifact deployed in CPI Security Material, e.g. kafka-credentials. Username = SASL username or API Key, Password = SASL password or API Secret.</description>
+                    <ErrorMessage>Please enter the alias of a User Credentials artifact from CPI Security Material</ErrorMessage>
+                </AttributeReference>
+            </AttributeGroup>
+        </Tab>
+
+        <!-- ===== Tab: Producer Settings ===== -->
+        <Tab id="producerSettings">
+            <GuiLabels guid="a2000003-0000-0000-0000-000000000001">
+                <Label language="EN">Producer Settings</Label>
+            </GuiLabels>
+            <AttributeGroup id="producerSending">
+                <Name xsi:type="xs:string" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">Sending</Name>
+                <GuiLabels guid="a2000003-0000-0000-0000-000000000010">
+                    <Label language="EN">Sending</Label>
+                </GuiLabels>
+                <AttributeReference>
+                    <ReferenceName>producerBatchMode</ReferenceName>
+                    <description>Select how a structured message body (JSON array or XML list) is split into individual Kafka records. NONE sends the entire message body as one record. JSON_ARRAY expects a JSON array of record objects. XML_LIST expects an XML document with root element kafkaRecords containing record elements.</description>
+                </AttributeReference>
+                <AttributeReference>
+                    <ReferenceName>acks</ReferenceName>
+                    <description>Producer acknowledgment level. 'All': waits for all in-sync replicas (strongest durability, recommended). 'Leader Only': waits for leader only. 'None': fire and forget, no durability guarantee.</description>
+                    <EditCondition>
+                        <AttributeName>enableIdempotence</AttributeName>
+                        <AttributeValue>false</AttributeValue>
+                    </EditCondition>
+                </AttributeReference>
+                <AttributeReference>
+                    <ReferenceName>compressionType</ReferenceName>
+                    <description>Compression algorithm for message batches. Reduces network bandwidth and storage at the cost of CPU. ZSTD is recommended for JSON payloads (best ratio with good speed). LZ4 is the fastest with minimal CPU overhead. GZIP achieves the smallest output but is the slowest. None disables compression entirely.</description>
+                </AttributeReference>
+                <AttributeReference>
+                    <ReferenceName>enableIdempotence</ReferenceName>
+                    <description>Enable idempotent producer to guarantee exactly-once delivery per partition. Prevents duplicate messages on retries. Recommended to keep enabled (default: true).</description>
+                </AttributeReference>
+                <AttributeReference>
+                    <ReferenceName>deliveryTimeoutSeconds</ReferenceName>
+                    <description>Maximum time in seconds for message delivery, including retries. Default: 120 seconds (2 minutes). If delivery fails within this time, the send is reported as failed.</description>
+                    <ErrorMessage>Please enter a positive number in seconds (e.g. 120 for 2 minutes)</ErrorMessage>
+                </AttributeReference>
+            </AttributeGroup>
+            <AttributeGroup id="producerPerformance">
+                <Name xsi:type="xs:string" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">Performance Tuning</Name>
+                <GuiLabels guid="a2000003-0000-0000-0000-000000000011">
+                    <Label language="EN">Performance Tuning</Label>
+                </GuiLabels>
+                <AttributeReference>
+                    <ReferenceName>maxRequestSizeKb</ReferenceName>
+                    <description>Maximum size of a single produce request in kilobytes. Default: 1024 KB (1 MB). Increase if your messages exceed 1 MB. Must also be allowed by the broker's message.max.bytes setting.</description>
+                    <ErrorMessage>Please enter a positive number in KB (e.g. 1024 for 1 MB)</ErrorMessage>
+                </AttributeReference>
+                <AttributeReference>
+                    <ReferenceName>producerBatchSizeKb</ReferenceName>
+                    <description>Maximum size of a producer batch in kilobytes. Default: 16 KB. The producer groups records into batches per partition for efficiency.</description>
+                    <ErrorMessage>Please enter a positive number in KB (e.g. 16)</ErrorMessage>
+                </AttributeReference>
+                <AttributeReference>
+                    <ReferenceName>bufferMemoryKb</ReferenceName>
+                    <description>Total memory in kilobytes available for buffering unsent records. Default: 32768 KB (32 MB). If the buffer is full, the producer blocks until space is available or delivery.timeout.ms is exceeded.</description>
+                    <ErrorMessage>Please enter a positive number in KB (e.g. 32768 for 32 MB)</ErrorMessage>
+                </AttributeReference>
+            </AttributeGroup>
+        </Tab>
+
+        <!-- ===== Tab: Avro / Schema Registry ===== -->
+        <Tab id="avro">
+            <GuiLabels guid="a2000004-0000-0000-0000-000000000001">
+                <Label language="EN">Avro / Schema Registry</Label>
+            </GuiLabels>
+            <AttributeGroup id="schemaRegistryConfig">
+                <Name xsi:type="xs:string" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">Schema Registry</Name>
+                <GuiLabels guid="a2000004-0000-0000-0000-000000000010">
+                    <Label language="EN">Schema Registry</Label>
+                </GuiLabels>
+                <AttributeReference>
+                    <ReferenceName>schemaRegistryEnabled</ReferenceName>
+                    <description>Enable Confluent Schema Registry integration for Avro serialization/deserialization.</description>
+                </AttributeReference>
+                <AttributeReference>
+                    <ReferenceName>schemaRegistryUrl</ReferenceName>
+                    <description>Confluent Schema Registry URL, e.g. https://schema-registry.example.com:8081. Required when Schema Registry is enabled. For Confluent Cloud use the Schema Registry endpoint from your environment settings.</description>
+                    <ErrorMessage>Please enter a valid Schema Registry URL (e.g. https://schema-registry.example.com:8081)</ErrorMessage>
+                    <EditCondition>
+                        <AttributeName>schemaRegistryEnabled</AttributeName>
+                        <AttributeValue>true</AttributeValue>
+                    </EditCondition>
+                </AttributeReference>
+                <AttributeReference>
+                    <ReferenceName>schemaRegistryCredentialAlias</ReferenceName>
+                    <description>Name of the 'User Credentials' artifact in CPI Security Material for Schema Registry basic auth. Username = API Key, Password = API Secret. Leave empty if Schema Registry requires no authentication.</description>
+                    <EditCondition>
+                        <AttributeName>schemaRegistryEnabled</AttributeName>
+                        <AttributeValue>true</AttributeValue>
+                    </EditCondition>
+                </AttributeReference>
+                <AttributeReference>
+                    <ReferenceName>autoRegisterSchemas</ReferenceName>
+                    <description>Automatically register new schemas with Schema Registry on first use. Requires write access to the registry. Recommended only for development. Disable in production and register schemas explicitly.</description>
+                    <EditCondition>
+                        <AttributeName>schemaRegistryEnabled</AttributeName>
+                        <AttributeValue>true</AttributeValue>
+                    </EditCondition>
+                </AttributeReference>
+                <AttributeReference>
+                    <ReferenceName>subjectNameStrategy</ReferenceName>
+                    <description>Strategy for deriving the Schema Registry subject name. TopicNameStrategy (default): uses topic name. RecordNameStrategy: uses the Avro record's full name. TopicRecordNameStrategy: combines both.</description>
+                    <EditCondition>
+                        <AttributeName>schemaRegistryEnabled</AttributeName>
+                        <AttributeValue>true</AttributeValue>
+                    </EditCondition>
+                </AttributeReference>
+                <AttributeReference>
+                    <ReferenceName>avroValueSerialization</ReferenceName>
+                    <description>Serialize message values using Avro via Schema Registry. Enable when the Kafka consumer expects Avro-encoded values.</description>
+                    <EditCondition>
+                        <AttributeName>schemaRegistryEnabled</AttributeName>
+                        <AttributeValue>true</AttributeValue>
+                    </EditCondition>
+                </AttributeReference>
+            </AttributeGroup>
+        </Tab>
+
+        <!-- ===== Tab: Processing (Receiver) ===== -->
+        <Tab id="receiverProcessing">
+            <GuiLabels guid="a2000005-0000-0000-0000-000000000001">
+                <Label language="EN">Processing</Label>
+            </GuiLabels>
+            <AttributeGroup id="receiverJsonSchemaConfig">
+                <Name xsi:type="xs:string" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">JSON Schema Validation</Name>
+                <GuiLabels guid="a2000005-0000-0000-0000-000000000010">
+                    <Label language="EN">JSON Schema Validation</Label>
+                </GuiLabels>
+                <AttributeReference>
+                    <ReferenceName>jsonSchemaValidation</ReferenceName>
+                    <description>Enable JSON Schema validation of outbound messages before sending to Kafka. Invalid messages are rejected with an error instead of being published.</description>
+                </AttributeReference>
+                <AttributeReference>
+                    <ReferenceName>jsonSchema</ReferenceName>
+                    <description>Inline JSON Schema (draft-07) to validate messages against, e.g. {"type":"object","required":["id"],"properties":{"id":{"type":"string"}}}. Paste the full JSON Schema definition here.</description>
+                    <EditCondition>
+                        <AttributeName>jsonSchemaValidation</AttributeName>
+                        <AttributeValue>true</AttributeValue>
+                    </EditCondition>
+                </AttributeReference>
+                <AttributeReference>
+                    <ReferenceName>jsonSchemaReportError</ReferenceName>
+                    <description>Report validation failures as ERROR in CPI Monitoring (MPL)</description>
+                    <EditCondition>
+                        <AttributeName>jsonSchemaValidation</AttributeName>
+                        <AttributeValue>true</AttributeValue>
+                    </EditCondition>
+                </AttributeReference>
+            </AttributeGroup>
+        </Tab>
+
+    </Variant>
+
+    <!-- ============================================================ -->
+    <!-- ATTRIBUTE METADATA DEFINITIONS                               -->
+    <!-- ============================================================ -->
+
+    <!-- Connection -->
+    <AttributeMetadata>
+        <Name>bootstrapServers</Name>
+        <Usage>true</Usage>
+        <DataType>xsd:string</DataType>
+        <Default/>
+        <Length>2000</Length>
+        <isparameterized>true</isparameterized>
+        <GuiLabels guid="b1000001-0000-0000-0000-000000000001">
+            <Label language="EN">Bootstrap Servers</Label>
+        </GuiLabels>
+    </AttributeMetadata>
+    <AttributeMetadata>
+        <Name>topic</Name>
+        <Usage>true</Usage>
+        <DataType>xsd:string</DataType>
+        <Default/>
+        <Length>500</Length>
+        <isparameterized>true</isparameterized>
+        <GuiLabels guid="b1000001-0000-0000-0000-000000000002">
+            <Label language="EN">Topic</Label>
+        </GuiLabels>
+    </AttributeMetadata>
+    <AttributeMetadata>
+        <Name>groupId</Name>
+        <Usage>true</Usage>
+        <DataType>xsd:string</DataType>
+        <Default/>
+        <Length>500</Length>
+        <isparameterized>true</isparameterized>
+        <GuiLabels guid="b1000001-0000-0000-0000-000000000003">
+            <Label language="EN">Consumer Group ID</Label>
+        </GuiLabels>
+    </AttributeMetadata>
+
+    <!-- Security -->
+    <AttributeMetadata>
+        <Name>securityProtocol</Name>
+        <Usage>true</Usage>
+        <DataType>xsd:string</DataType>
+        <Default>SASL_SSL</Default>
+        <Length/>
+        <isparameterized>true</isparameterized>
+        <GuiLabels guid="b1000002-0000-0000-0000-000000000001">
+            <Label language="EN">Security Protocol</Label>
+        </GuiLabels>
+        <FixedValues>
+            <FixedValue><Value>SASL_SSL</Value><GuiLabels guid="b1000002-0000-0000-0000-000000000011"><Label language="EN">SASL_SSL</Label></GuiLabels></FixedValue>
+            <FixedValue><Value>SASL_PLAINTEXT</Value><GuiLabels guid="b1000002-0000-0000-0000-000000000012"><Label language="EN">SASL_PLAINTEXT</Label></GuiLabels></FixedValue>
+            <FixedValue><Value>SSL</Value><GuiLabels guid="b1000002-0000-0000-0000-000000000013"><Label language="EN">SSL</Label></GuiLabels></FixedValue>
+            <FixedValue><Value>PLAINTEXT</Value><GuiLabels guid="b1000002-0000-0000-0000-000000000014"><Label language="EN">PLAINTEXT</Label></GuiLabels></FixedValue>
+        </FixedValues>
+    </AttributeMetadata>
+    <AttributeMetadata>
+        <Name>saslMechanism</Name>
+        <Usage>false</Usage>
+        <DataType>xsd:string</DataType>
+        <Default>PLAIN</Default>
+        <Length/>
+        <isparameterized>true</isparameterized>
+        <GuiLabels guid="b1000002-0000-0000-0000-000000000002">
+            <Label language="EN">SASL Mechanism</Label>
+        </GuiLabels>
+        <FixedValues>
+            <FixedValue><Value>PLAIN</Value><GuiLabels guid="b1000002-0000-0000-0000-000000000021"><Label language="EN">PLAIN (API Key / Secret)</Label></GuiLabels></FixedValue>
+            <FixedValue><Value>SCRAM-SHA-256</Value><GuiLabels guid="b1000002-0000-0000-0000-000000000022"><Label language="EN">SCRAM-SHA-256</Label></GuiLabels></FixedValue>
+            <FixedValue><Value>SCRAM-SHA-512</Value><GuiLabels guid="b1000002-0000-0000-0000-000000000023"><Label language="EN">SCRAM-SHA-512</Label></GuiLabels></FixedValue>
+        </FixedValues>
+    </AttributeMetadata>
+    <AttributeMetadata>
+        <Name>credentialAlias</Name>
+        <Usage>false</Usage>
+        <DataType>xsd:string</DataType>
+        <Default/>
+        <Length>200</Length>
+        <isparameterized>true</isparameterized>
+        <GuiLabels guid="b1000002-0000-0000-0000-000000000003">
+            <Label language="EN">SASL Credential Alias</Label>
+        </GuiLabels>
+    </AttributeMetadata>
+
+    <!-- Processing (Sender/Consumer) -->
+    <AttributeMetadata>
+        <Name>autoOffsetReset</Name>
+        <Usage>false</Usage>
+        <DataType>xsd:string</DataType>
+        <Default>latest</Default>
+        <Length/>
+        <isparameterized>true</isparameterized>
+        <GuiLabels guid="b1000003-0000-0000-0000-000000000001">
+            <Label language="EN">Auto Offset Reset</Label>
+        </GuiLabels>
+        <FixedValues>
+            <FixedValue><Value>latest</Value><GuiLabels guid="b1000003-0000-0000-0000-000000000011"><Label language="EN">Latest (Only New Messages)</Label></GuiLabels></FixedValue>
+            <FixedValue><Value>earliest</Value><GuiLabels guid="b1000003-0000-0000-0000-000000000012"><Label language="EN">Earliest (All Available Messages)</Label></GuiLabels></FixedValue>
+        </FixedValues>
+    </AttributeMetadata>
+    <AttributeMetadata>
+        <Name>pollingIntervalSeconds</Name>
+        <Usage>false</Usage>
+        <DataType>xsd:integer</DataType>
+        <Default>5</Default>
+        <Length/>
+        <isparameterized>true</isparameterized>
+        <GuiLabels guid="b1000003-0000-0000-0000-000000000000"><Label language="EN">Polling Interval (Seconds)</Label></GuiLabels>
+    </AttributeMetadata>
+    <AttributeMetadata>
+        <Name>maxPollRecords</Name>
+        <Usage>false</Usage>
+        <DataType>xsd:integer</DataType>
+        <Default>500</Default>
+        <Length/>
+        <isparameterized>true</isparameterized>
+        <GuiLabels guid="b1000003-0000-0000-0000-000000000002"><Label language="EN">Max Poll Records</Label></GuiLabels>
+    </AttributeMetadata>
+    <AttributeMetadata>
+        <Name>maxPartitionFetchSizeKb</Name>
+        <Usage>false</Usage>
+        <DataType>xsd:integer</DataType>
+        <Default>1024</Default>
+        <Length/>
+        <isparameterized>true</isparameterized>
+        <GuiLabels guid="b1000003-0000-0000-0000-000000000099"><Label language="EN">Max Fetch Size per Partition (KB)</Label></GuiLabels>
+    </AttributeMetadata>
+    <AttributeMetadata>
+        <Name>commitStrategy</Name>
+        <Usage>false</Usage>
+        <DataType>xsd:string</DataType>
+        <Default>BATCH_COMPLETE</Default>
+        <Length/>
+        <isparameterized>true</isparameterized>
+        <GuiLabels guid="b1000003-0000-0000-0000-000000000003"><Label language="EN">Offset Commit Strategy</Label></GuiLabels>
+        <FixedValues>
+            <FixedValue><Value>BATCH_COMPLETE</Value><GuiLabels guid="b1000003-0000-0000-0000-000000000031"><Label language="EN">After Successful Processing (At-Least-Once)</Label></GuiLabels></FixedValue>
+            <FixedValue><Value>AUTO</Value><GuiLabels guid="b1000003-0000-0000-0000-000000000032"><Label language="EN">Auto Commit (Periodic)</Label></GuiLabels></FixedValue>
+        </FixedValues>
+    </AttributeMetadata>
+    <!-- Batch (Sender) -->
+    <AttributeMetadata>
+        <Name>batchMode</Name>
+        <Usage>false</Usage>
+        <DataType>xsd:boolean</DataType>
+        <Default>true</Default>
+        <Length/>
+        <isparameterized>true</isparameterized>
+        <GuiLabels guid="b1000003-0000-0000-0000-000000000006"><Label language="EN">Batch Mode</Label></GuiLabels>
+    </AttributeMetadata>
+    <AttributeMetadata>
+        <Name>batchSize</Name>
+        <Usage>false</Usage>
+        <DataType>xsd:integer</DataType>
+        <Default>100</Default>
+        <Length/>
+        <isparameterized>true</isparameterized>
+        <GuiLabels guid="b1000003-0000-0000-0000-000000000007"><Label language="EN">Batch Size</Label></GuiLabels>
+    </AttributeMetadata>
+    <AttributeMetadata>
+        <Name>batchTimeout</Name>
+        <Usage>false</Usage>
+        <DataType>xsd:long</DataType>
+        <Default>5000</Default>
+        <Length/>
+        <isparameterized>true</isparameterized>
+        <GuiLabels guid="b1000003-0000-0000-0000-000000000008"><Label language="EN">Batch Timeout (ms)</Label></GuiLabels>
+    </AttributeMetadata>
+    <AttributeMetadata>
+        <Name>batchOutputFormat</Name>
+        <Usage>false</Usage>
+        <DataType>xsd:string</DataType>
+        <Default>JSON_ARRAY</Default>
+        <Length/>
+        <isparameterized>true</isparameterized>
+        <GuiLabels guid="b1000003-0000-0000-0000-000000000009"><Label language="EN">Batch Output Format</Label></GuiLabels>
+        <FixedValues>
+            <FixedValue><Value>JSON_ARRAY</Value><GuiLabels guid="b1000003-0000-0000-0000-000000000091"><Label language="EN">JSON Array</Label></GuiLabels></FixedValue>
+            <FixedValue><Value>XML_LIST</Value><GuiLabels guid="b1000003-0000-0000-0000-000000000092"><Label language="EN">XML List</Label></GuiLabels></FixedValue>
+            <FixedValue><Value>SPLIT_EXCHANGES</Value><GuiLabels guid="b1000003-0000-0000-0000-000000000093"><Label language="EN">Individual Exchanges (No Batching)</Label></GuiLabels></FixedValue>
+        </FixedValues>
+    </AttributeMetadata>
+
+    <!-- JSON Schema Validation -->
+    <AttributeMetadata>
+        <Name>jsonSchemaValidation</Name>
+        <Usage>false</Usage>
+        <DataType>xsd:boolean</DataType>
+        <Default>false</Default>
+        <Length/>
+        <isparameterized>true</isparameterized>
+        <GuiLabels guid="b1000007-0000-0000-0000-000000000001"><Label language="EN">Enable JSON Schema Validation</Label></GuiLabels>
+    </AttributeMetadata>
+    <AttributeMetadata>
+        <Name>jsonSchema</Name>
+        <Usage>false</Usage>
+        <DataType>xsd:string</DataType>
+        <Default/>
+        <Length>50000</Length>
+        <isparameterized>true</isparameterized>
+        <GuiLabels guid="b1000007-0000-0000-0000-000000000002"><Label language="EN">JSON Schema</Label></GuiLabels>
+    </AttributeMetadata>
+    <AttributeMetadata>
+        <Name>jsonSchemaReportError</Name>
+        <Usage>false</Usage>
+        <DataType>xsd:boolean</DataType>
+        <Default>false</Default>
+        <Length/>
+        <isparameterized>true</isparameterized>
+        <GuiLabels guid="b1000007-0000-0000-0000-000000000003"><Label language="EN">Report Validation Failures in CPI Monitoring</Label></GuiLabels>
+    </AttributeMetadata>
+
+    <!-- Producer Settings -->
+    <AttributeMetadata>
+        <Name>producerBatchMode</Name>
+        <Usage>false</Usage>
+        <DataType>xsd:string</DataType>
+        <Default>NONE</Default>
+        <Length/>
+        <isparameterized>true</isparameterized>
+        <GuiLabels guid="b1000004-0000-0000-0000-000000000030"><Label language="EN">Batch Send Mode</Label></GuiLabels>
+        <FixedValues>
+            <Sort>false</Sort>
+            <FixedValue><Value>NONE</Value><GuiLabels guid="b1000004-0000-0000-0000-000000000031"><Label language="EN">None (Single Message)</Label></GuiLabels></FixedValue>
+            <FixedValue><Value>JSON_ARRAY</Value><GuiLabels guid="b1000004-0000-0000-0000-000000000032"><Label language="EN">JSON Array</Label></GuiLabels></FixedValue>
+            <FixedValue><Value>XML_LIST</Value><GuiLabels guid="b1000004-0000-0000-0000-000000000033"><Label language="EN">XML List</Label></GuiLabels></FixedValue>
+        </FixedValues>
+    </AttributeMetadata>
+    <AttributeMetadata>
+        <Name>acks</Name>
+        <Usage>false</Usage>
+        <DataType>xsd:string</DataType>
+        <Default>all</Default>
+        <Length/>
+        <isparameterized>true</isparameterized>
+        <GuiLabels guid="b1000004-0000-0000-0000-000000000001"><Label language="EN">Acknowledgments</Label></GuiLabels>
+        <FixedValues>
+            <FixedValue><Value>all</Value><GuiLabels guid="b1000004-0000-0000-0000-000000000011"><Label language="EN">All (Strongest Durability)</Label></GuiLabels></FixedValue>
+            <FixedValue><Value>1</Value><GuiLabels guid="b1000004-0000-0000-0000-000000000012"><Label language="EN">Leader Only</Label></GuiLabels></FixedValue>
+            <FixedValue><Value>0</Value><GuiLabels guid="b1000004-0000-0000-0000-000000000013"><Label language="EN">None (Fire and Forget)</Label></GuiLabels></FixedValue>
+        </FixedValues>
+    </AttributeMetadata>
+    <AttributeMetadata>
+        <Name>compressionType</Name>
+        <Usage>false</Usage>
+        <DataType>xsd:string</DataType>
+        <Default>none</Default>
+        <Length/>
+        <isparameterized>true</isparameterized>
+        <GuiLabels guid="b1000004-0000-0000-0000-000000000002"><Label language="EN">Compression Type</Label></GuiLabels>
+        <FixedValues>
+            <Sort>false</Sort>
+            <FixedValue><Value>none</Value><GuiLabels guid="b1000004-0000-0000-0000-000000000021"><Label language="EN">None</Label></GuiLabels></FixedValue>
+            <FixedValue><Value>zstd</Value><GuiLabels guid="b1000004-0000-0000-0000-000000000025"><Label language="EN">ZSTD (Best Balance)</Label></GuiLabels></FixedValue>
+            <FixedValue><Value>lz4</Value><GuiLabels guid="b1000004-0000-0000-0000-000000000024"><Label language="EN">LZ4 (Fastest)</Label></GuiLabels></FixedValue>
+            <FixedValue><Value>gzip</Value><GuiLabels guid="b1000004-0000-0000-0000-000000000022"><Label language="EN">GZIP (Smallest)</Label></GuiLabels></FixedValue>
+        </FixedValues>
+    </AttributeMetadata>
+    <AttributeMetadata>
+        <Name>maxRequestSizeKb</Name>
+        <Usage>false</Usage>
+        <DataType>xsd:integer</DataType>
+        <Default>1024</Default>
+        <Length/>
+        <isparameterized>true</isparameterized>
+        <GuiLabels guid="b1000004-0000-0000-0000-000000000003"><Label language="EN">Max Request Size (KB)</Label></GuiLabels>
+    </AttributeMetadata>
+    <AttributeMetadata>
+        <Name>producerBatchSizeKb</Name>
+        <Usage>false</Usage>
+        <DataType>xsd:integer</DataType>
+        <Default>249</Default>
+        <Length/>
+        <isparameterized>true</isparameterized>
+        <GuiLabels guid="b1000004-0000-0000-0000-000000000005"><Label language="EN">Batch Size (KB)</Label></GuiLabels>
+    </AttributeMetadata>
+    <AttributeMetadata>
+        <Name>bufferMemoryKb</Name>
+        <Usage>false</Usage>
+        <DataType>xsd:long</DataType>
+        <Default>32768</Default>
+        <Length/>
+        <isparameterized>true</isparameterized>
+        <GuiLabels guid="b1000004-0000-0000-0000-000000000006"><Label language="EN">Buffer Memory (KB)</Label></GuiLabels>
+    </AttributeMetadata>
+    <AttributeMetadata>
+        <Name>enableIdempotence</Name>
+        <Usage>false</Usage>
+        <DataType>xsd:boolean</DataType>
+        <Default>true</Default>
+        <Length/>
+        <isparameterized>true</isparameterized>
+        <GuiLabels guid="b1000004-0000-0000-0000-000000000007"><Label language="EN">Enable Idempotent Producer</Label></GuiLabels>
+    </AttributeMetadata>
+    <!-- retries: removed from UI — Kafka uses Integer.MAX_VALUE with idempotence,
+         deliveryTimeoutSeconds is the effective limit. Can be re-enabled if needed. -->
+    <AttributeMetadata>
+        <Name>deliveryTimeoutSeconds</Name>
+        <Usage>false</Usage>
+        <DataType>xsd:integer</DataType>
+        <Default>120</Default>
+        <Length/>
+        <isparameterized>true</isparameterized>
+        <GuiLabels guid="b1000004-0000-0000-0000-000000000009"><Label language="EN">Delivery Timeout (Seconds)</Label></GuiLabels>
+    </AttributeMetadata>
+    <!-- Avro / Schema Registry -->
+    <AttributeMetadata>
+        <Name>schemaRegistryEnabled</Name>
+        <Usage>false</Usage>
+        <DataType>xsd:boolean</DataType>
+        <Default>false</Default>
+        <Length/>
+        <isparameterized>true</isparameterized>
+        <GuiLabels guid="b1000005-0000-0000-0000-000000000000"><Label language="EN">Enable Schema Registry</Label></GuiLabels>
+    </AttributeMetadata>
+    <AttributeMetadata>
+        <Name>schemaRegistryUrl</Name>
+        <Usage>false</Usage>
+        <DataType>xsd:string</DataType>
+        <Default/>
+        <Length>2000</Length>
+        <isparameterized>true</isparameterized>
+        <GuiLabels guid="b1000005-0000-0000-0000-000000000001"><Label language="EN">Schema Registry URL</Label></GuiLabels>
+    </AttributeMetadata>
+    <AttributeMetadata>
+        <Name>schemaRegistryCredentialAlias</Name>
+        <Usage>false</Usage>
+        <DataType>xsd:string</DataType>
+        <Default/>
+        <Length>200</Length>
+        <isparameterized>true</isparameterized>
+        <GuiLabels guid="b1000005-0000-0000-0000-000000000002"><Label language="EN">Schema Registry Credential Alias</Label></GuiLabels>
+    </AttributeMetadata>
+    <AttributeMetadata>
+        <Name>avroOutputFormat</Name>
+        <Usage>false</Usage>
+        <DataType>xsd:string</DataType>
+        <Default>JSON</Default>
+        <Length/>
+        <isparameterized>true</isparameterized>
+        <GuiLabels guid="b1000005-0000-0000-0000-000000000003"><Label language="EN">Avro Output Format</Label></GuiLabels>
+        <FixedValues>
+            <FixedValue><Value>JSON</Value><GuiLabels guid="b1000005-0000-0000-0000-000000000031"><Label language="EN">JSON</Label></GuiLabels></FixedValue>
+            <FixedValue><Value>XML</Value><GuiLabels guid="b1000005-0000-0000-0000-000000000032"><Label language="EN">XML</Label></GuiLabels></FixedValue>
+        </FixedValues>
+    </AttributeMetadata>
+    <AttributeMetadata>
+        <Name>autoRegisterSchemas</Name>
+        <Usage>false</Usage>
+        <DataType>xsd:boolean</DataType>
+        <Default>false</Default>
+        <Length/>
+        <isparameterized>true</isparameterized>
+        <GuiLabels guid="b1000005-0000-0000-0000-000000000004"><Label language="EN">Auto Register Schemas</Label></GuiLabels>
+    </AttributeMetadata>
+    <AttributeMetadata>
+        <Name>subjectNameStrategy</Name>
+        <Usage>false</Usage>
+        <DataType>xsd:string</DataType>
+        <Default>TopicNameStrategy</Default>
+        <Length/>
+        <isparameterized>true</isparameterized>
+        <GuiLabels guid="b1000005-0000-0000-0000-000000000005"><Label language="EN">Subject Name Strategy</Label></GuiLabels>
+        <FixedValues>
+            <FixedValue><Value>TopicNameStrategy</Value><GuiLabels guid="b1000005-0000-0000-0000-000000000051"><Label language="EN">TopicNameStrategy</Label></GuiLabels></FixedValue>
+            <FixedValue><Value>RecordNameStrategy</Value><GuiLabels guid="b1000005-0000-0000-0000-000000000052"><Label language="EN">RecordNameStrategy</Label></GuiLabels></FixedValue>
+            <FixedValue><Value>TopicRecordNameStrategy</Value><GuiLabels guid="b1000005-0000-0000-0000-000000000053"><Label language="EN">TopicRecordNameStrategy</Label></GuiLabels></FixedValue>
+        </FixedValues>
+    </AttributeMetadata>
+    <AttributeMetadata>
+        <Name>avroValueDeserialization</Name>
+        <Usage>false</Usage>
+        <DataType>xsd:boolean</DataType>
+        <Default>true</Default>
+        <Length/>
+        <isparameterized>true</isparameterized>
+        <GuiLabels guid="b1000005-0000-0000-0000-000000000010"><Label language="EN">Deserialize Values as Avro</Label></GuiLabels>
+    </AttributeMetadata>
+    <AttributeMetadata>
+        <Name>avroValueSerialization</Name>
+        <Usage>false</Usage>
+        <DataType>xsd:boolean</DataType>
+        <Default>true</Default>
+        <Length/>
+        <isparameterized>true</isparameterized>
+        <GuiLabels guid="b1000005-0000-0000-0000-000000000012"><Label language="EN">Serialize Values as Avro</Label></GuiLabels>
+    </AttributeMetadata>
+
+    <!-- Error Handling / DLQ -->
+    <AttributeMetadata>
+        <Name>dlqEnabled</Name>
+        <Usage>false</Usage>
+        <DataType>xsd:boolean</DataType>
+        <Default>false</Default>
+        <Length/>
+        <isparameterized>true</isparameterized>
+        <GuiLabels guid="b1000006-0000-0000-0000-000000000001"><Label language="EN">Enable Dead Letter Queue</Label></GuiLabels>
+    </AttributeMetadata>
+    <AttributeMetadata>
+        <Name>dlqTopic</Name>
+        <Usage>false</Usage>
+        <DataType>xsd:string</DataType>
+        <Default/>
+        <Length>500</Length>
+        <isparameterized>true</isparameterized>
+        <GuiLabels guid="b1000006-0000-0000-0000-000000000002"><Label language="EN">Dead Letter Topic</Label></GuiLabels>
+    </AttributeMetadata>
+    <AttributeMetadata>
+        <Name>dlqMaxRetries</Name>
+        <Usage>false</Usage>
+        <DataType>xsd:integer</DataType>
+        <Default>3</Default>
+        <Length/>
+        <isparameterized>true</isparameterized>
+        <GuiLabels guid="b1000006-0000-0000-0000-000000000003"><Label language="EN">Max Retries before DLQ</Label></GuiLabels>
+    </AttributeMetadata>
+    <AttributeMetadata>
+        <Name>dlqCredentialAlias</Name>
+        <Usage>false</Usage>
+        <DataType>xsd:string</DataType>
+        <Default/>
+        <Length>200</Length>
+        <isparameterized>true</isparameterized>
+        <GuiLabels guid="b1000006-0000-0000-0000-000000000004"><Label language="EN">DLQ SASL Credential Alias</Label></GuiLabels>
+    </AttributeMetadata>
+    <AttributeMetadata>
+        <Name>retryOnlyTransientErrors</Name>
+        <Usage>false</Usage>
+        <DataType>xsd:boolean</DataType>
+        <Default>true</Default>
+        <Length/>
+        <isparameterized>true</isparameterized>
+        <GuiLabels guid="b1000006-0000-0000-0000-000000000005"><Label language="EN">Skip Retries for Permanent Errors</Label></GuiLabels>
+    </AttributeMetadata>
+    <AttributeMetadata>
+        <Name>retryDelaySeconds</Name>
+        <Usage>false</Usage>
+        <DataType>xsd:integer</DataType>
+        <Default>0</Default>
+        <Length/>
+        <isparameterized>true</isparameterized>
+        <GuiLabels guid="b1000006-0000-0000-0000-000000000006"><Label language="EN">Retry Delay (Seconds)</Label></GuiLabels>
+    </AttributeMetadata>
+
+    <!-- Auto-Pause (Circuit Breaker) -->
+    <AttributeMetadata>
+        <Name>autoPauseEnabled</Name>
+        <Usage>false</Usage>
+        <DataType>xsd:boolean</DataType>
+        <Default>false</Default>
+        <Length/>
+        <isparameterized>true</isparameterized>
+        <GuiLabels guid="b1000008-0000-0000-0000-000000000001"><Label language="EN">Enable Auto-Pause</Label></GuiLabels>
+    </AttributeMetadata>
+    <AttributeMetadata>
+        <Name>autoPauseErrorThreshold</Name>
+        <Usage>false</Usage>
+        <DataType>xsd:integer</DataType>
+        <Default>5</Default>
+        <Length/>
+        <isparameterized>true</isparameterized>
+        <GuiLabels guid="b1000008-0000-0000-0000-000000000002"><Label language="EN">Consecutive Error Threshold</Label></GuiLabels>
+    </AttributeMetadata>
+    <AttributeMetadata>
+        <Name>autoPauseCooldownSeconds</Name>
+        <Usage>false</Usage>
+        <DataType>xsd:integer</DataType>
+        <Default>60</Default>
+        <Length/>
+        <isparameterized>true</isparameterized>
+        <GuiLabels guid="b1000008-0000-0000-0000-000000000003"><Label language="EN">Initial Pause Duration (sec)</Label></GuiLabels>
+    </AttributeMetadata>
+
+    <!-- Drain Mode -->
+    <AttributeMetadata>
+        <Name>drainEnabled</Name>
+        <Usage>false</Usage>
+        <DataType>xsd:boolean</DataType>
+        <Default>false</Default>
+        <Length/>
+        <isparameterized>true</isparameterized>
+        <GuiLabels guid="b1000003-0000-0000-0000-000000000100"><Label language="EN">Drain Backlog</Label></GuiLabels>
+    </AttributeMetadata>
+    <AttributeMetadata>
+        <Name>minBacklogToDrain</Name>
+        <Usage>false</Usage>
+        <DataType>xsd:integer</DataType>
+        <Default>0</Default>
+        <Length/>
+        <isparameterized>true</isparameterized>
+        <GuiLabels guid="b1000003-0000-0000-0000-000000000102"><Label language="EN">Min Backlog to Drain</Label></GuiLabels>
+    </AttributeMetadata>
+
+</ComponentMetadata>

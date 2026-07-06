@@ -1,0 +1,5 @@
+# SHA-256 of frozen/released adapter metadata files.
+# A file is "frozen" once its version is BELOW the current config.adk Adapter-Version.
+# Grow-only: add an entry when a metadata file becomes a prior version; NEVER edit a frozen file.
+# Format: <filename>=<sha256>
+metadata.xml=f0fbd904e74bee51e17405fd1ba58a1ba215c5b42771c805035e4db8d6fe09ed

@@ -1,0 +1,50 @@
+site_name: SAP CPI Kafka Adapter Plus
+site_description: Custom Apache Kafka adapter for SAP Cloud Integration (CPI)
+repo_url: https://github.com/finkeflo/sap-cpi-kafka-adapter-plus
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: teal
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: indigo
+      accent: teal
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - search.highlight
+    - content.code.copy
+    - content.action.edit
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+
+nav:
+  - Home: index.md
+  - Getting Started: getting-started.md
+  - Configuration: configuration.md
+  - Features:
+      - Batch Processing: features/batch-processing.md
+      - Avro / Schema Registry: features/avro-schema-registry.md
+  - Security:
+      - Authentication: security/authentication.md
+  - Changelog: changelog.md

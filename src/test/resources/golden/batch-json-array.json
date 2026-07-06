@@ -1,0 +1,1 @@
+{"kafkaRecords":{"record":[{"key":{"id":"key-1"},"value":{"orderId":"A-100","amount":42,"active":true},"topic":"golden-topic","partition":2,"offset":101,"timestamp":1700000000123},{"key":"plain&key<2>\"'","value":"Text with XML chars <tag attr=\"v\">&</tag> and CDATA end ]]> marker","topic":"golden-topic","partition":2,"offset":102,"timestamp":1700000000456}]}}

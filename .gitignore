@@ -1,0 +1,14 @@
+# Build output
+/target/
+/site/
+
+# Compiled classes
+*.class
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# OS
+.DS_Store
