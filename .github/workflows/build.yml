@@ -6,9 +6,8 @@ on:
   pull_request:
 
 jobs:
-  build:
+  unit-tests:
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
 
@@ -18,5 +17,36 @@ jobs:
           java-version: '17'
           cache: maven
 
-      - name: Build with Maven
-        run: mvn -B verify
+      - name: Unit tests (Surefire)
+        run: mvn -B test
+
+  integration-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+
+      - name: Integration tests (Failsafe, Testcontainers/Docker) + package
+        run: mvn -B verify -Dskip.unit.tests=true
+
+  # Aggregating gate: keeps the required status check named "build" stable, so branch
+  # protection needs no change. Always runs and fails if any test job did not succeed
+  # (a skipped/failed dependency is treated as a failure).
+  build:
+    needs: [unit-tests, integration-tests]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require all test jobs to pass
+        run: |
+          echo "unit-tests=${{ needs.unit-tests.result }} integration-tests=${{ needs.integration-tests.result }}"
+          if [ "${{ needs.unit-tests.result }}" != "success" ] || [ "${{ needs.integration-tests.result }}" != "success" ]; then
+            echo "::error::One or more test jobs did not succeed"
+            exit 1
+          fi
+          echo "All test jobs passed."
