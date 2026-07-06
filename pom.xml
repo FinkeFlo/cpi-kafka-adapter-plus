@@ -20,6 +20,9 @@
         <avro.version>1.11.5</avro.version>
         <confluent.version>7.9.5</confluent.version>
         <jackson.version>2.16.0</jackson.version>
+        <!-- CI toggle: when true, Surefire (unit tests) is skipped so the integration-test
+             CI job can run *IT tests only, without re-running the unit tests. Default false. -->
+        <skip.unit.tests>false</skip.unit.tests>
     </properties>
 
     <repositories>
@@ -324,6 +327,16 @@
                         </goals>
                     </execution>
                 </executions>
+            </plugin>
+            <!-- Unit tests (*Test.java). The skip.unit.tests property lets CI run the
+                 integration tests in a separate job without re-executing the unit tests. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.2.5</version>
+                <configuration>
+                    <skip>${skip.unit.tests}</skip>
+                </configuration>
             </plugin>
             <!-- Integration tests (*IT.java) — run during 'mvn verify', skipped during 'mvn test' -->
             <plugin>
