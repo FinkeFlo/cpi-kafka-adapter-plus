@@ -1,6 +1,6 @@
 /*-
  * #%L
- * SAP CPI Kafka Adapter Plus
+ * Kafka Adapter Plus
  * %%
  * Copyright (C) 2026 Florian Kube
  * %%

@@ -1,6 +1,6 @@
-site_name: SAP CPI Kafka Adapter Plus
+site_name: Kafka Adapter Plus
 site_description: Custom Apache Kafka adapter for SAP Cloud Integration (CPI)
-repo_url: https://github.com/finkeflo/sap-cpi-kafka-adapter-plus
+repo_url: https://github.com/finkeflo/cpi-kafka-adapter-plus
 edit_uri: edit/main/docs/
 
 theme:

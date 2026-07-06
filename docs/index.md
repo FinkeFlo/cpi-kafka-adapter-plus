@@ -1,4 +1,4 @@
-# SAP CPI Kafka Adapter Plus
+# Kafka Adapter Plus
 
 Custom Apache Kafka adapter for SAP Cloud Integration (CPI) built with the SAP Adapter Development Kit (ADK).
 
