@@ -1,0 +1,91 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+
+      - name: Derive version from tag
+        id: ver
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Release version: $VERSION"
+
+      - name: Verify tag matches config.adk (single source of truth)
+        run: |
+          ADK_VERSION="$(grep -E '^Adapter-Version=' config.adk | cut -d= -f2 | tr -d '[:space:]')"
+          echo "Tag version:        ${{ steps.ver.outputs.version }}"
+          echo "config.adk version: $ADK_VERSION"
+          if [ "$ADK_VERSION" != "${{ steps.ver.outputs.version }}" ]; then
+            echo "::error::Tag v${{ steps.ver.outputs.version }} does not match config.adk Adapter-Version=$ADK_VERSION"
+            exit 1
+          fi
+
+      - name: Build, test and package (produces the ESA)
+        run: mvn -B clean install
+
+      - name: Locate ESA artifact
+        id: esa
+        run: |
+          ESA="$(find target -name '*.esa' | head -1)"
+          if [ -z "$ESA" ]; then
+            echo "::error::No .esa archive was produced by the build"
+            exit 1
+          fi
+          echo "path=$ESA" >> "$GITHUB_OUTPUT"
+          echo "Found ESA: $ESA"
+
+      - name: Extract release notes from CHANGELOG
+        id: notes
+        run: |
+          VERSION="${{ steps.ver.outputs.version }}"
+          awk -v v="$VERSION" '
+            $0 ~ ("^## \\[" v "\\]") { flag=1; next }
+            flag && /^## \[/ { exit }
+            flag { print }
+          ' CHANGELOG.md > release-notes.md
+          if [ ! -s release-notes.md ]; then
+            echo "Release v$VERSION. See CHANGELOG.md for details." > release-notes.md
+          fi
+          echo "----- release notes -----"
+          cat release-notes.md
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PRERELEASE=""
+          case "${{ steps.ver.outputs.version }}" in
+            *-*) PRERELEASE="--prerelease" ;;
+          esac
+          gh release create "${GITHUB_REF_NAME}" \
+            "${{ steps.esa.outputs.path }}" \
+            --title "v${{ steps.ver.outputs.version }}" \
+            --notes-file release-notes.md \
+            $PRERELEASE
+
+      - name: Job summary
+        run: |
+          {
+            echo "### Release v${{ steps.ver.outputs.version }} published :rocket:"
+            echo ""
+            echo "- **Asset:** \`$(basename "${{ steps.esa.outputs.path }}")\`"
+            echo "- **Tag:** \`${GITHUB_REF_NAME}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
