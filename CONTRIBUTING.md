@@ -1,4 +1,4 @@
-# Contributing to SAP CPI Kafka Adapter Plus
+# Contributing to Kafka Adapter Plus
 
 Thanks for your interest in contributing! This document explains how to build,
 test and submit changes.
