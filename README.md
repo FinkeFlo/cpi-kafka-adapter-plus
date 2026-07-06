@@ -1,8 +1,8 @@
-# SAP CPI Kafka Adapter Plus
+# Kafka Adapter Plus
 
 Custom Apache Kafka adapter for SAP Cloud Integration (CPI) built with the SAP Adapter Development Kit (ADK). Provides full Sender and Receiver adapter support with advanced batch processing, Avro/Schema Registry integration, and enterprise-grade security.
 
-📖 **Full documentation:** **[finkeflo.github.io/sap-cpi-kafka-adapter-plus](https://finkeflo.github.io/sap-cpi-kafka-adapter-plus/)**
+📖 **Full documentation:** **[finkeflo.github.io/cpi-kafka-adapter-plus](https://finkeflo.github.io/cpi-kafka-adapter-plus/)**
 
 ## Features
 
@@ -82,3 +82,11 @@ own licenses. Notable license families include:
 See the [NOTICE](NOTICE) file for details. A complete, machine-readable list of all
 dependencies and their licenses (`THIRD-PARTY.txt`) is generated locally when you build
 the project (`mvn generate-resources`).
+
+## Trademarks
+
+This is an independent, community-developed adapter. It is **not affiliated with, endorsed by, or sponsored by SAP SE**.
+
+*SAP*, *SAP Cloud Integration*, *SAP Integration Suite*, and other SAP product names referenced here are trademarks or registered trademarks of SAP SE (or an SAP affiliate) in Germany and other countries. *Apache*, *Apache Kafka*, and *Apache Camel* are trademarks of the Apache Software Foundation. *Confluent* and *Confluent Schema Registry* are trademarks of Confluent, Inc. All other trademarks are the property of their respective owners.
+
+These names are used solely for descriptive and identification purposes to indicate interoperability, and do not imply any endorsement or partnership.
