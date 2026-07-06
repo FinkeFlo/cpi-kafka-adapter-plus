@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kafkaRecords count="2">
+  <record>
+    <key>{&quot;id&quot;:&quot;key-1&quot;}</key>
+    <value format="text"><![CDATA[{"orderId":"A-100","amount":42,"active":true}]]></value>
+    <topic>golden-topic</topic>
+    <partition>2</partition>
+    <offset>101</offset>
+    <timestamp>1700000000123</timestamp>
+  </record>
+  <record>
+    <key>plain&amp;key&lt;2&gt;&quot;&apos;</key>
+    <value format="text"><![CDATA[Text with XML chars <tag attr="v">&</tag> and CDATA end ]]]]><![CDATA[> marker]]></value>
+    <topic>golden-topic</topic>
+    <partition>2</partition>
+    <offset>102</offset>
+    <timestamp>1700000000456</timestamp>
+  </record>
+</kafkaRecords>
