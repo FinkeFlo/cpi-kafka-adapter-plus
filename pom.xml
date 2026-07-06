@@ -14,12 +14,12 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <maven.compiler.source>1.8</maven.compiler.source>
         <maven.compiler.target>1.8</maven.compiler.target>
-        <camel.version>3.14.7</camel.version>
+        <camel.version>3.21.4</camel.version>
         <adk.version>2.3.0</adk.version>
-        <kafka.version>3.9.1</kafka.version>
+        <kafka.version>3.9.2</kafka.version>
         <avro.version>1.11.5</avro.version>
         <confluent.version>7.9.5</confluent.version>
-        <jackson.version>2.16.0</jackson.version>
+        <jackson.version>2.22.0</jackson.version>
         <!-- CI toggle: when true, Surefire (unit tests) is skipped so the integration-test
              CI job can run *IT tests only, without re-running the unit tests. Default false. -->
         <skip.unit.tests>false</skip.unit.tests>
@@ -173,7 +173,7 @@
         <dependency>
             <groupId>org.apache.commons</groupId>
             <artifactId>commons-lang3</artifactId>
-            <version>3.14.0</version>
+            <version>3.18.0</version>
             <scope>test</scope>
         </dependency>
     </dependencies>
