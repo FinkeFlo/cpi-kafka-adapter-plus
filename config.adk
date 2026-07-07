@@ -3,4 +3,4 @@ Reuse-Component=false
 Adapter-Name=Kafka Adapter Plus
 Adapter-Vendor=FlorianKube
 Adapter-ID=kafkaAdapterPlus
-Adapter-Version=1.0.3
+Adapter-Version=1.0.4
