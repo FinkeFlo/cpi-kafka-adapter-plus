@@ -18,7 +18,7 @@
         <adk.version>2.3.0</adk.version>
         <kafka.version>3.9.2</kafka.version>
         <avro.version>1.11.5</avro.version>
-        <confluent.version>7.9.5</confluent.version>
+        <confluent.version>8.3.0</confluent.version>
         <jackson.version>2.22.0</jackson.version>
         <!-- CI toggle: when true, Surefire (unit tests) is skipped so the integration-test
              CI job can run *IT tests only, without re-running the unit tests. Default false. -->
