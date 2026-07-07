@@ -29,7 +29,6 @@ jobs:
           echo "path=$ESA" >> "$GITHUB_OUTPUT"
           echo "name=$(basename "$ESA")" >> "$GITHUB_OUTPUT"
           echo "Found ESA: $ESA"
-           
           # Create artifact name with branch and timestamp (replace / with -)
           BRANCH_SAFE="$(echo "${{ github.ref_name }}" | tr '/' '-')"
           TIMESTAMP="$(date -u +'%Y%m%d-%H%M')"
