@@ -26,11 +26,12 @@
         <!-- Bundle-Version of the inner fat bundle (appears in the .esa Subsystem-Content).
              This is an internal build marker only - it does NOT drive the "Version" shown in
              the CPI UI. That field is the Subsystem-Version, which the ADK build derives from
-             the adapter variant version in src/main/resources/metadata/metadata-*.xml and is
-             deliberately kept stable (1.0.3) so existing iFlow channels stay compatible.
+             the adapter variant version in src/main/resources/metadata/metadata-*.xml and
+             tracks the released project version (bumped per release; within a major, micro/minor
+             bumps auto-migrate onto existing iFlow channels, so deployed integrations stay compatible).
              Defaults to the released project version so release builds stay clean; preview/CI
              builds may override via -Dadapter.bundle.version=<major.minor.micro.qualifier>
-             (e.g. 1.0.3.8-g2d51fd3) to tell preview bundles apart from the release. -->
+             (e.g. 1.0.4.8-g2d51fd3) to tell preview bundles apart from the release. -->
         <adapter.bundle.version>${project.version}</adapter.bundle.version>
     </properties>
 
