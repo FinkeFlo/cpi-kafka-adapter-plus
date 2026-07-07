@@ -80,6 +80,27 @@
             <groupId>org.apache.kafka</groupId>
             <artifactId>kafka-clients</artifactId>
             <version>${kafka.version}</version>
+            <exclusions>
+                <!-- Kafka 3.9.2+ swaps the lz4 codec to the at.yawk.lz4 fork, whose OSGi
+                     manifest is broken for CPI (Bundle-Version: 0, mandatory Import-Package:
+                     java.lang). That fork gets packaged as a standalone subsystem bundle and
+                     the CPI OSGi resolver cannot satisfy it, so the adapter fails to install.
+                     Exclude it and pin the well-behaved org.lz4:lz4-java below instead. -->
+                <exclusion>
+                    <groupId>at.yawk.lz4</groupId>
+                    <artifactId>lz4-java</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <!-- Pin the CPI-compatible lz4 codec (proper OSGi bundle, embedded in the fat bundle
+             via Embed-Dependency; org.lz4 is in the copy-dependencies excludeGroupIds so it is
+             NOT emitted as a separate subsystem jar). Keeps CPI deployability across Kafka bumps. -->
+        <dependency>
+            <groupId>org.lz4</groupId>
+            <artifactId>lz4-java</artifactId>
+            <version>1.8.0</version>
+            <scope>runtime</scope>
         </dependency>
 
         <!-- Snappy compression codec (required by Kafka consumers reading snappy-compressed batches) -->
