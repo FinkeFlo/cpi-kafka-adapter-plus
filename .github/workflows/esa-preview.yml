@@ -3,6 +3,11 @@ name: ESA Preview
 on:
   workflow_dispatch:
 
+# Least privilege: this workflow only checks out code, builds, and uploads an
+# artifact - none of which needs write access to the repository.
+permissions:
+  contents: read
+
 jobs:
   build-test-and-package:
     runs-on: ubuntu-latest
