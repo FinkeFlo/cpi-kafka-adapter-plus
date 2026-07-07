@@ -495,7 +495,7 @@
                     <dependency>
                         <groupId>org.glassfish.jaxb</groupId>
                         <artifactId>jaxb-runtime</artifactId>
-                        <version>2.3.9</version>
+                        <version>4.0.9</version>
                     </dependency>
                     <!-- Override old ASM 6.x with ASM 9.x to support Java 11+ class files -->
                     <dependency>
