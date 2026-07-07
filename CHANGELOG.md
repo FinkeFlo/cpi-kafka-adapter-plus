@@ -7,7 +7,7 @@ and the project follows [Semantic Versioning](https://semver.org/). See
 [VERSIONING.md](VERSIONING.md) for how the adapter version maps to SAP CPI
 iFlow compatibility.
 
-## [1.0.4] - Unreleased
+## [1.0.4] - 2026-07-07
 
 Dependency maintenance release. Keeps the adapter deployable on SAP CPI while
 updating third-party libraries surfaced by dependency scanning.
