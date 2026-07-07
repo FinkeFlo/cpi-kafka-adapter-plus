@@ -33,7 +33,7 @@ jobs:
       - name: Upload ESA artifact
         uses: actions/upload-artifact@v4
         with:
-          name: esa-${{ github.ref_name }}-${{ github.run_number }}
+          name: esa-${{ github.ref_name | replace('/', '-') }}-${{ github.run_number }}
           path: ${{ steps.esa.outputs.path }}
           if-no-files-found: error
           retention-days: 14
