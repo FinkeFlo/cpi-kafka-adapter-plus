@@ -29,16 +29,11 @@ jobs:
           echo "path=$ESA" >> "$GITHUB_OUTPUT"
           echo "name=$(basename "$ESA")" >> "$GITHUB_OUTPUT"
           echo "Found ESA: $ESA"
-          # Create artifact name with branch and timestamp (replace / with -)
-          BRANCH_SAFE="$(echo "${{ github.ref_name }}" | tr '/' '-')"
-          TIMESTAMP="$(date -u +'%Y%m%d-%H%M')"
-          ARTIFACT_NAME="esa-${BRANCH_SAFE}-${TIMESTAMP}"
-          echo "artifact_name=$ARTIFACT_NAME" >> "$GITHUB_OUTPUT"
 
       - name: Upload ESA artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.esa.outputs.artifact_name }}
+          name: esa-${{ github.ref_name }}-${{ github.run_number }}
           path: ${{ steps.esa.outputs.path }}
           if-no-files-found: error
           retention-days: 14
