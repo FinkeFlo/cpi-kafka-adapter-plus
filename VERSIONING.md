@@ -16,29 +16,25 @@ It is **not** computed from git/commits, and the metadata is **not** stamped.
 Within the same major everything is compatible (micro automatic, minor one-click) —
 a **major jump breaks** auto-migration.
 
-## Version format — three integer parts only
+## Version format & preview builds
 
-The adapter version **must** be exactly `MAJOR.MINOR.MICRO` (three integers, e.g. `1.0.3`).
-Do **not** try to append a fourth segment or a qualifier such as `1.0.3.6`,
-`1.0.3-6`, or `1.0.3.8-g2d51fd3` — even though the raw OSGi spec would allow a
-`major.minor.micro.qualifier` form.
+The version is always `MAJOR.MINOR.MICRO` — three integers, no fourth segment or
+qualifier (`1.0.3`, never `1.0.3.6` or `1.0.3-g2d51fd3`). This is exactly what the
+CPI UI shows: the OSGi `Subsystem-Version`, derived from the metadata
+adapter-variant `version::`, kept in sync with `Adapter-Version` in `config.adk`.
 
-- **Why it fails:** the SAP adapter-build plugin's `VersionComparator`
-  (`com.sap.cloud.adk.checks.VersionComparator.formatVersion`, reached via
-  `AdapterProjectChecks.checkForDuplicateMetadataVariants`) assumes a strict
-  three-part version. Given a 4th segment it spins in an **endless loop**
-  (100 % CPU, no `.esa` ever produced) — the build hangs instead of erroring out.
-  Verified empirically: setting `version::1.0.3.6` in the metadata files reproduces
-  the hang; the dash vs. dot in the qualifier is irrelevant — the 4th segment alone
-  triggers it.
-- **Consequence:** the version shown as **"Version" in the CPI UI cannot carry a
-  build/commit suffix.** It is the OSGi `Subsystem-Version`, which the ADK derives
-  from the metadata adapter-variant `version::` (kept in sync with
-  `Adapter-Version` in `config.adk`). It can only ever be a plain `X.Y.Z`.
-- **To distinguish preview/CI builds** use the **`.esa` file name** instead (the ESA
-  preview workflow stamps it via `git describe`, e.g. `…-1.0.3-8-g2d51fd3-<branch>.esa`).
-  The file name has no OSGi/ADK constraints and does not affect channel compatibility,
-  so the CPI-visible version stays a stable `X.Y.Z`.
+**Preview / CI builds keep the released version in the CPI UI and are told apart by
+the ESA file name.** The ESA-preview workflow stamps that name with `git describe`
+(e.g. `cpi-kafka-adapter-plus-1.0.3-8-g2d51fd3-<branch>.esa`), which has no OSGi/ADK
+constraints and does not affect channel compatibility. So the deployed file is always
+identifiable, while the CPI-visible version stays a clean `X.Y.Z`.
+
+We deliberately do **not** bump the CPI version for previews. There is no integer
+`MICRO` between a release and its successor — nothing sits between `1.0.3` and
+`1.0.4` — so any *distinct* preview number would be **≥ the next release**. Because
+micro versions auto-migrate onto existing iFlows within the same major, a stale
+preview like `1.0.36` would then outrank a later real `1.0.4`. Keeping previews on the
+released version avoids that trap entirely.
 
 ## Iron rules
 
