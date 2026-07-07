@@ -23,6 +23,15 @@
         <!-- CI toggle: when true, Surefire (unit tests) is skipped so the integration-test
              CI job can run *IT tests only, without re-running the unit tests. Default false. -->
         <skip.unit.tests>false</skip.unit.tests>
+        <!-- Bundle-Version of the inner fat bundle (appears in the .esa Subsystem-Content).
+             This is an internal build marker only - it does NOT drive the "Version" shown in
+             the CPI UI. That field is the Subsystem-Version, which the ADK build derives from
+             the adapter variant version in src/main/resources/metadata/metadata-*.xml and is
+             deliberately kept stable (1.0.3) so existing iFlow channels stay compatible.
+             Defaults to the released project version so release builds stay clean; preview/CI
+             builds may override via -Dadapter.bundle.version=<major.minor.micro.qualifier>
+             (e.g. 1.0.3.8-g2d51fd3) to tell preview bundles apart from the release. -->
+        <adapter.bundle.version>${project.version}</adapter.bundle.version>
     </properties>
 
     <repositories>
@@ -202,6 +211,43 @@
     <build>
         <defaultGoal>install</defaultGoal>
         <plugins>
+            <!-- Guard against transitive dependencies that are known to break CPI's OSGi
+                 resolver. A plain `mvn package` cannot detect these - the failure only
+                 surfaces at CPI deploy time - so we fail the build up front instead.
+                 at.yawk.lz4:lz4-java is a fork with a broken OSGi manifest (Bundle-Version: 0,
+                 mandatory Import-Package: java.lang) that Kafka 3.9.2+ pulls in transitively;
+                 it must never end up in the .esa. Add further known-bad artifacts here as they
+                 are discovered. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-enforcer-plugin</artifactId>
+                <version>3.5.0</version>
+                <executions>
+                    <execution>
+                        <id>ban-cpi-incompatible-dependencies</id>
+                        <phase>validate</phase>
+                        <goals><goal>enforce</goal></goals>
+                        <configuration>
+                            <rules>
+                                <bannedDependencies>
+                                    <excludes>
+                                        <!-- OSGi-broken lz4 fork; use org.lz4:lz4-java instead -->
+                                        <exclude>at.yawk.lz4:lz4-java</exclude>
+                                    </excludes>
+                                    <message>
+                                        A CPI-incompatible dependency was found on the classpath
+                                        (see banned list). This artifact breaks the CPI OSGi
+                                        resolver and would make the adapter fail to deploy. Add an
+                                        exclusion + a pinned, OSGi-clean replacement in pom.xml.
+                                    </message>
+                                    <searchTransitive>true</searchTransitive>
+                                </bannedDependencies>
+                            </rules>
+                            <fail>true</fail>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
             <plugin>
                 <groupId>org.codehaus.mojo</groupId>
                 <artifactId>license-maven-plugin</artifactId>
@@ -242,6 +288,7 @@
                 <configuration>
                     <instructions>
                         <Bundle-SymbolicName>${project.groupId}.${project.artifactId}</Bundle-SymbolicName>
+                        <Bundle-Version>${adapter.bundle.version}</Bundle-Version>
                         <Import-Package>
                             org.apache.camel;version="[3.14,4)",
                             org.apache.camel.support;version="[3.14,4)",

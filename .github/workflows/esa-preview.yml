@@ -22,6 +22,32 @@ jobs:
       - name: Build, test and package (produces the ESA)
         run: mvn -B clean install
 
+      - name: Verify ESA contents (CPI OSGi guard)
+        run: |
+          set -euo pipefail
+          ESA="$(find target -name '*.esa' | head -1)"
+          if [ -z "$ESA" ]; then
+            echo "::error::No .esa archive was produced by the build"
+            exit 1
+          fi
+
+          # A deployable .esa embeds every dependency inside the fat bundle and must contain
+          # exactly two jars at its root: the fat bundle (<artifactId>-<version>.jar) and the
+          # generated monitor jar (*.monitor.jar). Any additional standalone jar means a
+          # transitive dependency escaped embedding and was emitted as its own subsystem
+          # bundle - exactly the pattern that made the at.yawk.lz4 fork break CPI deploy.
+          JARS="$(unzip -Z1 "$ESA" | grep -E '\.jar$' || true)"
+          echo "Jars inside $ESA:"
+          echo "$JARS" | sed 's/^/  - /'
+
+          STRAY="$(echo "$JARS" | grep -vE '(^|/)([A-Za-z0-9._-]+\.monitor\.jar|cpi-kafka-adapter-plus-[0-9][^/]*\.jar)$' || true)"
+          if [ -n "$STRAY" ]; then
+            echo "::error::Unexpected standalone jar(s) in the .esa - a dependency was not embedded and may break CPI deploy:"
+            echo "$STRAY" | sed 's/^/::error::  /'
+            exit 1
+          fi
+          echo "ESA content check passed: only the fat bundle and monitor jar are present."
+
       - name: Locate ESA and compute artifact name
         id: esa
         run: |
