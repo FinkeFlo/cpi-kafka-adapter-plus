@@ -3,11 +3,20 @@ name: ESA Preview
 on:
   workflow_dispatch:
 
+# Least privilege: this workflow only checks out code, builds, and uploads an
+# artifact - none of which needs write access to the repository.
+permissions:
+  contents: read
+
 jobs:
   build-test-and-package:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Full history + tags are required so `git describe` can derive a
+          # meaningful build version (e.g. 1.0.3-6-g92e03c8).
+          fetch-depth: 0
 
       - uses: actions/setup-java@v4
         with:
@@ -18,7 +27,33 @@ jobs:
       - name: Build, test and package (produces the ESA)
         run: mvn -B clean install
 
-      - name: Locate ESA artifact
+      - name: Verify ESA contents (CPI OSGi guard)
+        run: |
+          set -euo pipefail
+          ESA="$(find target -name '*.esa' | head -1)"
+          if [ -z "$ESA" ]; then
+            echo "::error::No .esa archive was produced by the build"
+            exit 1
+          fi
+
+          # A deployable .esa embeds every dependency inside the fat bundle and must contain
+          # exactly two jars at its root: the fat bundle (<artifactId>-<version>.jar) and the
+          # generated monitor jar (*.monitor.jar). Any additional standalone jar means a
+          # transitive dependency escaped embedding and was emitted as its own subsystem
+          # bundle - exactly the pattern that made the at.yawk.lz4 fork break CPI deploy.
+          JARS="$(unzip -Z1 "$ESA" | grep -E '\.jar$' || true)"
+          echo "Jars inside $ESA:"
+          echo "$JARS" | sed 's/^/  - /'
+
+          STRAY="$(echo "$JARS" | grep -vE '(^|/)([A-Za-z0-9._-]+\.monitor\.jar|cpi-kafka-adapter-plus-[0-9][^/]*\.jar)$' || true)"
+          if [ -n "$STRAY" ]; then
+            echo "::error::Unexpected standalone jar(s) in the .esa - a dependency was not embedded and may break CPI deploy:"
+            echo "$STRAY" | sed 's/^/::error::  /'
+            exit 1
+          fi
+          echo "ESA content check passed: only the fat bundle and monitor jar are present."
+
+      - name: Locate ESA and compute artifact name
         id: esa
         run: |
           ESA="$(find target -name '*.esa' | head -1)"
@@ -26,14 +61,31 @@ jobs:
             echo "::error::No .esa archive was produced by the build"
             exit 1
           fi
-          echo "path=$ESA" >> "$GITHUB_OUTPUT"
-          echo "name=$(basename "$ESA")" >> "$GITHUB_OUTPUT"
-          echo "Found ESA: $ESA"
-          # Create artifact name with branch and timestamp (replace / with -)
-          BRANCH_SAFE="$(echo "${{ github.ref_name }}" | tr '/' '-')"
-          TIMESTAMP="$(date -u +'%Y%m%d-%H%M')"
-          ARTIFACT_NAME="esa-${BRANCH_SAFE}-${TIMESTAMP}"
+
+          # Product name = Maven artifactId, derived from the built file name by
+          # stripping the trailing "-<version>" (version always starts with a digit).
+          ESA_BASE="$(basename "$ESA" .esa)"
+          PRODUCT="$(printf '%s' "$ESA_BASE" | sed -E 's/-[0-9].*$//')"
+
+          # Build version via git describe:
+          #   - on a release tag  -> e.g. 1.0.3
+          #   - past a tag         -> e.g. 1.0.3-6-g92e03c8 (clearly a dev build)
+          #   - no tag at all      -> short commit sha
+          DESCRIBE="$(git describe --tags --always --dirty | sed 's/^v//')"
+
+          # Branch name, filesystem-safe (slashes are not allowed in artifact names).
+          BRANCH_SAFE="$(printf '%s' "${GITHUB_REF_NAME}" | tr '/' '-')"
+
+          ARTIFACT_NAME="${PRODUCT}-${DESCRIBE}-${BRANCH_SAFE}"
+
+          # Rename the .esa so the file inside the download matches the artifact name.
+          NEW_ESA="$(dirname "$ESA")/${ARTIFACT_NAME}.esa"
+          mv "$ESA" "$NEW_ESA"
+
+          echo "path=$NEW_ESA" >> "$GITHUB_OUTPUT"
           echo "artifact_name=$ARTIFACT_NAME" >> "$GITHUB_OUTPUT"
+          echo "esa_file=${ARTIFACT_NAME}.esa" >> "$GITHUB_OUTPUT"
+          echo "Renamed ESA to: $NEW_ESA"
 
       - name: Upload ESA artifact
         uses: actions/upload-artifact@v4
@@ -49,6 +101,7 @@ jobs:
             echo "### ESA preview build finished"
             echo ""
             echo "- **Branch/Ref:** \`${GITHUB_REF_NAME}\`"
-            echo "- **ESA:** \`${{ steps.esa.outputs.name }}\`"
+            echo "- **Artifact (zip):** \`${{ steps.esa.outputs.artifact_name }}\`"
+            echo "- **ESA file:** \`${{ steps.esa.outputs.esa_file }}\`"
             echo "- **Download:** Actions Run Artifacts"
           } >> "$GITHUB_STEP_SUMMARY"

@@ -16,6 +16,26 @@ It is **not** computed from git/commits, and the metadata is **not** stamped.
 Within the same major everything is compatible (micro automatic, minor one-click) —
 a **major jump breaks** auto-migration.
 
+## Version format & preview builds
+
+The version is always `MAJOR.MINOR.MICRO` — three integers, no fourth segment or
+qualifier (`1.0.3`, never `1.0.3.6` or `1.0.3-g2d51fd3`). This is exactly what the
+CPI UI shows: the OSGi `Subsystem-Version`, derived from the metadata
+adapter-variant `version::`, kept in sync with `Adapter-Version` in `config.adk`.
+
+**Preview / CI builds keep the released version in the CPI UI and are told apart by
+the ESA file name.** The ESA-preview workflow stamps that name with `git describe`
+(e.g. `cpi-kafka-adapter-plus-1.0.3-8-g2d51fd3-<branch>.esa`), which has no OSGi/ADK
+constraints and does not affect channel compatibility. So the deployed file is always
+identifiable, while the CPI-visible version stays a clean `X.Y.Z`.
+
+We deliberately do **not** bump the CPI version for previews. There is no integer
+`MICRO` between a release and its successor — nothing sits between `1.0.3` and
+`1.0.4` — so any *distinct* preview number would be **≥ the next release**. Because
+micro versions auto-migrate onto existing iFlows within the same major, a stale
+preview like `1.0.36` would then outrank a later real `1.0.4`. Keeping previews on the
+released version avoids that trap entirely.
+
 ## Iron rules
 
 1. **Bugfixes = MICRO.** Never put a fix into a new minor — existing iFlows would **not** receive it.

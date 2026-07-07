@@ -5,7 +5,7 @@
     <modelVersion>4.0.0</modelVersion>
     <groupId>com.finkeflo.cpi.kafka</groupId>
     <artifactId>cpi-kafka-adapter-plus</artifactId>
-    <version>1.0.3</version>
+    <version>1.0.4</version>
     <packaging>bundle</packaging>
     <name>Kafka Adapter Plus</name>
     <description>Custom Apache Kafka adapter for SAP Cloud Integration (CPI) with advanced batch processing, Avro/Schema Registry support, and SASL/SSL security.</description>
@@ -16,13 +16,23 @@
         <maven.compiler.target>1.8</maven.compiler.target>
         <camel.version>3.14.7</camel.version>
         <adk.version>2.3.0</adk.version>
-        <kafka.version>3.9.1</kafka.version>
+        <kafka.version>3.9.2</kafka.version>
         <avro.version>1.11.5</avro.version>
         <confluent.version>7.9.5</confluent.version>
-        <jackson.version>2.16.0</jackson.version>
+        <jackson.version>2.22.0</jackson.version>
         <!-- CI toggle: when true, Surefire (unit tests) is skipped so the integration-test
              CI job can run *IT tests only, without re-running the unit tests. Default false. -->
         <skip.unit.tests>false</skip.unit.tests>
+        <!-- Bundle-Version of the inner fat bundle (appears in the .esa Subsystem-Content).
+             This is an internal build marker only - it does NOT drive the "Version" shown in
+             the CPI UI. That field is the Subsystem-Version, which the ADK build derives from
+             the adapter variant version in src/main/resources/metadata/metadata-*.xml and
+             tracks the released project version (bumped per release; within a major, micro/minor
+             bumps auto-migrate onto existing iFlow channels, so deployed integrations stay compatible).
+             Defaults to the released project version so release builds stay clean; preview/CI
+             builds may override via -Dadapter.bundle.version=<major.minor.micro.qualifier>
+             (e.g. 1.0.4.8-g2d51fd3) to tell preview bundles apart from the release. -->
+        <adapter.bundle.version>${project.version}</adapter.bundle.version>
     </properties>
 
     <repositories>
@@ -80,6 +90,27 @@
             <groupId>org.apache.kafka</groupId>
             <artifactId>kafka-clients</artifactId>
             <version>${kafka.version}</version>
+            <exclusions>
+                <!-- Kafka 3.9.2+ swaps the lz4 codec to the at.yawk.lz4 fork, whose OSGi
+                     manifest is broken for CPI (Bundle-Version: 0, mandatory Import-Package:
+                     java.lang). That fork gets packaged as a standalone subsystem bundle and
+                     the CPI OSGi resolver cannot satisfy it, so the adapter fails to install.
+                     Exclude it and pin the well-behaved org.lz4:lz4-java below instead. -->
+                <exclusion>
+                    <groupId>at.yawk.lz4</groupId>
+                    <artifactId>lz4-java</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <!-- Pin the CPI-compatible lz4 codec (proper OSGi bundle, embedded in the fat bundle
+             via Embed-Dependency; org.lz4 is in the copy-dependencies excludeGroupIds so it is
+             NOT emitted as a separate subsystem jar). Keeps CPI deployability across Kafka bumps. -->
+        <dependency>
+            <groupId>org.lz4</groupId>
+            <artifactId>lz4-java</artifactId>
+            <version>1.8.0</version>
+            <scope>runtime</scope>
         </dependency>
 
         <!-- Snappy compression codec (required by Kafka consumers reading snappy-compressed batches) -->
@@ -173,7 +204,7 @@
         <dependency>
             <groupId>org.apache.commons</groupId>
             <artifactId>commons-lang3</artifactId>
-            <version>3.14.0</version>
+            <version>3.20.0</version>
             <scope>test</scope>
         </dependency>
     </dependencies>
@@ -181,6 +212,43 @@
     <build>
         <defaultGoal>install</defaultGoal>
         <plugins>
+            <!-- Guard against transitive dependencies that are known to break CPI's OSGi
+                 resolver. A plain `mvn package` cannot detect these - the failure only
+                 surfaces at CPI deploy time - so we fail the build up front instead.
+                 at.yawk.lz4:lz4-java is a fork with a broken OSGi manifest (Bundle-Version: 0,
+                 mandatory Import-Package: java.lang) that Kafka 3.9.2+ pulls in transitively;
+                 it must never end up in the .esa. Add further known-bad artifacts here as they
+                 are discovered. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-enforcer-plugin</artifactId>
+                <version>3.5.0</version>
+                <executions>
+                    <execution>
+                        <id>ban-cpi-incompatible-dependencies</id>
+                        <phase>validate</phase>
+                        <goals><goal>enforce</goal></goals>
+                        <configuration>
+                            <rules>
+                                <bannedDependencies>
+                                    <excludes>
+                                        <!-- OSGi-broken lz4 fork; use org.lz4:lz4-java instead -->
+                                        <exclude>at.yawk.lz4:lz4-java</exclude>
+                                    </excludes>
+                                    <message>
+                                        A CPI-incompatible dependency was found on the classpath
+                                        (see banned list). This artifact breaks the CPI OSGi
+                                        resolver and would make the adapter fail to deploy. Add an
+                                        exclusion + a pinned, OSGi-clean replacement in pom.xml.
+                                    </message>
+                                    <searchTransitive>true</searchTransitive>
+                                </bannedDependencies>
+                            </rules>
+                            <fail>true</fail>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
             <plugin>
                 <groupId>org.codehaus.mojo</groupId>
                 <artifactId>license-maven-plugin</artifactId>
@@ -221,6 +289,7 @@
                 <configuration>
                     <instructions>
                         <Bundle-SymbolicName>${project.groupId}.${project.artifactId}</Bundle-SymbolicName>
+                        <Bundle-Version>${adapter.bundle.version}</Bundle-Version>
                         <Import-Package>
                             org.apache.camel;version="[3.14,4)",
                             org.apache.camel.support;version="[3.14,4)",

@@ -33,6 +33,12 @@ This produces:
 1. An OSGi bundle JAR (fat bundle with embedded Kafka, Avro, Confluent, and Jackson dependencies)
 2. An ESA archive (via ADK `build` goal) deployable to SAP CPI
 
+### Build ESA in GitHub Actions (no release tag)
+
+Use the **ESA Preview** workflow (`.github/workflows/esa-preview.yml`) via **Actions → ESA Preview → Run workflow**.
+It runs `mvn -B clean install` on the selected branch, executes all tests, and uploads the generated `.esa`
+as a workflow artifact for download.
+
 ### Run Tests
 
 ```bash
