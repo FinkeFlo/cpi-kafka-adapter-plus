@@ -12,7 +12,7 @@ jobs:
   build-test-and-package:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # Full history + tags are required so `git describe` can derive a
           # meaningful build version (e.g. 1.0.3-6-g92e03c8).
@@ -88,7 +88,7 @@ jobs:
           echo "Renamed ESA to: $NEW_ESA"
 
       - name: Upload ESA artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.esa.outputs.artifact_name }}
           path: ${{ steps.esa.outputs.path }}
