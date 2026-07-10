@@ -19,10 +19,16 @@ updates:
       prefix: "build"
       include: "scope"
     # CPI provides Camel at runtime; keep Camel upgrades out of automatic updates.
+    # Enterprise adapter: prioritize stability over new features, so major
+    # version bumps are excluded from automatic PRs and must be reviewed/
+    # upgraded manually and deliberately.
     ignore:
       - dependency-name: "org.apache.camel:*"
+      - dependency-name: "*"
+        update-types:
+          - "version-update:semver-major"
     # Bundle low-risk minor/patch bumps into a single PR to reduce noise;
-    # major upgrades stay as individual PRs for focused review.
+    # major upgrades are excluded above and handled manually.
     groups:
       maven-minor-patch:
         update-types:
