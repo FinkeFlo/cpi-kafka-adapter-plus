@@ -12,7 +12,7 @@ jobs:
   build-test-and-package:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # Full history + tags are required so `git describe` can derive a
           # meaningful build version (e.g. 1.0.3-6-g92e03c8).
