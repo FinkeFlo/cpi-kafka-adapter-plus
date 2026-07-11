@@ -416,6 +416,9 @@
                     <excludes>
                         <exclude>**/FullVolumeIT.java</exclude>
                     </excludes>
+                    <systemPropertyVariables>
+                        <project.build.finalName>${project.build.finalName}</project.build.finalName>
+                    </systemPropertyVariables>
                 </configuration>
                 <executions>
                     <execution>

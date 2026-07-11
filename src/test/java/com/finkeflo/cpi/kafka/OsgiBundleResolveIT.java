@@ -79,6 +79,18 @@ public class OsgiBundleResolveIT {
         Assert.assertTrue("Maven target directory does not exist: " + targetDirectory.getAbsolutePath(),
                 targetDirectory.isDirectory());
 
+        // Preferred path: Failsafe injects the current build's finalName, so we validate exactly
+        // the bundle produced by this build and ignore stale/renamed artifacts (e.g. a leftover
+        // JAR from a previous artifactId or version) that may linger in target/ without a clean.
+        String finalName = System.getProperty("project.build.finalName");
+        if (hasText(finalName)) {
+            File bundle = new File(targetDirectory, finalName + ".jar");
+            Assert.assertTrue("Built OSGi bundle for the current build was not found: "
+                    + bundle.getAbsolutePath(), bundle.isFile());
+            assertHasBundleSymbolicName(bundle);
+            return bundle;
+        }
+
         File[] jarFiles = targetDirectory.listFiles();
         Assert.assertNotNull("Unable to list Maven target directory: " + targetDirectory.getAbsolutePath(), jarFiles);
         Arrays.sort(jarFiles);
@@ -104,6 +116,18 @@ public class OsgiBundleResolveIT {
         Assert.assertEquals("Expected exactly one built OSGi bundle JAR with a Bundle-SymbolicName in "
                 + targetDirectory.getAbsolutePath() + " but found: " + bundleCandidates, 1, bundleCandidates.size());
         return bundleCandidates.get(0);
+    }
+
+    private static void assertHasBundleSymbolicName(File bundle) throws IOException {
+        JarFile bundleJar = new JarFile(bundle);
+        try {
+            Manifest manifest = bundleJar.getManifest();
+            Assert.assertTrue("Built OSGi bundle is missing a " + BUNDLE_SYMBOLIC_NAME + " header: "
+                    + bundle.getAbsolutePath(),
+                    manifest != null && hasText(manifest.getMainAttributes().getValue(BUNDLE_SYMBOLIC_NAME)));
+        } finally {
+            bundleJar.close();
+        }
     }
 
     private static boolean isCandidateJar(File file) {

@@ -22,6 +22,13 @@ jobs:
 
   integration-tests:
     runs-on: ubuntu-latest
+    strategy:
+      # Run every shard to completion so a failure in one shard still reports the others.
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2]
+    env:
+      SHARD_TOTAL: 3
     steps:
       - uses: actions/checkout@v7
 
@@ -31,8 +38,29 @@ jobs:
           java-version: '17'
           cache: maven
 
+      # Deterministically split the *IT classes across shards by round-robin over the
+      # sorted class list. New *IT classes are picked up automatically (no manual list to
+      # maintain); FullVolumeIT stays excluded to mirror the Failsafe configuration.
+      - name: Select integration test classes for shard ${{ matrix.shard }}
+        id: select
+        run: |
+          all=()
+          while IFS= read -r cls; do all+=("$cls"); done \
+            < <(find src/test/java -name '*IT.java' ! -name 'FullVolumeIT.java' -exec basename {} .java ';' | sort)
+          sel=()
+          for i in "${!all[@]}"; do
+            if [ $(( i % SHARD_TOTAL )) -eq ${{ matrix.shard }} ]; then sel+=("${all[$i]}"); fi
+          done
+          if [ ${#sel[@]} -eq 0 ]; then
+            echo "::error::No integration test classes assigned to shard ${{ matrix.shard }} — check SHARD_TOTAL vs. class count"
+            exit 1
+          fi
+          joined=$(IFS=,; echo "${sel[*]}")
+          echo "Shard ${{ matrix.shard }}/${SHARD_TOTAL} runs ${#sel[@]} classes: ${joined}"
+          echo "tests=${joined}" >> "$GITHUB_OUTPUT"
+
       - name: Integration tests (Failsafe, Testcontainers/Docker) + package
-        run: mvn -B verify -Dskip.unit.tests=true
+        run: mvn -B verify -Dskip.unit.tests=true -Dit.test="${{ steps.select.outputs.tests }}"
 
   # Aggregating gate: keeps the required status check named "build" stable, so branch
   # protection needs no change. Always runs and fails if any test job did not succeed
