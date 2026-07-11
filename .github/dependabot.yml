@@ -27,6 +27,11 @@ updates:
       - dependency-name: "*"
         update-types:
           - "version-update:semver-major"
+      # org.lz4:lz4-java 1.8.1+ is a Maven relocation stub pointing to
+      # at.yawk.lz4:lz4-java, the OSGi-broken fork banned by the
+      # ban-cpi-incompatible-dependencies enforcer rule in pom.xml. Stay on
+      # 1.8.0, the last version published under the real org.lz4 coordinates.
+      - dependency-name: "org.lz4:lz4-java"
     # Bundle low-risk minor/patch bumps into a single PR to reduce noise;
     # major upgrades are excluded above and handled manually.
     groups:
