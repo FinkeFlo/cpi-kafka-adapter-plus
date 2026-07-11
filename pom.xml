@@ -17,8 +17,8 @@
         <camel.version>3.14.7</camel.version>
         <adk.version>2.3.0</adk.version>
         <kafka.version>3.9.2</kafka.version>
-        <avro.version>1.11.5</avro.version>
-        <confluent.version>7.9.5</confluent.version>
+        <avro.version>1.12.1</avro.version>
+        <confluent.version>7.9.8</confluent.version>
         <jackson.version>2.22.1</jackson.version>
         <!-- CI toggle: when true, Surefire (unit tests) is skipped so the integration-test
              CI job can run *IT tests only, without re-running the unit tests. Default false. -->
@@ -157,7 +157,7 @@
         <dependency>
             <groupId>com.networknt</groupId>
             <artifactId>json-schema-validator</artifactId>
-            <version>1.0.87</version>
+            <version>1.5.9</version>
         </dependency>
 
         <!-- Logging -->
@@ -222,7 +222,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-enforcer-plugin</artifactId>
-                <version>3.5.0</version>
+                <version>3.6.3</version>
                 <executions>
                     <execution>
                         <id>ban-cpi-incompatible-dependencies</id>
@@ -252,7 +252,7 @@
             <plugin>
                 <groupId>org.codehaus.mojo</groupId>
                 <artifactId>license-maven-plugin</artifactId>
-                <version>2.4.0</version>
+                <version>2.7.1</version>
                 <configuration>
                     <licenseName>agpl_v3</licenseName>
                     <licenseFile>${project.basedir}/LICENSE</licenseFile>
@@ -366,7 +366,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
-                <version>3.13.0</version>
+                <version>3.15.0</version>
                 <configuration>
                     <source>1.8</source>
                     <target>1.8</target>
@@ -379,7 +379,7 @@
             <plugin>
                 <groupId>org.codehaus.mojo</groupId>
                 <artifactId>animal-sniffer-maven-plugin</artifactId>
-                <version>1.24</version>
+                <version>1.27</version>
                 <configuration>
                     <signature>
                         <groupId>org.codehaus.mojo.signature</groupId>
@@ -402,7 +402,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
-                <version>3.2.5</version>
+                <version>3.5.6</version>
                 <configuration>
                     <skip>${skip.unit.tests}</skip>
                 </configuration>
@@ -411,7 +411,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-failsafe-plugin</artifactId>
-                <version>3.2.5</version>
+                <version>3.5.6</version>
                 <configuration>
                     <excludes>
                         <exclude>**/FullVolumeIT.java</exclude>
@@ -431,7 +431,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-dependency-plugin</artifactId>
-                <version>3.7.1</version>
+                <version>3.11.0</version>
                 <executions>
                     <execution>
                         <id>copy-dependencies</id>
@@ -452,7 +452,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-antrun-plugin</artifactId>
-                <version>3.1.0</version>
+                <version>3.2.0</version>
                 <executions>
                     <execution>
                         <id>stage-adapter-project</id>
@@ -501,7 +501,7 @@
                     <dependency>
                         <groupId>org.ow2.asm</groupId>
                         <artifactId>asm</artifactId>
-                        <version>9.7</version>
+                        <version>9.10.1</version>
                     </dependency>
                 </dependencies>
             </plugin>
