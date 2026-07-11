@@ -17,8 +17,8 @@
         <camel.version>3.14.7</camel.version>
         <adk.version>2.3.0</adk.version>
         <kafka.version>3.9.2</kafka.version>
-        <avro.version>1.11.5</avro.version>
-        <confluent.version>7.9.5</confluent.version>
+        <avro.version>1.12.1</avro.version>
+        <confluent.version>7.9.8</confluent.version>
         <jackson.version>2.22.1</jackson.version>
         <!-- CI toggle: when true, Surefire (unit tests) is skipped so the integration-test
              CI job can run *IT tests only, without re-running the unit tests. Default false. -->
@@ -157,7 +157,7 @@
         <dependency>
             <groupId>com.networknt</groupId>
             <artifactId>json-schema-validator</artifactId>
-            <version>1.0.87</version>
+            <version>1.5.9</version>
         </dependency>
 
         <!-- Logging -->
@@ -205,6 +205,13 @@
             <groupId>org.apache.commons</groupId>
             <artifactId>commons-lang3</artifactId>
             <version>3.20.0</version>
+            <scope>test</scope>
+        </dependency>
+        <!-- Testcontainers/Ryuk needs commons-io FileTimes (2.12+); pin explicitly for IT stability. -->
+        <dependency>
+            <groupId>commons-io</groupId>
+            <artifactId>commons-io</artifactId>
+            <version>2.20.0</version>
             <scope>test</scope>
         </dependency>
     </dependencies>
