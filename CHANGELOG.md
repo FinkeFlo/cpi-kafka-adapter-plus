@@ -7,6 +7,17 @@ and the project follows [Semantic Versioning](https://semver.org/). See
 [VERSIONING.md](VERSIONING.md) for how the adapter version maps to SAP CPI
 iFlow compatibility.
 
+## [1.0.6] - 2026-07-13
+
+Test and CI hardening release; no runtime behavior changes.
+
+### Added
+- Real OSGi resolution integration test that verifies the ESA standalone bundles resolve in an isolated OSGi runtime, including a negative guard for unresolvable input.
+
+### Changed
+- Scoped the ESA-producing OSGi resolution check to a dedicated `osgi-resolution` Maven profile and CI job, so regular builds and integration-test shards are not slowed.
+- Made ESA selection in the resolution test deterministic (fails fast on an ambiguous `target/` state) and clean up the OSGi framework storage directory after each run.
+
 ## [1.0.5] - 2026-07-13
 
 Release focused on runtime dependency maintenance and CI stability.
