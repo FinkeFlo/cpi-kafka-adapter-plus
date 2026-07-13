@@ -73,13 +73,20 @@ public class OsgiFrameworkResolveIT {
             }
             return null;
         }
-        java.util.Collections.sort(esaCandidates, new java.util.Comparator<File>() {
-            @Override
-            public int compare(File left, File right) {
-                return left.getAbsolutePath().compareTo(right.getAbsolutePath());
-            }
-        });
-        return esaCandidates.get(esaCandidates.size() - 1);
+        if (esaCandidates.size() == 1) {
+            return esaCandidates.get(0);
+        }
+
+        StringBuilder message = new StringBuilder();
+        message.append("Multiple ESA archives found under ");
+        message.append(targetDirectory.getAbsolutePath());
+        message.append(" (ambiguous build state):");
+        for (int i = 0; i < esaCandidates.size(); i++) {
+            message.append('\n');
+            message.append(esaCandidates.get(i).getAbsolutePath());
+        }
+        Assert.fail(message.toString());
+        return null;
     }
 
     private static void findEsaFiles(File directory, List<File> collector) {

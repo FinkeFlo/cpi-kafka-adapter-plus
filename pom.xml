@@ -433,6 +433,7 @@
                 <configuration>
                     <excludes>
                         <exclude>**/FullVolumeIT.java</exclude>
+                        <exclude>**/OsgiFrameworkResolveIT.java</exclude>
                     </excludes>
                     <systemPropertyVariables>
                         <project.build.finalName>${project.build.finalName}</project.build.finalName>
@@ -543,7 +544,7 @@
                         </execution>
                         <execution>
                             <id>build-adapter</id>
-                            <phase>package</phase>
+                            <phase>install</phase>
                             <goals>
                                 <goal>build</goal>
                             </goals>
@@ -558,6 +559,39 @@
     </build>
 
     <profiles>
+        <profile>
+            <id>osgi-resolution</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>com.sap.cloud.adk</groupId>
+                        <artifactId>com.sap.cloud.adk.build.archive</artifactId>
+                        <executions>
+                            <execution>
+                                <id>build-adapter</id>
+                                <phase>package</phase>
+                                <goals>
+                                    <goal>build</goal>
+                                </goals>
+                                <configuration>
+                                    <adapterProjectDirectory>${project.build.directory}/${project.build.finalName}</adapterProjectDirectory>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-failsafe-plugin</artifactId>
+                        <configuration>
+                            <excludes combine.self="override">
+                                <exclude>**/FullVolumeIT.java</exclude>
+                            </excludes>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+
         <profile>
             <id>full-volume</id>
             <build>

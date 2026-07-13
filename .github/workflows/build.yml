@@ -46,7 +46,7 @@ jobs:
         run: |
           all=()
           while IFS= read -r cls; do all+=("$cls"); done \
-            < <(find src/test/java -name '*IT.java' ! -name 'FullVolumeIT.java' -exec basename {} .java ';' | sort)
+            < <(find src/test/java -name '*IT.java' ! -name 'FullVolumeIT.java' ! -name 'OsgiFrameworkResolveIT.java' -exec basename {} .java ';' | sort)
           sel=()
           for i in "${!all[@]}"; do
             if [ $(( i % SHARD_TOTAL )) -eq ${{ matrix.shard }} ]; then sel+=("${all[$i]}"); fi
@@ -75,7 +75,7 @@ jobs:
 
       # Runs the real OSGi resolver check in an ESA-producing build path.
       - name: OSGi resolver check (ESA standalone bundles)
-        run: mvn -B clean install -Dskip.unit.tests=true -Dit.test=OsgiFrameworkResolveIT -Dosgi.resolution.requireEsa=true
+        run: mvn -B clean install -Posgi-resolution -Dskip.unit.tests=true -Dit.test=OsgiFrameworkResolveIT -Dosgi.resolution.requireEsa=true
 
   # Aggregating gate: keeps the required status check named "build" stable, so branch
   # protection needs no change. Always runs and fails if any test job did not succeed

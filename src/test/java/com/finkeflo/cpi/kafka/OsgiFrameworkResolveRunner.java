@@ -91,7 +91,8 @@ public final class OsgiFrameworkResolveRunner {
             return;
         }
 
-        Framework framework = startFramework("target/felix-resolve-" + UUID.randomUUID().toString());
+        String storagePath = "target/felix-resolve-" + UUID.randomUUID().toString();
+        Framework framework = startFramework(storagePath);
         try {
             List<Bundle> installed = installBundles(framework, standaloneBundles);
             FrameworkWiring wiring = framework.adapt(FrameworkWiring.class);
@@ -102,12 +103,17 @@ public final class OsgiFrameworkResolveRunner {
             }
             System.out.println("Resolved standalone ESA bundles: " + standaloneBundles.size());
         } finally {
-            stopFramework(framework);
+            try {
+                stopFramework(framework);
+            } finally {
+                deleteRecursively(new File(storagePath));
+            }
         }
     }
 
     private static void runNegativeGuard() throws Exception {
-        Framework framework = startFramework("target/felix-resolve-negative-" + UUID.randomUUID().toString());
+        String storagePath = "target/felix-resolve-negative-" + UUID.randomUUID().toString();
+        Framework framework = startFramework(storagePath);
         try {
             byte[] brokenBundle = createBundleWithImport("com.finkeflo.cpi.kafka.test.unresolvable",
                     "com.finkeflo.cpi.kafka.missing.pkg;version=\"[1.0,2.0)\"");
@@ -125,7 +131,11 @@ public final class OsgiFrameworkResolveRunner {
             }
             System.out.println("Negative guard passed.");
         } finally {
-            stopFramework(framework);
+            try {
+                stopFramework(framework);
+            } finally {
+                deleteRecursively(new File(storagePath));
+            }
         }
     }
 
@@ -213,6 +223,25 @@ public final class OsgiFrameworkResolveRunner {
     private static void stopFramework(Framework framework) throws BundleException, InterruptedException {
         framework.stop();
         framework.waitForStop(5000L);
+    }
+
+    private static boolean deleteRecursively(File file) {
+        try {
+            if (file == null || !file.exists()) {
+                return true;
+            }
+            if (file.isDirectory()) {
+                File[] children = file.listFiles();
+                if (children != null) {
+                    for (int i = 0; i < children.length; i++) {
+                        deleteRecursively(children[i]);
+                    }
+                }
+            }
+            return file.delete() || !file.exists();
+        } catch (RuntimeException e) {
+            return false;
+        }
     }
 
     private static String unresolvedDiagnostics(List<Bundle> bundles) {
