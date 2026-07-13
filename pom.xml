@@ -207,6 +207,24 @@
             <version>3.20.0</version>
             <scope>test</scope>
         </dependency>
+        <dependency>
+            <groupId>org.apache.felix</groupId>
+            <artifactId>org.apache.felix.framework</artifactId>
+            <version>7.0.5</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.osgi</groupId>
+            <artifactId>osgi.core</artifactId>
+            <version>8.0.0</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.osgi</groupId>
+            <artifactId>org.osgi.service.resolver</artifactId>
+            <version>1.1.1</version>
+            <scope>test</scope>
+        </dependency>
         <!-- Testcontainers/Ryuk needs commons-io FileTimes (2.12+); pin explicitly for IT stability. -->
         <dependency>
             <groupId>commons-io</groupId>
@@ -422,6 +440,7 @@
                 <configuration>
                     <excludes>
                         <exclude>**/FullVolumeIT.java</exclude>
+                        <exclude>**/OsgiFrameworkResolveIT.java</exclude>
                     </excludes>
                     <systemPropertyVariables>
                         <project.build.finalName>${project.build.finalName}</project.build.finalName>
@@ -547,6 +566,39 @@
     </build>
 
     <profiles>
+        <profile>
+            <id>osgi-resolution</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>com.sap.cloud.adk</groupId>
+                        <artifactId>com.sap.cloud.adk.build.archive</artifactId>
+                        <executions>
+                            <execution>
+                                <id>build-adapter</id>
+                                <phase>package</phase>
+                                <goals>
+                                    <goal>build</goal>
+                                </goals>
+                                <configuration>
+                                    <adapterProjectDirectory>${project.build.directory}/${project.build.finalName}</adapterProjectDirectory>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-failsafe-plugin</artifactId>
+                        <configuration>
+                            <excludes combine.self="override">
+                                <exclude>**/FullVolumeIT.java</exclude>
+                            </excludes>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+
         <profile>
             <id>full-volume</id>
             <build>
