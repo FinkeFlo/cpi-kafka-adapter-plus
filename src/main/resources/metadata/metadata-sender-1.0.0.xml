@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<ComponentMetadata ComponentId="ctype::Adapter/cname::kafkaAdapterPlus/vendor::FlorianKube/version::1.0.4"
+<ComponentMetadata ComponentId="ctype::Adapter/cname::kafkaAdapterPlus/vendor::FlorianKube/version::1.0.5"
                    ComponentName="kafkaAdapterPlus"
                    UIElementType="Adapter"
                    IsExtension="false"
@@ -14,7 +14,7 @@
     <!-- SENDER VARIANT (Kafka Consumer -> CPI)                       -->
     <!-- ============================================================ -->
     <Variant VariantName="Kafka_Adapter_Plus_Sender"
-             VariantId="ctype::AdapterVariant/cname::kafkaAdapterPlus/vendor::FlorianKube/tp::cpi-kafka-plus/mp::cpi-kafka-plus/direction::Sender/version::1.0.4"
+             VariantId="ctype::AdapterVariant/cname::kafkaAdapterPlus/vendor::FlorianKube/tp::cpi-kafka-plus/mp::cpi-kafka-plus/direction::Sender/version::1.0.5"
              MetadataVersion="2.0"
              gen:RuntimeComponentBaseUri="cpi-kafka-plus"
              AttachmentBehavior="Preserve"

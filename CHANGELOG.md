@@ -7,6 +7,19 @@ and the project follows [Semantic Versioning](https://semver.org/). See
 [VERSIONING.md](VERSIONING.md) for how the adapter version maps to SAP CPI
 iFlow compatibility.
 
+## [1.0.5] - 2026-07-13
+
+Release focused on runtime dependency maintenance and CI stability.
+
+### Changed
+- Updated runtime dependencies: `avro` 1.11.5 → 1.12.1, `confluent` 7.9.5 → 7.9.8, and `json-schema-validator` 1.0.87 → 1.5.9.
+- Updated build tooling: enforcer, license plugin, compiler, animal-sniffer, surefire/failsafe, dependency, antrun, and ASM.
+- Sharded integration tests across 3 CI jobs to reduce wall-clock build time.
+
+### Fixed
+- Hardened the OSGi bundle test to validate the current build artifact instead of stale jars in `target/`.
+- Pinned `commons-io:2.22.0` for Testcontainers/Ryuk compatibility.
+
 ## [1.0.4] - 2026-07-07
 
 Dependency maintenance release. Keeps the adapter deployable on SAP CPI while
