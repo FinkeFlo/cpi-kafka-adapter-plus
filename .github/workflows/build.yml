@@ -62,18 +62,33 @@ jobs:
       - name: Integration tests (Failsafe, Testcontainers/Docker) + package
         run: mvn -B verify -Dskip.unit.tests=true -Dit.test="${{ steps.select.outputs.tests }}"
 
+  osgi-resolution:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+
+      # Runs the real OSGi resolver check in an ESA-producing build path.
+      - name: OSGi resolver check (ESA standalone bundles)
+        run: mvn -B clean install -Dskip.unit.tests=true -Dit.test=OsgiFrameworkResolveIT -Dosgi.resolution.requireEsa=true
+
   # Aggregating gate: keeps the required status check named "build" stable, so branch
   # protection needs no change. Always runs and fails if any test job did not succeed
   # (a skipped/failed dependency is treated as a failure).
   build:
-    needs: [unit-tests, integration-tests]
+    needs: [unit-tests, integration-tests, osgi-resolution]
     if: always()
     runs-on: ubuntu-latest
     steps:
       - name: Require all test jobs to pass
         run: |
-          echo "unit-tests=${{ needs.unit-tests.result }} integration-tests=${{ needs.integration-tests.result }}"
-          if [ "${{ needs.unit-tests.result }}" != "success" ] || [ "${{ needs.integration-tests.result }}" != "success" ]; then
+          echo "unit-tests=${{ needs.unit-tests.result }} integration-tests=${{ needs.integration-tests.result }} osgi-resolution=${{ needs.osgi-resolution.result }}"
+          if [ "${{ needs.unit-tests.result }}" != "success" ] || [ "${{ needs.integration-tests.result }}" != "success" ] || [ "${{ needs.osgi-resolution.result }}" != "success" ]; then
             echo "::error::One or more test jobs did not succeed"
             exit 1
           fi

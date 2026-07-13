@@ -207,6 +207,24 @@
             <version>3.20.0</version>
             <scope>test</scope>
         </dependency>
+        <dependency>
+            <groupId>org.apache.felix</groupId>
+            <artifactId>org.apache.felix.framework</artifactId>
+            <version>7.0.5</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.osgi</groupId>
+            <artifactId>osgi.core</artifactId>
+            <version>8.0.0</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.osgi</groupId>
+            <artifactId>org.osgi.service.resolver</artifactId>
+            <version>1.1.1</version>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>
@@ -525,7 +543,7 @@
                         </execution>
                         <execution>
                             <id>build-adapter</id>
-                            <phase>install</phase>
+                            <phase>package</phase>
                             <goals>
                                 <goal>build</goal>
                             </goals>
