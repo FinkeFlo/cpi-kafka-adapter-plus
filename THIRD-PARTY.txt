@@ -1,5 +1,5 @@
 
-Lists of 106 third-party dependencies.
+Lists of 114 third-party dependencies.
      (MIT License) minimal-json (com.eclipsesource.minimal-json:minimal-json:0.9.5 - https://github.com/ralfstx/minimal-json)
      (Apache License, Version 2.0) Internet Time Utility (com.ethlo.time:itu:1.14.0 - https://github.com/ethlo/itu)
      (The Apache Software License, Version 2.0) Jackson-annotations (com.fasterxml.jackson.core:jackson-annotations:2.22 - https://github.com/FasterXML/jackson)
@@ -23,6 +23,10 @@ Lists of 106 third-party dependencies.
      (SAP DEVELOPER LICENSE AGREEMENT) com.sap.cloud.adk.adapter.api (com.sap.cloud.adk:adapter.api:3.21.0 - http://www.sap.com)
      (SAP DEVELOPER LICENSE AGREEMENT) com.sap.cloud.adk:com.sap.cloud.adk.build.archive (com.sap.cloud.adk:com.sap.cloud.adk.build.archive:2.3.0 - http://www.sap.com)
      (SAP DEVELOPER LICENSE AGREEMENT) com.sap.cloud.adk.generic.api (com.sap.cloud.adk:generic.api:3.21.0 - http://www.sap.com)
+     (The Apache Software License, Version 2.0) mockwebserver (com.squareup.okhttp3:mockwebserver:4.12.0 - https://square.github.io/okhttp/)
+     (The Apache Software License, Version 2.0) okhttp (com.squareup.okhttp3:okhttp:4.12.0 - https://square.github.io/okhttp/)
+     (The Apache Software License, Version 2.0) okio (com.squareup.okio:okio:3.6.0 - https://github.com/square/okio/)
+     (The Apache Software License, Version 2.0) okio (com.squareup.okio:okio-jvm:3.6.0 - https://github.com/square/okio/)
      (EDL 1.0) Jakarta Activation (com.sun.activation:jakarta.activation:1.2.2 - https://github.com/eclipse-ee4j/jaf/jakarta.activation)
      (CDDL+GPL License) Old JAXB Core (com.sun.xml.bind:jaxb-core:2.3.0 - http://jaxb.java.net/jaxb-bundles/jaxb-core)
      (Eclipse Distribution License - v 1.0) Old JAXB Runtime (com.sun.xml.bind:jaxb-impl:2.3.3 - https://eclipse-ee4j.github.io/jaxb-ri/jaxb-bundles/jaxb-impl)
@@ -94,6 +98,10 @@ Lists of 106 third-party dependencies.
      (MIT license) Animal Sniffer Annotations (org.codehaus.mojo:animal-sniffer-annotations:1.9 - http://mojo.codehaus.org/animal-sniffer/animal-sniffer-annotations)
      (New BSD License) Hamcrest Core (org.hamcrest:hamcrest-core:1.3 - https://github.com/hamcrest/JavaHamcrest/hamcrest-core)
      (The Apache Software License, Version 2.0) JetBrains Java Annotations (org.jetbrains:annotations:17.0.0 - https://github.com/JetBrains/java-annotations)
+     (The Apache License, Version 2.0) Kotlin Stdlib (org.jetbrains.kotlin:kotlin-stdlib:1.8.21 - https://kotlinlang.org/)
+     (The Apache License, Version 2.0) Kotlin Stdlib Common (org.jetbrains.kotlin:kotlin-stdlib-common:1.8.21 - https://kotlinlang.org/)
+     (The Apache License, Version 2.0) Kotlin Stdlib Jdk7 (org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.21 - https://kotlinlang.org/)
+     (The Apache License, Version 2.0) Kotlin Stdlib Jdk8 (org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.8.21 - https://kotlinlang.org/)
      (The Apache Software License, Version 2.0) LZ4 and xxHash (org.lz4:lz4-java:1.8.0 - https://github.com/lz4/lz4-java)
      (Apache-2.0) org.osgi:org.osgi.service.resolver (org.osgi:org.osgi.service.resolver:1.1.1 - https://www.osgi.org/)
      (Apache License, Version 2.0) org.osgi:osgi.cmpn (org.osgi:osgi.cmpn:6.0.0 - http://www.osgi.org/)
