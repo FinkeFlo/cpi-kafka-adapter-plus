@@ -20,6 +20,55 @@ jobs:
       - name: Unit tests (Surefire)
         run: mvn -B test
 
+      - name: Verify JaCoCo report output
+        run: |
+          test -f target/jacoco.exec
+          test -f target/site/jacoco/jacoco.xml
+          test -f target/site/jacoco/index.html
+
+      - name: JaCoCo coverage summary
+        run: |
+          python3 - <<'PY'
+          import os
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+
+          report = Path("target/site/jacoco/jacoco.xml")
+          root = ET.parse(report).getroot()
+          counters = {
+              counter.attrib["type"]: (
+                  int(counter.attrib["missed"]),
+                  int(counter.attrib["covered"]),
+              )
+              for counter in root.findall("counter")
+          }
+
+          def row(metric):
+              missed, covered = counters.get(metric, (0, 0))
+              total = missed + covered
+              percentage = (covered / total * 100.0) if total else 0.0
+              return "| {} | {} | {} | {:.2f}% |".format(
+                  metric.title(), covered, total, percentage
+              )
+
+          with open(Path(os.environ["GITHUB_STEP_SUMMARY"]), "a") as summary:
+              summary.write("### JaCoCo coverage (unit tests)\n\n")
+              summary.write("| Metric | Covered | Total | Coverage |\n")
+              summary.write("| --- | ---: | ---: | ---: |\n")
+              for metric in ("LINE", "BRANCH", "INSTRUCTION"):
+                  summary.write(row(metric) + "\n")
+          PY
+
+      - name: Upload JaCoCo report artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: jacoco-unit-test-report
+          path: |
+            target/jacoco.exec
+            target/site/jacoco/
+          if-no-files-found: error
+          retention-days: 14
+
   integration-tests:
     runs-on: ubuntu-latest
     strategy:

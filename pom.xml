@@ -422,6 +422,39 @@
                     </execution>
                 </executions>
             </plugin>
+            <!-- JaCoCo coverage reporting. Bind once for local/unit-test runs (`mvn test`)
+                 and again after `verify` so full local verification can include IT coverage
+                 in the final report without changing test selection or CI sharding. -->
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <version>0.8.12</version>
+                <executions>
+                    <execution>
+                        <id>default-prepare-agent</id>
+                        <goals>
+                            <goal>prepare-agent</goal>
+                        </goals>
+                        <configuration>
+                            <append>true</append>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>report-unit-test-coverage</id>
+                        <phase>test</phase>
+                        <goals>
+                            <goal>report</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>report-verified-coverage</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>report</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
             <!-- Unit tests (*Test.java). The skip.unit.tests property lets CI run the
                  integration tests in a separate job without re-executing the unit tests. -->
             <plugin>

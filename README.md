@@ -43,7 +43,11 @@ as a workflow artifact for download.
 
 ```bash
 mvn test
+mvn verify
 ```
+
+`mvn test` generates a JaCoCo coverage report under `target/site/jacoco/`.
+In CI, the `build` workflow uploads the unit-test JaCoCo report as a downloadable artifact.
 
 ## Architecture
 
