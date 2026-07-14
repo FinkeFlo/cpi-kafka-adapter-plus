@@ -4,9 +4,9 @@ Custom Apache Kafka adapter for SAP Cloud Integration (CPI) built with the SAP A
 
 ## Key Features
 
-- **Kafka Sender Adapter** — Kafka Consumer that feeds messages into CPI IFlows
-- **Kafka Receiver Adapter** — CPI IFlow output published to Kafka topics
-- **Batch Processing** — JSON_ARRAY, XML_LIST, and SPLIT_EXCHANGES modes for high-throughput consumption
+- **Kafka Sender Adapter** — Consumes messages from Kafka topics and feeds them into a CPI integration flow (used on a Sender channel)
+- **Kafka Receiver Adapter** — Publishes integration flow messages to Kafka topics (used on a Receiver channel)
+- **Batch Processing** — Combine multiple Kafka records into a single message (JSON array or XML list) for higher throughput, or process each record as its own IFlow execution (no batching) when per-record handling is required
 - **Avro / Schema Registry** — Confluent Schema Registry integration for Avro serialization and deserialization
 - **Security** — SASL/PLAIN, SASL/SCRAM, SSL/TLS, and mTLS authentication
 - **At-Least-Once Delivery** — Manual offset commit after successful message processing
