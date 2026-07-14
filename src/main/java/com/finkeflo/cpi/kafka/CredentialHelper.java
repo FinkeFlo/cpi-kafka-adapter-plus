@@ -20,6 +20,7 @@
  */
 package com.finkeflo.cpi.kafka;
 
+import java.util.Arrays;
 import java.util.Map;
 
 import javax.net.ssl.KeyManager;
@@ -125,13 +126,37 @@ public final class CredentialHelper {
             }
 
             String username = userCredential.getUsername();
-            String password = new String(userCredential.getPassword());
+            String password = toStringAndZero(userCredential.getPassword());
 
             LOG.debug("Successfully resolved credentials for alias '{}'", alias);
             return new UserCredentials(username, password);
         } catch (Exception e) {
             LOG.error("Failed to retrieve credentials for alias '{}': {}", alias, e.getMessage(), e);
             throw new RuntimeException("Failed to retrieve credentials: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Copies the given password characters into a String and immediately zeroes out the
+     * original array. Reduces the time window during which the plaintext password sits in
+     * JVM heap memory as a mutable {@code char[]} that could otherwise be overwritten with
+     * dummy data (unlike a {@code String}, which is immutable and stays put until GC).
+     *
+     * <p>Package-private (not private) so it can be unit-tested directly without needing to
+     * mock the SAP CPI {@code SecureStoreService}.</p>
+     *
+     * @param passwordChars the password characters as returned by {@code UserCredential.getPassword()};
+     *                      may be {@code null}. The array is mutated (zeroed) as a side effect.
+     * @return a new String containing the password, or {@code null} if {@code passwordChars} is {@code null}
+     */
+    static String toStringAndZero(char[] passwordChars) {
+        if (passwordChars == null) {
+            return null;
+        }
+        try {
+            return new String(passwordChars);
+        } finally {
+            Arrays.fill(passwordChars, ' ');
         }
     }
 
