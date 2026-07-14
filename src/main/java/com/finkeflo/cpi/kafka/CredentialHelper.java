@@ -72,6 +72,22 @@ public final class CredentialHelper {
     };
     private static volatile CredentialResolver credentialResolver = DEFAULT_RESOLVER;
 
+    /**
+     * Strategy for resolving SSL contexts from the CPI Keystore.
+     * The default implementation reads from the CPI KeystoreService via ITApiFactory;
+     * tests can inject an alternative resolver via {@link #setSslContextResolver(SslContextResolver)}.
+     */
+    public interface SslContextResolver {
+        SSLContext resolveSslContext(String alias);
+    }
+
+    private static final SslContextResolver DEFAULT_SSL_CONTEXT_RESOLVER = new SslContextResolver() {
+        public SSLContext resolveSslContext(String alias) {
+            return resolveSslContextFromKeystore(alias);
+        }
+    };
+    private static volatile SslContextResolver sslContextResolver = DEFAULT_SSL_CONTEXT_RESOLVER;
+
     private CredentialHelper() {}
 
     /**
@@ -79,6 +95,13 @@ public final class CredentialHelper {
      */
     public static void setCredentialResolver(CredentialResolver resolver) {
         credentialResolver = (resolver != null) ? resolver : DEFAULT_RESOLVER;
+    }
+
+    /**
+     * Inject the SSL context resolver. Passing null restores the default CPI Keystore resolver.
+     */
+    public static void setSslContextResolver(SslContextResolver resolver) {
+        sslContextResolver = (resolver != null) ? resolver : DEFAULT_SSL_CONTEXT_RESOLVER;
     }
 
     /**
@@ -139,6 +162,10 @@ public final class CredentialHelper {
      * Get an SSLContext configured with KeyManager and TrustManager from CPI Keystore.
      */
     public static SSLContext getSSLContext(String keystoreAlias) {
+        return sslContextResolver.resolveSslContext(keystoreAlias);
+    }
+
+    private static SSLContext resolveSslContextFromKeystore(String keystoreAlias) {
         try {
             KeystoreService keystoreService = ITApiFactory.getService(KeystoreService.class, null);
 

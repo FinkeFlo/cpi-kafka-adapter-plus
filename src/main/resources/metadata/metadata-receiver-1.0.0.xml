@@ -82,6 +82,20 @@
                         </EditCondition>
                     </OrCondition>
                 </AttributeReference>
+                <AttributeReference>
+                    <ReferenceName>sslKeystoreAlias</ReferenceName>
+                    <description>Optional CPI Keystore alias for custom broker CAs and/or client certificates (mTLS). Leave empty for publicly trusted brokers that work with the JVM default truststore.</description>
+                    <OrCondition>
+                        <EditCondition>
+                            <AttributeName>securityProtocol</AttributeName>
+                            <AttributeValue>SASL_SSL</AttributeValue>
+                        </EditCondition>
+                        <EditCondition>
+                            <AttributeName>securityProtocol</AttributeName>
+                            <AttributeValue>SSL</AttributeValue>
+                        </EditCondition>
+                    </OrCondition>
+                </AttributeReference>
             </AttributeGroup>
         </Tab>
 
@@ -319,6 +333,17 @@
         <isparameterized>true</isparameterized>
         <GuiLabels guid="b1000002-0000-0000-0000-000000000003">
             <Label language="EN">Credential Alias</Label>
+        </GuiLabels>
+    </AttributeMetadata>
+    <AttributeMetadata>
+        <Name>sslKeystoreAlias</Name>
+        <Usage>false</Usage>
+        <DataType>xsd:string</DataType>
+        <Default/>
+        <Length>200</Length>
+        <isparameterized>true</isparameterized>
+        <GuiLabels guid="b1000002-0000-0000-0000-000000000004">
+            <Label language="EN">SSL Keystore Alias</Label>
         </GuiLabels>
     </AttributeMetadata>
 
