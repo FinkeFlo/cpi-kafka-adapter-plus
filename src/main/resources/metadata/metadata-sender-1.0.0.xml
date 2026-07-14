@@ -74,8 +74,19 @@
                 </AttributeReference>
                 <AttributeReference>
                     <ReferenceName>credentialAlias</ReferenceName>
-                    <description>Name of the 'User Credentials' artifact deployed in CPI Security Material, e.g. kafka-credentials. Username = SASL username or API Key, Password = SASL password or API Secret.</description>
+                    <description>Name of the 'User Credentials' artifact deployed in CPI Security Material, e.g. kafka-credentials. Username = SASL username or API Key, Password = SASL password or API Secret. Required when Security Protocol is SASL_SSL or SASL_PLAINTEXT.</description>
+                    <Restriction>Constraint.isValidRegex(.+)</Restriction>
                     <ErrorMessage>Please enter the alias of a User Credentials artifact from CPI Security Material</ErrorMessage>
+                    <OrCondition>
+                        <EditCondition>
+                            <AttributeName>securityProtocol</AttributeName>
+                            <AttributeValue>SASL_SSL</AttributeValue>
+                        </EditCondition>
+                        <EditCondition>
+                            <AttributeName>securityProtocol</AttributeName>
+                            <AttributeValue>SASL_PLAINTEXT</AttributeValue>
+                        </EditCondition>
+                    </OrCondition>
                 </AttributeReference>
             </AttributeGroup>
         </Tab>
@@ -97,6 +108,7 @@
                 <AttributeReference>
                     <ReferenceName>pollingIntervalSeconds</ReferenceName>
                     <description>Time in seconds between poll cycles. Each cycle fetches up to 'Max Poll Records' from Kafka. Range: 1 to 21600 (1 second to 6 hours). Default: 5 seconds. Whole-hour values align polls with predictable clock times: 3600=1h, 7200=2h, 10800=3h, 14400=4h, 18000=5h, 21600=6h. Values above 21600 are rejected at IFlow start because they would exceed the max.poll.interval.ms hard cap (6 h 10 min) and cause the Kafka consumer to leave its group between polls.</description>
+                    <Restriction>Constraint.isValidRegex(^([1-9][0-9]{0,3}|1[0-9]{4}|20[0-9]{3}|21[0-4][0-9]{2}|215[0-9]{2}|21600)$)</Restriction>
                     <ErrorMessage>Please enter a number between 1 and 21600 (1 second to 6 hours)</ErrorMessage>
                 </AttributeReference>
                 <AttributeReference>
@@ -413,7 +425,7 @@
         <Length>200</Length>
         <isparameterized>true</isparameterized>
         <GuiLabels guid="b1000002-0000-0000-0000-000000000003">
-            <Label language="EN">SASL Credential Alias</Label>
+            <Label language="EN">Credential Alias</Label>
         </GuiLabels>
     </AttributeMetadata>
 
