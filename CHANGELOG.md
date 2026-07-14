@@ -7,6 +7,17 @@ and the project follows [Semantic Versioning](https://semver.org/). See
 [VERSIONING.md](VERSIONING.md) for how the adapter version maps to SAP CPI
 iFlow compatibility.
 
+## [1.0.7] - 2026-07-14
+
+### Added
+- Design-time validation for `pollingIntervalSeconds` (sender): the Web UI/Eclipse configuration dialog now rejects values outside 1-21600 immediately, instead of only at IFlow start. (#44)
+- Design-time validation for `credentialAlias` (sender + receiver): now enforced as non-empty when Security Protocol is `SASL_SSL` or `SASL_PLAINTEXT`.
+
+### Changed
+- Renamed the `credentialAlias` GUI label from "SASL Credential Alias" to "Credential Alias" (sender + receiver). Cosmetic only; the underlying parameter name and existing channel configurations are unaffected.
+- Increased producer default `maxRequestSizeKb` from 1024 KB (1 MB) to 5120 KB (5 MB).
+- Increased producer default `producerBatchSizeKb` from 249 KB to 1024 KB (1 MB); removed a stale in-code comment referencing a 250 KB CPI message-size tier that does not currently apply.
+
 ## [1.0.6] - 2026-07-13
 
 Test and CI hardening release; no runtime behavior changes.

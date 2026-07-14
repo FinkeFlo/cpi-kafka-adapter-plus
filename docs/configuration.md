@@ -59,8 +59,8 @@ In `XML_LIST` mode, each `<value>` element carries a `format` attribute (`"xml"`
 | `producerBatchMode` | `NONE` | Batch send mode: `NONE`, `JSON_ARRAY`, `XML_LIST`. |
 | `acks` | `all` | Producer acknowledgments: `all`, `1`, `0`. |
 | `compressionType` | `none` | Compression type: `none`, `gzip`, `lz4`, `zstd`. |
-| `maxRequestSizeKb` | `1024` | Maximum request size in KB. |
-| `producerBatchSizeKb` | `249` | Producer batch size in KB. |
+| `maxRequestSizeKb` | `5120` | Maximum request size in KB. |
+| `producerBatchSizeKb` | `1024` | Producer batch size in KB. |
 | `bufferMemoryKb` | `32768` | Total memory for producer buffering in KB. |
 | `enableIdempotence` | `true` | Enable idempotent producer. |
 | `deliveryTimeoutSeconds` | `120` | Maximum delivery time in seconds, including retries. |

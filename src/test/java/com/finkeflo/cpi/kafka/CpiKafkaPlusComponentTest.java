@@ -145,8 +145,8 @@ public class CpiKafkaPlusComponentTest {
         Assert.assertEquals("NONE", endpoint.getProducerBatchMode());
         Assert.assertEquals("all", endpoint.getAcks());
         Assert.assertEquals("none", endpoint.getCompressionType());
-        Assert.assertEquals(1024, endpoint.getMaxRequestSizeKb());
-        Assert.assertEquals(249, endpoint.getProducerBatchSizeKb());
+        Assert.assertEquals(5120, endpoint.getMaxRequestSizeKb());
+        Assert.assertEquals(1024, endpoint.getProducerBatchSizeKb());
         Assert.assertEquals(32768, endpoint.getBufferMemoryKb());
         Assert.assertTrue(endpoint.isEnableIdempotence());
         Assert.assertEquals(120, endpoint.getDeliveryTimeoutSeconds());
