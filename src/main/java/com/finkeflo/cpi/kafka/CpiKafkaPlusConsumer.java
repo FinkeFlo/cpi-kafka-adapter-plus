@@ -37,18 +37,25 @@ import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.errors.AuthenticationException;
+import org.apache.kafka.common.errors.AuthorizationException;
 import org.apache.kafka.common.errors.RecordDeserializationException;
+import org.apache.kafka.common.errors.SaslAuthenticationException;
+import org.apache.kafka.common.errors.SslAuthenticationException;
 import org.apache.kafka.common.errors.WakeupException;
 import org.apache.kafka.common.header.Headers;
 import org.apache.kafka.common.serialization.ByteArrayDeserializer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.net.ssl.SSLHandshakeException;
+
 public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
 
     private static final Logger LOG = LoggerFactory.getLogger(CpiKafkaPlusConsumer.class);
     private static final int MAX_CONSECUTIVE_POLL_FAILURES = 5;
     private static final long MAX_POLL_FAILURE_DURATION_MS = 60_000L;
+    private static final long STOPPED_BY_ERROR_REMINDER_INTERVAL_MS = 60_000L;
     /** Camel-Scheduler-Takt zwischen zwei poll()-Aufrufen, wenn pollingIntervalSeconds groesser ist. */
     private static final long KEEP_ALIVE_INTERVAL_SECONDS = 60L;
     /** Poll-Timeout des Keep-Alive-Polls — kurz, treibt nur den Coordinator-Roundtrip. */
@@ -69,6 +76,9 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
     private long lastEmitTimeMs = 0L;
     private ConsumerCircuitBreaker circuitBreaker;
     private RecordProcessor recordProcessor;
+    private volatile boolean stoppedByErrorPolicy = false;
+    private volatile Throwable stoppedByError;
+    private volatile long lastStoppedByErrorReminderMs = 0L;
     /**
      * Last CPI connection/consumption status published for this consumer. Drives transition-based
      * reporting so the monitor is neither stuck nor spammed:
@@ -112,6 +122,12 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
 
     @Override
     protected void doStart() throws Exception {
+        shutdownRequested = false;
+        stoppedByErrorPolicy = false;
+        stoppedByError = null;
+        lastStoppedByErrorReminderMs = 0L;
+        lastEmitTimeMs = 0L;
+
         // Fail-fast: validate shared configuration (Schema Registry, JSON Schema, SASL)
         endpoint.validateConfiguration();
 
@@ -223,6 +239,10 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
         consecutivePollFailures = 0;
         firstPollFailureMs = 0L;
         consecutiveInitFailures = 0;
+        stoppedByErrorPolicy = false;
+        stoppedByError = null;
+        lastStoppedByErrorReminderMs = 0L;
+        lastEmitTimeMs = 0L;
         if (circuitBreaker != null) {
             circuitBreaker.reset();
             circuitBreaker = null;
@@ -372,6 +392,11 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
 
     @Override
     protected int poll() throws Exception {
+        if (stoppedByErrorPolicy) {
+            logStoppedByErrorReminderIfDue();
+            return 0;
+        }
+
         ensureInitialized();
         if (kafkaConsumer == null) {
             LOG.error("[CPI-KAFKA-PLUS-DIAG] poll: kafkaConsumer is null (init failed), skipping poll");
@@ -560,7 +585,11 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
         } catch (WakeupException we) {
             LOG.info("[CPI-KAFKA-PLUS-DIAG] keepAlivePoll: received wakeup signal");
         } catch (Exception e) {
-            LOG.warn("[CPI-KAFKA-PLUS-DIAG] keepAlivePoll: best-effort poll failed: {}", e.getMessage());
+            if (isNonRetryablePollFailure(e)) {
+                handleNonRetryablePollFailure(e);
+            } else {
+                LOG.warn("[CPI-KAFKA-PLUS-DIAG] keepAlivePoll: best-effort poll failed: {}", e.getMessage());
+            }
         }
     }
 
@@ -658,13 +687,97 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
                     t.getCause() != null ? t.getCause().getClass().getName() : "null",
                     t.getCause() != null ? t.getCause().getMessage() : "null",
                     describeTopStack(t, 6));
-            reportConnectionError(t);
-            maybeReconnectAfterPollFailure();
+            if (isNonRetryablePollFailure(t)) {
+                handleNonRetryablePollFailure(t);
+            } else {
+                reportConnectionError(t);
+                maybeReconnectAfterPollFailure();
+            }
             if (t instanceof Exception) {
                 throw (Exception) t;
             }
             throw new RuntimeException("Non-Exception Throwable from poll: " + t.getClass().getName(), t);
         }
+    }
+
+    /**
+     * Returns {@code true} when the poll failure is caused by a permanent configuration or
+     * access problem that cannot heal via reconnects alone. Walks the full cause chain because
+     * Kafka often wraps the effective broker error inside transport/runtime exceptions.
+     * Unknown failures deliberately default to retryable to avoid false-positive permanent stops.
+     */
+    static boolean isNonRetryablePollFailure(Throwable failure) {
+        return findNonRetryablePollFailureCause(failure) != null;
+    }
+
+    private static Throwable findNonRetryablePollFailureCause(Throwable failure) {
+        Throwable current = failure;
+        while (current != null) {
+            if (current instanceof SaslAuthenticationException
+                    || current instanceof AuthenticationException
+                    || current instanceof AuthorizationException
+                    || current instanceof SslAuthenticationException
+                    || current instanceof SSLHandshakeException) {
+                return current;
+            }
+            Throwable next = current.getCause();
+            if (next == current) {
+                break;
+            }
+            current = next;
+        }
+        return null;
+    }
+
+    /**
+     * Builds a clear operator-facing error that explains why the consumer will not retry until
+     * the integration flow is restarted with fixed credentials, permissions, or certificates.
+     */
+    static IllegalStateException buildStoppedByErrorPolicyException(String topic, String groupId, Throwable failure) {
+        Throwable effectiveCause = findNonRetryablePollFailureCause(failure);
+        if (effectiveCause == null) {
+            effectiveCause = failure;
+        }
+        String message = "Non-retryable Kafka consumer poll failure detected for topic='" + topic
+                + "' group='" + groupId + "' (" + effectiveCause.getClass().getSimpleName() + "). "
+                + "Polling has been stopped by error policy. Fix credentials, permissions, or certificates "
+                + "and redeploy the integration flow to resume consumption.";
+        return new IllegalStateException(message, failure);
+    }
+
+    private void handleNonRetryablePollFailure(Throwable failure) {
+        IllegalStateException policyError = buildStoppedByErrorPolicyException(
+                endpoint.getEffectiveTopic(), endpoint.getGroupId(), failure);
+        stoppedByErrorPolicy = true;
+        stoppedByError = policyError;
+        initialized = false;
+        consecutivePollFailures = 0;
+        firstPollFailureMs = 0L;
+        closeConsumerQuietly();
+        connStatus = ConnStatus.ERROR;
+        tracingHelper.publishConnectionStatus(false, policyError);
+        lastStoppedByErrorReminderMs = 0L;
+        logStoppedByErrorReminderIfDue();
+    }
+
+    private void logStoppedByErrorReminderIfDue() {
+        if (!stoppedByErrorPolicy) {
+            return;
+        }
+        long now = System.currentTimeMillis();
+        if (lastStoppedByErrorReminderMs != 0L
+                && (now - lastStoppedByErrorReminderMs) < STOPPED_BY_ERROR_REMINDER_INTERVAL_MS) {
+            return;
+        }
+        Throwable failure = stoppedByError;
+        LOG.error("[CPI-KAFKA-PLUS-DIAG] poll: NON-RETRYABLE failure state active for topic='{}' group='{}'. "
+                        + "Polling remains stopped until operator intervention (fix credentials/permissions/certificates and redeploy). "
+                        + "policyErrorClass={} policyErrorMsg='{}' topStack={}",
+                endpoint.getEffectiveTopic(), endpoint.getGroupId(),
+                failure != null ? failure.getClass().getName() : "null",
+                failure != null ? failure.getMessage() : "null",
+                describeTopStack(failure, 6));
+        lastStoppedByErrorReminderMs = now;
     }
 
     /**

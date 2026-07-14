@@ -27,11 +27,16 @@ import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 
+import javax.net.ssl.SSLHandshakeException;
+
 import org.apache.camel.impl.DefaultCamelContext;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.errors.SaslAuthenticationException;
+import org.apache.kafka.common.errors.TimeoutException;
+import org.apache.kafka.common.errors.TopicAuthorizationException;
 import org.junit.Assert;
 import org.junit.Test;
 
@@ -313,6 +318,55 @@ public class CpiKafkaPlusConsumerTest {
                     60000, consumer.getDelay());
             ctx.stop();
         }
+    }
+
+    @Test
+    public void testIsNonRetryablePollFailureWithSaslAuthenticationException() {
+        Assert.assertTrue(CpiKafkaPlusConsumer.isNonRetryablePollFailure(
+                new SaslAuthenticationException("bad credentials")));
+    }
+
+    @Test
+    public void testIsNonRetryablePollFailureWithTopicAuthorizationException() {
+        Assert.assertTrue(CpiKafkaPlusConsumer.isNonRetryablePollFailure(
+                new TopicAuthorizationException(java.util.Collections.singleton("topic-a"))));
+    }
+
+    @Test
+    public void testIsNonRetryablePollFailureWithSslHandshakeCause() {
+        Assert.assertTrue(CpiKafkaPlusConsumer.isNonRetryablePollFailure(
+                new RuntimeException("wrapped", new SSLHandshakeException("handshake failed"))));
+    }
+
+    @Test
+    public void testIsNonRetryablePollFailureWithWrappedAuthenticationCause() {
+        Assert.assertTrue(CpiKafkaPlusConsumer.isNonRetryablePollFailure(
+                new RuntimeException("wrapped",
+                        new IllegalStateException("mid",
+                                new SaslAuthenticationException("auth failed")))));
+    }
+
+    @Test
+    public void testIsNonRetryablePollFailureWithTimeoutExceptionDefaultsToRetryable() {
+        Assert.assertFalse(CpiKafkaPlusConsumer.isNonRetryablePollFailure(
+                new TimeoutException("broker timeout")));
+    }
+
+    @Test
+    public void testIsNonRetryablePollFailureWithUnknownExceptionDefaultsToRetryable() {
+        Assert.assertFalse(CpiKafkaPlusConsumer.isNonRetryablePollFailure(
+                new RuntimeException("unknown")));
+    }
+
+    @Test
+    public void testBuildStoppedByErrorPolicyExceptionUsesMatchingCauseInMessage() {
+        IllegalStateException ex = CpiKafkaPlusConsumer.buildStoppedByErrorPolicyException(
+                "topic-a", "group-a",
+                new RuntimeException("wrapped", new SSLHandshakeException("cert mismatch")));
+
+        Assert.assertTrue(ex.getMessage().contains("SSLHandshakeException"));
+        Assert.assertTrue(ex.getMessage().contains("topic='topic-a'"));
+        Assert.assertTrue(ex.getMessage().contains("group='group-a'"));
     }
 
     @Test
