@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<ComponentMetadata ComponentId="ctype::Adapter/cname::kafkaAdapterPlus/vendor::FlorianKube/version::1.0.6"
+<ComponentMetadata ComponentId="ctype::Adapter/cname::kafkaAdapterPlus/vendor::FlorianKube/version::1.0.7"
                    ComponentName="kafkaAdapterPlus"
                    UIElementType="Adapter"
                    IsExtension="false"
@@ -14,7 +14,7 @@
     <!-- RECEIVER VARIANT (CPI -> Kafka Producer)                    -->
     <!-- ============================================================ -->
     <Variant VariantName="Kafka_Adapter_Plus_Receiver"
-             VariantId="ctype::AdapterVariant/cname::kafkaAdapterPlus/vendor::FlorianKube/tp::cpi-kafka-plus/mp::cpi-kafka-plus/direction::Receiver/version::1.0.6"
+             VariantId="ctype::AdapterVariant/cname::kafkaAdapterPlus/vendor::FlorianKube/tp::cpi-kafka-plus/mp::cpi-kafka-plus/direction::Receiver/version::1.0.7"
              MetadataVersion="2.0"
              gen:RuntimeComponentBaseUri="cpi-kafka-plus"
              AttachmentBehavior="Preserve"
@@ -68,8 +68,19 @@
                 </AttributeReference>
                 <AttributeReference>
                     <ReferenceName>credentialAlias</ReferenceName>
-                    <description>Name of the 'User Credentials' artifact deployed in CPI Security Material, e.g. kafka-credentials. Username = SASL username or API Key, Password = SASL password or API Secret.</description>
+                    <description>Name of the 'User Credentials' artifact deployed in CPI Security Material, e.g. kafka-credentials. Username = SASL username or API Key, Password = SASL password or API Secret. Required when Security Protocol is SASL_SSL or SASL_PLAINTEXT.</description>
+                    <Restriction>Constraint.isValidRegex(.+)</Restriction>
                     <ErrorMessage>Please enter the alias of a User Credentials artifact from CPI Security Material</ErrorMessage>
+                    <OrCondition>
+                        <EditCondition>
+                            <AttributeName>securityProtocol</AttributeName>
+                            <AttributeValue>SASL_SSL</AttributeValue>
+                        </EditCondition>
+                        <EditCondition>
+                            <AttributeName>securityProtocol</AttributeName>
+                            <AttributeValue>SASL_PLAINTEXT</AttributeValue>
+                        </EditCondition>
+                    </OrCondition>
                 </AttributeReference>
             </AttributeGroup>
         </Tab>
@@ -117,13 +128,13 @@
                 </GuiLabels>
                 <AttributeReference>
                     <ReferenceName>maxRequestSizeKb</ReferenceName>
-                    <description>Maximum size of a single produce request in kilobytes. Default: 1024 KB (1 MB). Increase if your messages exceed 1 MB. Must also be allowed by the broker's message.max.bytes setting.</description>
-                    <ErrorMessage>Please enter a positive number in KB (e.g. 1024 for 1 MB)</ErrorMessage>
+                    <description>Maximum size of a single produce request in kilobytes. Default: 5120 KB (5 MB). Increase if your messages exceed 5 MB. Must also be allowed by the broker's message.max.bytes setting.</description>
+                    <ErrorMessage>Please enter a positive number in KB (e.g. 5120 for 5 MB)</ErrorMessage>
                 </AttributeReference>
                 <AttributeReference>
                     <ReferenceName>producerBatchSizeKb</ReferenceName>
-                    <description>Maximum size of a producer batch in kilobytes. Default: 16 KB. The producer groups records into batches per partition for efficiency.</description>
-                    <ErrorMessage>Please enter a positive number in KB (e.g. 16)</ErrorMessage>
+                    <description>Maximum size of a producer batch in kilobytes. Default: 1024 KB (1 MB). The producer groups records into batches per partition for efficiency.</description>
+                    <ErrorMessage>Please enter a positive number in KB (e.g. 1024 for 1 MB)</ErrorMessage>
                 </AttributeReference>
                 <AttributeReference>
                     <ReferenceName>bufferMemoryKb</ReferenceName>
@@ -307,7 +318,7 @@
         <Length>200</Length>
         <isparameterized>true</isparameterized>
         <GuiLabels guid="b1000002-0000-0000-0000-000000000003">
-            <Label language="EN">SASL Credential Alias</Label>
+            <Label language="EN">Credential Alias</Label>
         </GuiLabels>
     </AttributeMetadata>
 
@@ -489,7 +500,7 @@
         <Name>maxRequestSizeKb</Name>
         <Usage>false</Usage>
         <DataType>xsd:integer</DataType>
-        <Default>1024</Default>
+        <Default>5120</Default>
         <Length/>
         <isparameterized>true</isparameterized>
         <GuiLabels guid="b1000004-0000-0000-0000-000000000003"><Label language="EN">Max Request Size (KB)</Label></GuiLabels>
@@ -498,7 +509,7 @@
         <Name>producerBatchSizeKb</Name>
         <Usage>false</Usage>
         <DataType>xsd:integer</DataType>
-        <Default>249</Default>
+        <Default>1024</Default>
         <Length/>
         <isparameterized>true</isparameterized>
         <GuiLabels guid="b1000004-0000-0000-0000-000000000005"><Label language="EN">Batch Size (KB)</Label></GuiLabels>

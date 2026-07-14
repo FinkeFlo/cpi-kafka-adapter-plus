@@ -137,13 +137,13 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
             description = "Compression type: none, gzip, lz4, zstd")
     private String compressionType = "none";
 
-    @UriParam(label = "producer", defaultValue = "1024",
-            description = "Maximum size of a request in kilobytes. Default: 1024 KB (1 MB).")
-    private int maxRequestSizeKb = 1024;
+    @UriParam(label = "producer", defaultValue = "5120",
+            description = "Maximum size of a request in kilobytes. Default: 5120 KB (5 MB).")
+    private int maxRequestSizeKb = 5120;
 
-    @UriParam(label = "producer", defaultValue = "249",
-            description = "Producer batch size in kilobytes. Default: 249 KB (fits within CPI 250 KB message size tier with overhead buffer).")
-    private int producerBatchSizeKb = 249;
+    @UriParam(label = "producer", defaultValue = "1024",
+            description = "Producer batch size in kilobytes. Default: 1024 KB (1 MB).")
+    private int producerBatchSizeKb = 1024;
 
     @UriParam(label = "producer", defaultValue = "32768",
             description = "Total memory for producer buffering in kilobytes. Default: 32768 KB (32 MB).")
