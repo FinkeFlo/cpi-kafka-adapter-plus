@@ -19,11 +19,11 @@ Custom Apache Kafka adapter for SAP Cloud Integration (CPI) built with the SAP A
 
 The adapter follows the standard Apache Camel component model:
 
-```
-Component (cpi-kafka-plus)
-  └── Endpoint (cpi-kafka-plus:topicName)
-        ├── Consumer (Sender direction: Kafka → CPI)
-        └── Producer (Receiver direction: CPI → Kafka)
+```mermaid
+flowchart TD
+    A["Component (cpi-kafka-plus)"] --> B["Endpoint (cpi-kafka-plus:topic)"]
+    B --> C["Consumer\n(Sender direction: Kafka → CPI)"]
+    B --> D["Producer\n(Receiver direction: CPI → Kafka)"]
 ```
 
 ## Next Steps

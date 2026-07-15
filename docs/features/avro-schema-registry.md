@@ -29,13 +29,13 @@ To consume Avro-encoded messages:
 4. Set `schemaRegistryCredentialAlias` if authentication is required
 5. Choose `avroOutputFormat` (`JSON` or `XML`) for the deserialized output
 
-```
-schemaRegistryEnabled = true
-avroValueDeserialization = true
-schemaRegistryUrl = https://schema-registry:8081
-schemaRegistryCredentialAlias = SchemaRegistryCreds
-avroOutputFormat = JSON
-```
+| Parameter | Value |
+|---|---|
+| `schemaRegistryEnabled` | `true` |
+| `avroValueDeserialization` | `true` |
+| `schemaRegistryUrl` | `https://schema-registry:8081` |
+| `schemaRegistryCredentialAlias` | `SchemaRegistryCreds` |
+| `avroOutputFormat` | `JSON` |
 
 The adapter deserializes the Avro binary payload using the schema from the registry and converts it to the specified output format before passing it to the IFlow.
 
@@ -49,13 +49,13 @@ To produce Avro-encoded messages:
 4. Set `schemaRegistryCredentialAlias` if authentication is required
 5. Optionally enable `autoRegisterSchemas`
 
-```
-schemaRegistryEnabled = true
-avroValueSerialization = true
-schemaRegistryUrl = https://schema-registry:8081
-schemaRegistryCredentialAlias = SchemaRegistryCreds
-autoRegisterSchemas = false
-```
+| Parameter | Value |
+|---|---|
+| `schemaRegistryEnabled` | `true` |
+| `avroValueSerialization` | `true` |
+| `schemaRegistryUrl` | `https://schema-registry:8081` |
+| `schemaRegistryCredentialAlias` | `SchemaRegistryCreds` |
+| `autoRegisterSchemas` | `false` |
 
 ## Subject Naming Strategy
 
