@@ -1,21 +1,21 @@
 # Producer Batch Send
 
-## Ueberblick
+## Overview
 
-Der Producer kann einen Exchange-Body mit mehreren Records (JSON oder XML) entgegennehmen
-und jeden als eigene Kafka-Message senden. Intern wird async send + flush verwendet
-fuer maximalen Durchsatz.
+The producer can accept an exchange body containing multiple records (JSON or XML)
+and send each one as its own Kafka message. Internally it uses async send + flush
+for maximum throughput.
 
-**Kernprinzip:** Spiegelbildlich zum Consumer-Batching. Was der Consumer als `JSON_ARRAY`
-oder `XML_LIST` ausgibt, kann der Producer direkt als Input verwenden.
+**Core principle:** Mirrors the consumer batching. Whatever the consumer outputs as
+`JSON_ARRAY` or `XML_LIST` can be used directly as producer input.
 
-## Konfiguration
+## Configuration
 
-| Parameter | Default | Beschreibung |
+| Parameter | Default | Description |
 |-----------|---------|-------------|
-| **Batch Send Mode** | `NONE` | `NONE` = 1 Exchange = 1 Kafka-Message. `JSON_ARRAY` = JSON-Array splitten. `XML_LIST` = XML kafkaRecords splitten. |
+| **Batch Send Mode** | `NONE` | `NONE` = 1 exchange = 1 Kafka message. `JSON_ARRAY` = split a JSON array. `XML_LIST` = split XML `kafkaRecords`. |
 
-## Input-Formate
+## Input formats
 
 ### JSON_ARRAY
 
@@ -27,13 +27,13 @@ oder `XML_LIST` ausgibt, kann der Producer direkt als Input verwenden.
 ]
 ```
 
-**Regeln:**
-- Root muss ein JSON-Array sein
-- Jedes Element muss mindestens `value` enthalten
-- `key` ist optional (wenn fehlend: Fallback auf `kafka.KEY` Header, dann `null`)
-- `value` als JSON-Objekt wird zu JSON-String serialisiert
-- `value: null` erzeugt eine Kafka-Tombstone-Nachricht
-- Unbekannte Felder (`topic`, `partition`, `offset`, `timestamp`) werden ignoriert
+**Rules:**
+- Root must be a JSON array
+- Each element must contain at least `value`
+- `key` is optional (if missing: falls back to the `kafka.KEY` header, then `null`)
+- A `value` given as a JSON object is serialized to a JSON string
+- `value: null` produces a Kafka tombstone message
+- Unknown fields (`topic`, `partition`, `offset`, `timestamp`) are ignored
 
 ### XML_LIST
 
@@ -49,37 +49,37 @@ oder `XML_LIST` ausgibt, kann der Producer direkt als Input verwenden.
 </kafkaRecords>
 ```
 
-**Regeln:**
-- Root-Element muss `<kafkaRecords>` sein
-- Jedes `<record>` muss mindestens `<value>` enthalten
-- `<key>` ist optional; fehlend = null Key, leer = expliziter Empty-String-Key
-- `<value/>` (leer) erzeugt eine Tombstone-Nachricht
-- Bei XML-Inhalt als Value: **CDATA verwenden** (empfohlen)
-- Unbekannte Elemente werden ignoriert (Round-Trip-Symmetrie mit Consumer)
+**Rules:**
+- Root element must be `<kafkaRecords>`
+- Each `<record>` must contain at least `<value>`
+- `<key>` is optional; missing = null key, empty = explicit empty-string key
+- An empty `<value/>` produces a tombstone message
+- For XML content as a value: **use CDATA** (recommended)
+- Unknown elements are ignored (round-trip symmetry with the consumer)
 
-## Key-Handling
+## Key handling
 
-Prioritaet (von hoch nach niedrig):
+Priority (high to low):
 
-1. `key` im Record (JSON-Feld oder XML-Element)
-2. `kafka.KEY` Exchange-Header (Fallback)
-3. Kein Key → `null` (Kafka round-robin Partitioning)
+1. `key` in the record (JSON field or XML element)
+2. `kafka.KEY` exchange header (fallback)
+3. No key → `null` (Kafka round-robin partitioning)
 
 ## Response
 
 ### Headers
 
-| Header | Beschreibung |
+| Header | Description |
 |--------|-------------|
-| `SAP_Receiver` | Topic-Name (MPL-Monitoring) |
+| `SAP_Receiver` | Topic name (MPL monitoring) |
 | `CamelKafkaTopic` | Topic |
-| `CpiKafkaPlusBatchRecordCount` | Anzahl gesendeter Records |
-| `CpiKafkaPlusBatchInputFormat` | Konfigurierter Batch-Mode |
-| `CpiKafkaPlusBatchFirstOffset` | Offset des ersten Records |
-| `CpiKafkaPlusBatchLastOffset` | Offset des letzten Records |
-| `CpiKafkaPlusBatchPartitions` | Beteiligte Partitionen (kommasepariert) |
+| `CpiKafkaPlusBatchRecordCount` | Number of records sent |
+| `CpiKafkaPlusBatchInputFormat` | Configured batch mode |
+| `CpiKafkaPlusBatchFirstOffset` | Offset of the first record |
+| `CpiKafkaPlusBatchLastOffset` | Offset of the last record |
+| `CpiKafkaPlusBatchPartitions` | Partitions involved (comma-separated) |
 
-### Body — XML-Summary
+### Body — XML summary
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -94,28 +94,28 @@ Prioritaet (von hoch nach niedrig):
 </kafkaBatchResult>
 ```
 
-Bei Fehler bleibt der Body unveraendert (fuer Debugging).
+On error, the body is left unchanged (for debugging).
 
-## Fehlerbehandlung
+## Error handling
 
-- **Parsing-Fehler:** Klare Exception mit Fehlerbeschreibung und Record-Index → MPL-Error
-- **Send-Fehler:** Fail-Fast bei erstem Fehler, bereits gesendete Records bleiben bei Kafka
-- **Fatal-Fehler (Auth/Authorization):** Reconnect wird automatisch ausgeloest
+- **Parsing error:** Clear exception with error description and record index → MPL error
+- **Send error:** Fail-fast on the first error; records already sent remain in Kafka
+- **Fatal error (auth/authorization):** Reconnect is triggered automatically
 
-## Einschraenkungen (v1)
+## Limitations (v1)
 
-- JSON Schema Validation wird im Batch-Mode uebersprungen (Warnung im Log)
-- `kafka.PARTITION_KEY` und `kafka.OVERRIDE_TIMESTAMP` gelten fuer alle Records im Batch
-- Exchange-Headers werden auf alle Kafka-Records kopiert (keine per-Record-Headers)
-- Avro-Serialisierung ist im Batch-Mode nicht unterstuetzt (v1)
+- JSON Schema validation is skipped in batch mode (logged as a warning)
+- `kafka.PARTITION_KEY` and `kafka.OVERRIDE_TIMESTAMP` apply to all records in the batch
+- Exchange headers are copied to all Kafka records (no per-record headers)
+- Avro serialization is not supported in batch mode (v1)
 
 ---
 
-## CPI-Anleitung: Batch-Input erstellen
+## CPI guide: building batch input
 
-### JSON-Batch per Groovy-Script
+### JSON batch via Groovy script
 
-Typischer Use-Case: Daten aus DB-Abfrage oder API als Batch an Kafka senden.
+Typical use case: send data from a DB query or API call to Kafka as a batch.
 
 ```groovy
 import com.sap.gateway.ip.core.customdev.util.Message
@@ -135,9 +135,9 @@ def Message processData(Message message) {
 }
 ```
 
-### XML-Batch per XSLT-Mapping
+### XML batch via XSLT mapping
 
-Typischer Use-Case: SAP IDoc oder SOAP-Response mit Wiederholgruppen an Kafka senden.
+Typical use case: send an SAP IDoc or SOAP response with repeating groups to Kafka.
 
 ```xslt
 <?xml version="1.0" encoding="UTF-8"?>
@@ -160,7 +160,7 @@ Typischer Use-Case: SAP IDoc oder SOAP-Response mit Wiederholgruppen an Kafka se
 </xsl:stylesheet>
 ```
 
-### XML-Batch per Groovy (empfohlen fuer XML-Values)
+### XML batch via Groovy (recommended for XML values)
 
 ```groovy
 import com.sap.gateway.ip.core.customdev.util.Message
@@ -186,11 +186,11 @@ def Message processData(Message message) {
 }
 ```
 
-### Hinweis: CDATA fuer XML-Values
+### Note: CDATA for XML values
 
-Bei XML-Inhalt als Value immer CDATA verwenden:
+Always use CDATA for XML content used as a value:
 
-- **XSLT:** `cdata-section-elements="value"` im `<xsl:output>`
-- **Groovy:** `<![CDATA[...]]>` manuell einsetzen
+- **XSLT:** `cdata-section-elements="value"` in `<xsl:output>`
+- **Groovy:** insert `<![CDATA[...]]>` manually
 
-Der XML-Parser uneskaped CDATA automatisch.
+The XML parser automatically un-escapes CDATA.
