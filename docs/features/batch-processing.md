@@ -144,6 +144,58 @@ Topic has 1,200 messages, 5 msg/s continue to arrive:
 
 Without a threshold (default 0), drain would continue in iteration 4 and also fetch the 30 remaining records. With a threshold > 0, drain stops earlier and leaves small remaining batches for the next regular poll cycle.
 
+=== "Start"
+
+    | Metric | Value |
+    |---|---|
+    | Committed offset | 10,000 |
+    | Log-end offset (broker) | 11,200 |
+    | **Lag** | **1,200** |
+
+    Topic has a backlog of 1,200 messages. `Drain Backlog = ON`, `Min Backlog to Drain = 100`.
+
+=== "Iteration 1"
+
+    | Metric | Value |
+    |---|---|
+    | `poll()` returns | 500 records (offsets 10,000–10,499) |
+    | Committed offset (after) | 10,500 |
+    | Log-end offset (broker) | 11,215 *(+15 new arrivals)* |
+    | **Lag** | **715** |
+    | Check | 500 ≥ 100 → continue |
+
+=== "Iteration 2"
+
+    | Metric | Value |
+    |---|---|
+    | `poll()` returns | 500 records (offsets 10,500–10,999) |
+    | Committed offset (after) | 11,000 |
+    | Log-end offset (broker) | 11,230 *(+15 new arrivals)* |
+    | **Lag** | **230** |
+    | Check | 500 ≥ 100 → continue |
+
+=== "Iteration 3"
+
+    | Metric | Value |
+    |---|---|
+    | `poll()` returns | 220 records (offsets 11,000–11,219) |
+    | Committed offset (after) | 11,220 |
+    | Log-end offset (broker) | 11,250 *(+20 new arrivals)* |
+    | **Lag** | **30** |
+    | Check | 220 ≥ 100 → continue |
+
+=== "Iteration 4 (stop)"
+
+    | Metric | Value |
+    |---|---|
+    | `poll()` returns | 30 records (offsets 11,220–11,249) |
+    | Committed offset (after) | 11,250 |
+    | Log-end offset (broker) | ~11,250 |
+    | **Lag** | **~0** |
+    | Check | 30 < 100 → **STOP** |
+
+    Drain stops. The topic is almost empty; any further trickle of new messages is picked up on the next regular poll cycle (`pollingIntervalSeconds` later).
+
 ### No max.poll.interval.ms risk
 
 Kafka removes a consumer from the group if it does not call `poll()` within `max.poll.interval.ms`. The drain loop calls `kafkaConsumer.poll()` in every iteration, so this timer is reset on each pass and the loop cannot trip it.
