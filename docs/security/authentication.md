@@ -38,13 +38,42 @@ credentialAlias = MyKafkaCredentials
 
 Supported SCRAM mechanisms: `SCRAM-SHA-256` and `SCRAM-SHA-512`.
 
-## SSL/TLS (mTLS)
+## SSL/TLS and mTLS
+
+For broker connections that need a private/custom CA and/or client certificate
+authentication, configure a CPI keystore alias:
+
+```
+securityProtocol = SSL
+sslKeystoreAlias = MyKafkaKeystore
+```
+
+Or, when SASL and custom TLS material are both required:
+
+```
+securityProtocol = SASL_SSL
+saslMechanism = PLAIN
+credentialAlias = MyKafkaCredentials
+sslKeystoreAlias = MyKafkaKeystore
+```
+
+How it works at runtime:
+
+- If `sslKeystoreAlias` is **empty**, the Kafka client behaves as before and uses
+  the JVM default truststore. This is the right choice for publicly trusted
+  brokers such as Confluent Cloud.
+- If `sslKeystoreAlias` is **set**, the adapter creates a Kafka `SslEngineFactory`
+  backed by CPI's `KeystoreService`.
+- CPI trust managers are used for custom/private CA validation.
+- If the configured alias also contains a client keypair, the same setup enables
+  mutual TLS (mTLS).
 
 ## CPI Secure Store
 
 All credentials are managed through the SAP CPI Secure Store:
 
 - **User Credentials**: Username/password pairs for SASL and Schema Registry authentication
+- **Keystore entries**: Private keys/certificates and trusted CA certificates for SSL/TLS
 
 Credential artifacts are referenced by their **alias** in the adapter configuration. The adapter resolves them at runtime via the `ITApiFactory`.
 
@@ -54,5 +83,6 @@ Credential artifacts are referenced by their **alias** in the adapter configurat
 ## Recommendations
 
 - Use `SASL_SSL` for managed Kafka services (Confluent Cloud, Amazon MSK)
-- Use `SSL` (mTLS) when your organization requires certificate-based authentication
+- Leave `sslKeystoreAlias` empty for public-CA brokers
+- Set `sslKeystoreAlias` when your organization uses a private CA or requires mTLS
 - Avoid `PLAINTEXT` and `SASL_PLAINTEXT` in production environments

@@ -62,6 +62,11 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
             description = "Credential alias for SASL username/password from CPI Secure Store")
     private String credentialAlias;
 
+    @UriParam(label = "security",
+            description = "Optional CPI Keystore alias for custom broker CAs and/or client certificates (mTLS). "
+                    + "Leave empty to use the JVM default truststore only.")
+    private String sslKeystoreAlias;
+
     // --- Processing ---
     @UriParam(label = "processing", defaultValue = "5",
             description = "Time in seconds between poll cycles. Range: 1 to 21600 (1 second to 6 hours). "
@@ -364,6 +369,9 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
 
     public String getCredentialAlias() { return credentialAlias; }
     public void setCredentialAlias(String credentialAlias) { this.credentialAlias = credentialAlias; }
+
+    public String getSslKeystoreAlias() { return sslKeystoreAlias; }
+    public void setSslKeystoreAlias(String sslKeystoreAlias) { this.sslKeystoreAlias = sslKeystoreAlias; }
 
     public long getPollingIntervalSeconds() { return pollingIntervalSeconds; }
     public void setPollingIntervalSeconds(long pollingIntervalSeconds) { this.pollingIntervalSeconds = pollingIntervalSeconds; }

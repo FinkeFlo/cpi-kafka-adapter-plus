@@ -20,6 +20,8 @@
  */
 package com.finkeflo.cpi.kafka;
 
+import static org.awaitility.Awaitility.await;
+
 import java.time.Duration;
 import java.util.Collection;
 import java.util.Collections;
@@ -130,14 +132,18 @@ public class AvroSerializationIT {
 
         try (KafkaConsumer<byte[], Object> consumer = new KafkaConsumer<byte[], Object>(props)) {
             consumer.subscribe(Collections.singletonList(topic));
-            long deadline = System.currentTimeMillis() + 10000L;
-            while (System.currentTimeMillis() < deadline) {
-                ConsumerRecords<byte[], Object> records = consumer.poll(Duration.ofMillis(500));
-                for (ConsumerRecord<byte[], Object> record : records) {
-                    return (GenericRecord) record.value();
-                }
-            }
+            final GenericRecord[] foundRecord = new GenericRecord[1];
+            await().atMost(Duration.ofSeconds(10))
+                    .pollInterval(Duration.ofMillis(500))
+                    .until(() -> {
+                        ConsumerRecords<byte[], Object> records = consumer.poll(Duration.ofMillis(500));
+                        for (ConsumerRecord<byte[], Object> record : records) {
+                            foundRecord[0] = (GenericRecord) record.value();
+                            return true;
+                        }
+                        return false;
+                    });
+            return foundRecord[0];
         }
-        return null;
     }
 }

@@ -20,8 +20,11 @@
  */
 package com.finkeflo.cpi.kafka;
 
+import static org.awaitility.Awaitility.await;
+
 import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -41,6 +44,7 @@ import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.header.Header;
 import org.apache.kafka.common.serialization.ByteArraySerializer;
 import org.apache.kafka.common.serialization.StringSerializer;
+import org.awaitility.core.ConditionTimeoutException;
 import org.junit.AfterClass;
 import org.junit.Assert;
 import org.junit.BeforeClass;
@@ -199,18 +203,20 @@ public class ConsumerPoisonPillIT {
         Method pollMethod = CpiKafkaPlusConsumer.class.getDeclaredMethod("poll");
         pollMethod.setAccessible(true);
 
-        // We need multiple poll cycles: assignment, drain valid records, hit poison-pill,
-        // route to DLQ + seek, then drain remaining records. 30 cycles * 500ms = 15s ceiling.
-        int totalProcessed = 0;
-        for (int i = 0; i < 30; i++) {
-            int polled = (Integer) pollMethod.invoke(consumer);
-            totalProcessed += polled;
-            if (totalProcessed >= targetExchanges) {
-                // One extra cycle in case there is anything else queued.
-                pollMethod.invoke(consumer);
-                return;
-            }
-            Thread.sleep(500);
+        final int[] totalProcessed = new int[1];
+        try {
+            await().atMost(Duration.ofSeconds(15))
+                    .pollInterval(Duration.ofMillis(500))
+                    .until(() -> {
+                        totalProcessed[0] += (Integer) pollMethod.invoke(consumer);
+                        if (totalProcessed[0] >= targetExchanges) {
+                            pollMethod.invoke(consumer);
+                            return true;
+                        }
+                        return false;
+                    });
+        } catch (ConditionTimeoutException ignored) {
+            // Later assertions validate whether processing reached the expected state.
         }
     }
 

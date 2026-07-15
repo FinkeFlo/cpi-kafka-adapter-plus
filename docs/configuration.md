@@ -17,6 +17,7 @@ All adapter parameters are configured on the `CpiKafkaPlusEndpoint`. Parameters 
 | `securityProtocol` | `SASL_SSL` | Security protocol: `PLAINTEXT`, `SSL`, `SASL_PLAINTEXT`, `SASL_SSL`. |
 | `saslMechanism` | `PLAIN` | SASL mechanism: `PLAIN`, `SCRAM-SHA-256`, `SCRAM-SHA-512`. |
 | `credentialAlias` | — | Credential alias for SASL username/password from CPI Secure Store. |
+| `sslKeystoreAlias` | — | Optional CPI Keystore alias for custom broker CAs and/or client certificates (mTLS). Leave empty for public-CA brokers. |
 
 For detailed security setup, see [Authentication](security/authentication.md).
 

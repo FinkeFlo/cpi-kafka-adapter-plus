@@ -20,10 +20,27 @@
  */
 package com.finkeflo.cpi.kafka;
 
+import java.security.SecureRandom;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Properties;
+import java.util.concurrent.atomic.AtomicReference;
+
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLEngine;
+
+import org.apache.kafka.common.config.SslConfigs;
+import org.junit.After;
 import org.junit.Assert;
 import org.junit.Test;
 
 public class SecurityConfigHelperTest {
+
+    @After
+    public void resetResolvers() {
+        CredentialHelper.setCredentialResolver(null);
+        CredentialHelper.setSslContextResolver(null);
+    }
 
     @Test
     public void testBuildJaasConfigPlain() {
@@ -75,5 +92,68 @@ public class SecurityConfigHelperTest {
         Assert.assertEquals(
                 "org.apache.kafka.common.security.plain.PlainLoginModule required username=\"user\\\"name\" password=\"pass\";",
                 result);
+    }
+
+    @Test
+    public void testConfigureSslWithoutKeystoreAliasUsesDefaultTruststoreBehavior() {
+        Properties props = new Properties();
+        CpiKafkaPlusEndpoint endpoint = new CpiKafkaPlusEndpoint();
+        endpoint.setSecurityProtocol("SSL");
+        endpoint.setSslKeystoreAlias("   ");
+
+        SecurityConfigHelper.configureSecurityProperties(props, endpoint);
+
+        Assert.assertEquals("TLSv1.3", props.getProperty(SslConfigs.SSL_PROTOCOL_CONFIG));
+        Assert.assertNull(props.getProperty(SslConfigs.SSL_ENGINE_FACTORY_CLASS_CONFIG));
+        Assert.assertNull(props.getProperty(CpiKafkaPlusSslEngineFactory.SSL_KEYSTORE_ALIAS_CONFIG));
+    }
+
+    @Test
+    public void testConfigureSslWithKeystoreAliasRegistersCustomSslEngineFactory() {
+        Properties props = new Properties();
+        CpiKafkaPlusEndpoint endpoint = new CpiKafkaPlusEndpoint();
+        endpoint.setSecurityProtocol("SSL");
+        endpoint.setSslKeystoreAlias("tenant-kafka");
+
+        SecurityConfigHelper.configureSecurityProperties(props, endpoint);
+
+        Assert.assertEquals("TLSv1.3", props.getProperty(SslConfigs.SSL_PROTOCOL_CONFIG));
+        Assert.assertEquals(CpiKafkaPlusSslEngineFactory.class.getName(),
+                props.getProperty(SslConfigs.SSL_ENGINE_FACTORY_CLASS_CONFIG));
+        Assert.assertEquals("tenant-kafka",
+                props.getProperty(CpiKafkaPlusSslEngineFactory.SSL_KEYSTORE_ALIAS_CONFIG));
+    }
+
+    @Test
+    public void testCustomSslEngineFactoryBuildsClientEngineFromInjectedSslContext() throws Exception {
+        final AtomicReference<String> resolvedAlias = new AtomicReference<String>();
+        final SSLContext sslContext = SSLContext.getInstance("TLS");
+        sslContext.init(null, null, new SecureRandom());
+
+        CredentialHelper.setSslContextResolver(new CredentialHelper.SslContextResolver() {
+            public SSLContext resolveSslContext(String alias) {
+                resolvedAlias.set(alias);
+                return sslContext;
+            }
+        });
+
+        CpiKafkaPlusSslEngineFactory factory = new CpiKafkaPlusSslEngineFactory();
+        Map<String, Object> configs = new HashMap<String, Object>();
+        configs.put(CpiKafkaPlusSslEngineFactory.SSL_KEYSTORE_ALIAS_CONFIG, "tenant-kafka");
+        configs.put(SslConfigs.SSL_ENDPOINT_IDENTIFICATION_ALGORITHM_CONFIG, "HTTPS");
+        configs.put(SslConfigs.SSL_ENABLED_PROTOCOLS_CONFIG, "TLSv1.3");
+
+        factory.configure(configs);
+        SSLEngine engine = factory.createClientSslEngine("broker.example.com", 9093, null);
+
+        Assert.assertEquals("tenant-kafka", resolvedAlias.get());
+        Assert.assertTrue(engine.getUseClientMode());
+        Assert.assertArrayEquals(new String[] { "TLSv1.3" }, engine.getEnabledProtocols());
+        Assert.assertEquals("HTTPS", engine.getSSLParameters().getEndpointIdentificationAlgorithm());
+        Assert.assertFalse(factory.shouldBeRebuilt(configs));
+
+        Map<String, Object> changedConfigs = new HashMap<String, Object>(configs);
+        changedConfigs.put(CpiKafkaPlusSslEngineFactory.SSL_KEYSTORE_ALIAS_CONFIG, "other-alias");
+        Assert.assertTrue(factory.shouldBeRebuilt(changedConfigs));
     }
 }
