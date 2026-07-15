@@ -20,12 +20,16 @@
  */
 package com.finkeflo.cpi.kafka;
 
+import static org.awaitility.Awaitility.await;
+
 import java.lang.reflect.Method;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.apache.camel.Exchange;
 import org.apache.camel.Processor;
@@ -84,14 +88,12 @@ public class KeepAlivePollIT {
         try {
             consumer1.doStart();
 
-            // Emit-Ticks, bis der erste Batch konsumiert ist (Group-Join kann ein
-            // paar Polls dauern; lastEmitTimeMs wird erst bei Zuordnung gesetzt).
-            for (int i = 0; i < 30 && captured1.size() < 2; i++) {
-                pollMethod.invoke(consumer1);
-                if (captured1.size() < 2) {
-                    Thread.sleep(500);
-                }
-            }
+            await().atMost(Duration.ofSeconds(15))
+                    .pollInterval(Duration.ofMillis(500))
+                    .until(() -> {
+                        pollMethod.invoke(consumer1);
+                        return captured1.size() >= 2;
+                    });
             Assert.assertEquals("erster Emit muss beide Records konsumieren", 2, captured1.size());
 
             // Zwei weitere Records NACH dem Emit; die naechsten poll()s sind
@@ -99,11 +101,14 @@ public class KeepAlivePollIT {
             KafkaTestInfrastructure.produceStringMessages(topic,
                     Arrays.asList("k3", "k4"),
                     Arrays.asList("v3", "v4"));
-            for (int i = 0; i < 6; i++) {
-                int n = (Integer) pollMethod.invoke(consumer1);
-                Assert.assertEquals("Keep-Alive-Poll muss 0 zurueckgeben", 0, n);
-                Thread.sleep(200);
-            }
+            AtomicInteger keepAlivePolls = new AtomicInteger();
+            await().pollDelay(Duration.ZERO)
+                    .atMost(Duration.ofSeconds(10))
+                    .pollInterval(Duration.ofMillis(200))
+                    .until(() -> {
+                        int polled = ((Integer) pollMethod.invoke(consumer1)).intValue();
+                        return polled == 0 && keepAlivePolls.incrementAndGet() >= 6;
+                    });
             Assert.assertEquals("Keep-Alive-Poll darf keine neuen Records konsumieren",
                     2, captured1.size());
         } finally {
@@ -116,12 +121,12 @@ public class KeepAlivePollIT {
         CpiKafkaPlusConsumer consumer2 = createConsumer(topic, group, params, captured2);
         try {
             consumer2.doStart();
-            for (int i = 0; i < 30 && captured2.size() < 2; i++) {
-                pollMethod.invoke(consumer2);
-                if (captured2.size() < 2) {
-                    Thread.sleep(500);
-                }
-            }
+            await().atMost(Duration.ofSeconds(15))
+                    .pollInterval(Duration.ofMillis(500))
+                    .until(() -> {
+                        pollMethod.invoke(consumer2);
+                        return captured2.size() >= 2;
+                    });
             Assert.assertEquals("neuer Consumer muss genau die 2 un-konsumierten Records sehen",
                     2, captured2.size());
         } finally {

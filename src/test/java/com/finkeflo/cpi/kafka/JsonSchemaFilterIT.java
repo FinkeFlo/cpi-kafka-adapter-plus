@@ -20,8 +20,11 @@
  */
 package com.finkeflo.cpi.kafka;
 
+import static org.awaitility.Awaitility.await;
+
 import java.lang.reflect.Method;
 import java.net.URLEncoder;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -32,6 +35,7 @@ import org.apache.camel.Exchange;
 import org.apache.camel.Processor;
 import org.apache.camel.impl.DefaultCamelContext;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.awaitility.core.ConditionTimeoutException;
 import org.junit.AfterClass;
 import org.junit.Assert;
 import org.junit.BeforeClass;
@@ -294,12 +298,12 @@ public class JsonSchemaFilterIT {
         Method pollMethod = CpiKafkaPlusConsumer.class.getDeclaredMethod("poll");
         pollMethod.setAccessible(true);
 
-        for (int i = 0; i < 10; i++) {
-            int polled = (Integer) pollMethod.invoke(consumer);
-            if (polled > 0) {
-                break;
-            }
-            Thread.sleep(500);
+        try {
+            await().atMost(Duration.ofSeconds(5))
+                    .pollInterval(Duration.ofMillis(500))
+                    .until(() -> (Integer) pollMethod.invoke(consumer) > 0);
+        } catch (ConditionTimeoutException ignored) {
+            // Some call sites intentionally verify that a follow-up poll stays empty.
         }
     }
 }
