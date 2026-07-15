@@ -51,6 +51,7 @@ public class CpiKafkaPlusComponentTest {
         endpoint.setSecurityProtocol("SASL_SSL");
         endpoint.setSaslMechanism("PLAIN");
         endpoint.setCredentialAlias("myAlias");
+        endpoint.setSslKeystoreAlias("tenant-keystore");
 
         Assert.assertEquals("localhost:9092", endpoint.getBootstrapServers());
         Assert.assertEquals("test-topic", endpoint.getTopic());
@@ -64,6 +65,7 @@ public class CpiKafkaPlusComponentTest {
         Assert.assertEquals("SASL_SSL", endpoint.getSecurityProtocol());
         Assert.assertEquals("PLAIN", endpoint.getSaslMechanism());
         Assert.assertEquals("myAlias", endpoint.getCredentialAlias());
+        Assert.assertEquals("tenant-keystore", endpoint.getSslKeystoreAlias());
     }
 
     @Test
@@ -101,6 +103,7 @@ public class CpiKafkaPlusComponentTest {
         Assert.assertEquals(0, endpoint.getMinBacklogToDrain());
         Assert.assertEquals("SASL_SSL", endpoint.getSecurityProtocol());
         Assert.assertEquals("PLAIN", endpoint.getSaslMechanism());
+        Assert.assertNull(endpoint.getSslKeystoreAlias());
         Assert.assertEquals("JSON", endpoint.getAvroOutputFormat());
         Assert.assertFalse(endpoint.isSchemaRegistryEnabled());
         Assert.assertNull(endpoint.getSchemaRegistryUrl());

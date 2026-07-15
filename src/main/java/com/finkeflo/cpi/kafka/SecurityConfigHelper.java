@@ -22,6 +22,7 @@ package com.finkeflo.cpi.kafka;
 
 import java.util.Properties;
 
+import org.apache.kafka.common.config.SslConfigs;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -32,6 +33,7 @@ import org.slf4j.LoggerFactory;
 public final class SecurityConfigHelper {
 
     private static final Logger LOG = LoggerFactory.getLogger(SecurityConfigHelper.class);
+    private static final String DEFAULT_SSL_PROTOCOL = "TLSv1.3";
 
     private SecurityConfigHelper() {}
 
@@ -81,7 +83,16 @@ public final class SecurityConfigHelper {
     }
 
     private static void configureSsl(Properties props, CpiKafkaPlusEndpoint endpoint) {
-        props.put("ssl.protocol", "TLSv1.3");
+        props.put(SslConfigs.SSL_PROTOCOL_CONFIG, DEFAULT_SSL_PROTOCOL);
+
+        String sslKeystoreAlias = trimToNull(endpoint.getSslKeystoreAlias());
+        if (sslKeystoreAlias == null) {
+            return;
+        }
+
+        props.put(SslConfigs.SSL_ENGINE_FACTORY_CLASS_CONFIG, CpiKafkaPlusSslEngineFactory.class.getName());
+        props.put(CpiKafkaPlusSslEngineFactory.SSL_KEYSTORE_ALIAS_CONFIG, sslKeystoreAlias);
+        LOG.info("Kafka SSL will use CPI keystore alias '{}' for trust/key material", sslKeystoreAlias);
     }
 
     static String buildJaasConfig(String mechanism, String username, String password) {
@@ -132,5 +143,13 @@ public final class SecurityConfigHelper {
             safe.put("ssl.context", "***SSLContext***");
         }
         return safe.toString();
+    }
+
+    private static String trimToNull(String value) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? null : trimmed;
     }
 }
