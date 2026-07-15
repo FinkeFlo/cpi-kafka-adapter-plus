@@ -102,20 +102,19 @@ With `Drain Backlog = ON`, the consumer fetches all available records in a singl
 ```mermaid
 flowchart TD
     A["Timer fires"] --> B["poll() + process batch\n(up to maxPollRecords records)"]
-    B --> C{"records returned\n== maxPollRecords?"}
-    C -- "yes, more may be available" --> B
-    C -- "no, topic almost empty -> STOP" --> D["Timer waits pollingIntervalSeconds"]
+    B --> C{"records returned == 0\nor below minBacklogToDrain?"}
+    C -- "no" --> B
+    C -- "yes" --> D["Timer waits pollingIntervalSeconds"]
     D --> A
 ```
 
-Example with `maxPollRecords = 500`: iteration 1 returns 500 records (continue), iteration 2 returns 500 records (continue), ..., iteration N returns 238 records (`238 < 500` → topic is almost empty → stop).
+Example with `maxPollRecords = 500` and `minBacklogToDrain = 100`: iteration 1 returns 500 records (continue), iteration 2 returns 500 records (continue), iteration 3 returns 220 records (continue), iteration 4 returns 30 records (`30 < 100` → stop).
 
 Drain continues until the topic is almost empty. Stop conditions:
 
 1. **Topic is empty** - `poll()` returns 0 records
-2. **No more backlog** - `poll()` returns fewer than `maxPollRecords`
-3. **Min Backlog threshold** - `poll()` returns fewer than `minBacklogToDrain`
-4. **iFlow is stopped** - undeploy/restart in CPI
+2. **Min Backlog threshold** - when `minBacklogToDrain > 0`, drain stops once a poll returns fewer records than the threshold
+3. **iFlow is stopped** - undeploy/restart in CPI
 
 ### Min Backlog to Drain — when drain should stop
 
@@ -196,9 +195,9 @@ Without a threshold (default 0), drain would continue in iteration 4 and also fe
 
     Drain stops. The topic is almost empty; any further trickle of new messages is picked up on the next regular poll cycle (`pollingIntervalSeconds` later).
 
-### No max.poll.interval.ms risk
+### Reduced max.poll.interval.ms risk
 
-Kafka removes a consumer from the group if it does not call `poll()` within `max.poll.interval.ms`. The drain loop calls `kafkaConsumer.poll()` in every iteration, so this timer is reset on each pass and the loop cannot trip it.
+Kafka removes a consumer from the group if it does not call `poll()` within `max.poll.interval.ms`. The adapter significantly reduces this risk by polling regularly (including keep-alive polls between emit cycles) and by deriving `max.poll.interval.ms` from `pollingIntervalSeconds` with an additional processing buffer (capped at 6 h 10 min).
 
 ### Limitation: Drain + AUTO commit
 

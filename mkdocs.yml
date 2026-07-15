@@ -53,6 +53,7 @@ nav:
   - Features:
       - Batch Processing: features/batch-processing.md
       - Avro / Schema Registry: features/avro-schema-registry.md
+      - Producer Batch Send: features/producer-batch.md
   - Security:
       - Authentication: security/authentication.md
   - Changelog: changelog.md
