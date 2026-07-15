@@ -1,5 +1,7 @@
 # Kafka Adapter Plus
 
+![Kafka Adapter Plus logo](docs/assets/branding/logo.png)
+
 Custom Apache Kafka adapter for SAP Cloud Integration (CPI) built with the SAP Adapter Development Kit (ADK). Provides full Sender and Receiver adapter support with advanced batch processing, Avro/Schema Registry integration, and enterprise-grade security.
 
 📖 **Full documentation:** **[finkeflo.github.io/cpi-kafka-adapter-plus](https://finkeflo.github.io/cpi-kafka-adapter-plus/)**
