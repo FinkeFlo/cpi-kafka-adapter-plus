@@ -20,7 +20,10 @@
  */
 package com.finkeflo.cpi.kafka;
 
+import static org.awaitility.Awaitility.await;
+
 import java.lang.reflect.Method;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -36,6 +39,7 @@ import org.apache.camel.Exchange;
 import org.apache.camel.Processor;
 import org.apache.camel.impl.DefaultCamelContext;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.awaitility.core.ConditionTimeoutException;
 import org.junit.AfterClass;
 import org.junit.Assert;
 import org.junit.BeforeClass;
@@ -466,19 +470,21 @@ public class RealisticLoadIT {
         Method pollMethod = CpiKafkaPlusConsumer.class.getDeclaredMethod("poll");
         pollMethod.setAccessible(true);
 
-        // Poll multiple times to allow partition assignment, then let drain do its work
-        PollResult lastResult = new PollResult(0, 0L);
-        for (int i = 0; i < 15; i++) {
-            long startedNanos = System.nanoTime();
-            int polled = (Integer) pollMethod.invoke(consumer);
-            long elapsedNanos = System.nanoTime() - startedNanos;
-            lastResult = new PollResult(polled, elapsedNanos);
-            if (polled > 0) {
-                return lastResult;
-            }
-            Thread.sleep(500);
+        final PollResult[] lastResult = new PollResult[] { new PollResult(0, 0L) };
+        try {
+            await().atMost(Duration.ofMillis(7500))
+                    .pollInterval(Duration.ofMillis(500))
+                    .until(() -> {
+                        long startedNanos = System.nanoTime();
+                        int polled = (Integer) pollMethod.invoke(consumer);
+                        long elapsedNanos = System.nanoTime() - startedNanos;
+                        lastResult[0] = new PollResult(polled, elapsedNanos);
+                        return polled > 0;
+                    });
+        } catch (ConditionTimeoutException ignored) {
+            // Some call sites intentionally verify that a follow-up poll stays empty.
         }
-        return lastResult;
+        return lastResult[0];
     }
 
     private static double messagesPerSecond(int messages, long elapsedNanos) {

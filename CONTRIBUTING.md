@@ -14,13 +14,15 @@ test and submit changes.
 
 ```bash
 mvn clean install     # full build: OSGi bundle JAR + ESA archive
-mvn test              # unit tests (JUnit 4 + Camel test support) — no broker needed
-mvn verify            # full verification, matching CI (runs integration tests)
+mvn test              # unit tests + JaCoCo report under target/site/jacoco/ — no broker needed
+mvn verify            # full verification + refreshed JaCoCo report (includes ITs when they run)
 mvn test -Dtest=CpiKafkaPlusComponentTest#someMethod   # a single test method
 ```
 
 Unit tests must pass **without** a running Kafka broker. Integration tests
 (`*IT.java`) use Testcontainers and require Docker; they run in `mvn verify`.
+The CI `build` workflow uploads the unit-test JaCoCo report as an artifact so it
+can be downloaded from the Actions run.
 
 ## How to contribute
 

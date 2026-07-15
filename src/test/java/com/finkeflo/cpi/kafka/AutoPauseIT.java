@@ -20,8 +20,11 @@
  */
 package com.finkeflo.cpi.kafka;
 
+import static org.awaitility.Awaitility.await;
+
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -37,6 +40,7 @@ import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.common.serialization.StringDeserializer;
+import org.awaitility.core.ConditionTimeoutException;
 import org.junit.AfterClass;
 import org.junit.Assert;
 import org.junit.BeforeClass;
@@ -153,43 +157,39 @@ public class AutoPauseIT {
 
     private static void waitUntilAttemptsAtLeast(Method pollMethod, CpiKafkaPlusConsumer consumer,
                                                  int expectedAttempts, long timeoutMs) throws Exception {
-        long deadline = System.currentTimeMillis() + timeoutMs;
-        while (System.currentTimeMillis() < deadline) {
-            invokePollAllowingIntentionalFailures(pollMethod, consumer);
-            if (getAttempts(consumer) >= expectedAttempts) {
-                return;
-            }
-            Thread.sleep(100L);
-        }
-        Assert.fail("Timed out waiting for " + expectedAttempts + " processing attempts");
+        await().atMost(Duration.ofMillis(timeoutMs))
+                .pollInterval(Duration.ofMillis(100))
+                .until(() -> {
+                    invokePollAllowingIntentionalFailures(pollMethod, consumer);
+                    return getAttempts(consumer) >= expectedAttempts;
+                });
     }
 
     private static void waitUntilSuccessCount(Method pollMethod, CpiKafkaPlusConsumer consumer,
                                              int expectedSuccesses, long timeoutMs) throws Exception {
-        long deadline = System.currentTimeMillis() + timeoutMs;
-        while (System.currentTimeMillis() < deadline) {
-            invokePollAllowingIntentionalFailures(pollMethod, consumer);
-            if (getSuccessfulBodies(consumer).size() >= expectedSuccesses) {
-                return;
-            }
-            Thread.sleep(100L);
-        }
-        Assert.fail("Timed out waiting for " + expectedSuccesses + " successful records");
+        await().atMost(Duration.ofMillis(timeoutMs))
+                .pollInterval(Duration.ofMillis(100))
+                .until(() -> {
+                    invokePollAllowingIntentionalFailures(pollMethod, consumer);
+                    return getSuccessfulBodies(consumer).size() >= expectedSuccesses;
+                });
     }
 
     private static void assertNoProcessingDuringCooldown(Method pollMethod, CpiKafkaPlusConsumer consumer,
                                                          int attemptsAfterPause) throws Exception {
-        long deadline = System.currentTimeMillis() + 800L;
-        int pausedPolls = 0;
-        while (System.currentTimeMillis() < deadline) {
-            int processed = invokePollAllowingIntentionalFailures(pollMethod, consumer);
-            pausedPolls++;
-            Assert.assertEquals("Auto-paused poll must not process records", 0, processed);
-            Assert.assertEquals("No downstream processor calls expected during cooldown",
-                    attemptsAfterPause, getAttempts(consumer));
-            Thread.sleep(100L);
-        }
-        Assert.assertTrue("Cooldown observation should include at least one paused poll", pausedPolls > 0);
+        AtomicInteger pausedPolls = new AtomicInteger();
+        await().during(Duration.ofMillis(800))
+                .atMost(Duration.ofMillis(1200))
+                .pollInterval(Duration.ofMillis(100))
+                .untilAsserted(() -> {
+                    int processed = invokePollAllowingIntentionalFailures(pollMethod, consumer);
+                    pausedPolls.incrementAndGet();
+                    Assert.assertEquals("Auto-paused poll must not process records", 0, processed);
+                    Assert.assertEquals("No downstream processor calls expected during cooldown",
+                            attemptsAfterPause, getAttempts(consumer));
+                });
+        Assert.assertTrue("Cooldown observation should include at least one paused poll",
+                pausedPolls.get() > 0);
     }
 
     private static int invokePollAllowingIntentionalFailures(Method pollMethod,
@@ -245,16 +245,19 @@ public class AutoPauseIT {
         KafkaConsumer<String, String> kafkaConsumer = new KafkaConsumer<String, String>(props);
         try {
             kafkaConsumer.subscribe(java.util.Collections.singletonList(topic));
-            long deadline = System.currentTimeMillis() + 5000L;
-            while (System.currentTimeMillis() < deadline) {
-                ConsumerRecords<String, String> records =
-                        kafkaConsumer.poll(java.time.Duration.ofMillis(250L));
-                for (ConsumerRecord<String, String> record : records) {
-                    result.add(record);
-                }
-                if (!result.isEmpty()) {
-                    break;
-                }
+            try {
+                await().atMost(Duration.ofSeconds(5))
+                        .pollInterval(Duration.ofMillis(250))
+                        .until(() -> {
+                            ConsumerRecords<String, String> records =
+                                    kafkaConsumer.poll(java.time.Duration.ofMillis(250L));
+                            for (ConsumerRecord<String, String> record : records) {
+                                result.add(record);
+                            }
+                            return !result.isEmpty();
+                        });
+            } catch (ConditionTimeoutException ignored) {
+                // Expected when the group has already committed past the processed records.
             }
         } finally {
             kafkaConsumer.close();

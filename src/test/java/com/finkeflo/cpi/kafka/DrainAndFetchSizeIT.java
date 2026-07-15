@@ -20,7 +20,10 @@
  */
 package com.finkeflo.cpi.kafka;
 
+import static org.awaitility.Awaitility.await;
+
 import java.lang.reflect.Method;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -29,6 +32,7 @@ import java.util.Map;
 import org.apache.camel.Exchange;
 import org.apache.camel.Processor;
 import org.apache.camel.impl.DefaultCamelContext;
+import org.awaitility.core.ConditionTimeoutException;
 import org.junit.AfterClass;
 import org.junit.Assert;
 import org.junit.BeforeClass;
@@ -525,13 +529,12 @@ public class DrainAndFetchSizeIT {
         Method pollMethod = CpiKafkaPlusConsumer.class.getDeclaredMethod("poll");
         pollMethod.setAccessible(true);
 
-        // Poll multiple times to allow partition assignment, then let drain do its work
-        for (int i = 0; i < 15; i++) {
-            int polled = (Integer) pollMethod.invoke(consumer);
-            if (polled > 0) {
-                break;
-            }
-            Thread.sleep(500);
+        try {
+            await().atMost(Duration.ofMillis(7500))
+                    .pollInterval(Duration.ofMillis(500))
+                    .until(() -> (Integer) pollMethod.invoke(consumer) > 0);
+        } catch (ConditionTimeoutException ignored) {
+            // Some call sites intentionally verify that a follow-up poll stays empty.
         }
     }
 
@@ -545,15 +548,18 @@ public class DrainAndFetchSizeIT {
         Method pollMethod = CpiKafkaPlusConsumer.class.getDeclaredMethod("poll");
         pollMethod.setAccessible(true);
 
-        // First few polls may return 0 while partition assignment happens
-        for (int i = 0; i < 15; i++) {
-            int polled = (Integer) pollMethod.invoke(consumer);
-            if (polled > 0) {
-                return polled;
-            }
-            Thread.sleep(500);
+        final int[] polled = new int[1];
+        try {
+            await().atMost(Duration.ofMillis(7500))
+                    .pollInterval(Duration.ofMillis(500))
+                    .until(() -> {
+                        polled[0] = (Integer) pollMethod.invoke(consumer);
+                        return polled[0] > 0;
+                    });
+        } catch (ConditionTimeoutException ignored) {
+            // Callers assert on the returned value and captured exchanges.
         }
-        return 0;
+        return polled[0];
     }
 
     private void produceMessages(String topic, int count) {

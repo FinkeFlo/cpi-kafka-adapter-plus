@@ -20,6 +20,7 @@
  */
 package com.finkeflo.cpi.kafka;
 
+import java.util.Arrays;
 import java.util.Map;
 
 import javax.net.ssl.KeyManager;
@@ -72,6 +73,22 @@ public final class CredentialHelper {
     };
     private static volatile CredentialResolver credentialResolver = DEFAULT_RESOLVER;
 
+    /**
+     * Strategy for resolving SSL contexts from the CPI Keystore.
+     * The default implementation reads from the CPI KeystoreService via ITApiFactory;
+     * tests can inject an alternative resolver via {@link #setSslContextResolver(SslContextResolver)}.
+     */
+    public interface SslContextResolver {
+        SSLContext resolveSslContext(String alias);
+    }
+
+    private static final SslContextResolver DEFAULT_SSL_CONTEXT_RESOLVER = new SslContextResolver() {
+        public SSLContext resolveSslContext(String alias) {
+            return resolveSslContextFromKeystore(alias);
+        }
+    };
+    private static volatile SslContextResolver sslContextResolver = DEFAULT_SSL_CONTEXT_RESOLVER;
+
     private CredentialHelper() {}
 
     /**
@@ -79,6 +96,13 @@ public final class CredentialHelper {
      */
     public static void setCredentialResolver(CredentialResolver resolver) {
         credentialResolver = (resolver != null) ? resolver : DEFAULT_RESOLVER;
+    }
+
+    /**
+     * Inject the SSL context resolver. Passing null restores the default CPI Keystore resolver.
+     */
+    public static void setSslContextResolver(SslContextResolver resolver) {
+        sslContextResolver = (resolver != null) ? resolver : DEFAULT_SSL_CONTEXT_RESOLVER;
     }
 
     /**
@@ -125,7 +149,7 @@ public final class CredentialHelper {
             }
 
             String username = userCredential.getUsername();
-            String password = new String(userCredential.getPassword());
+            String password = toStringAndZero(userCredential.getPassword());
 
             LOG.debug("Successfully resolved credentials for alias '{}'", alias);
             return new UserCredentials(username, password);
@@ -136,9 +160,37 @@ public final class CredentialHelper {
     }
 
     /**
+     * Copies the given password characters into a String and immediately zeroes out the
+     * original array. Reduces the time window during which the plaintext password sits in
+     * JVM heap memory as a mutable {@code char[]} that could otherwise be overwritten with
+     * dummy data (unlike a {@code String}, which is immutable and stays put until GC).
+     *
+     * <p>Package-private (not private) so it can be unit-tested directly without needing to
+     * mock the SAP CPI {@code SecureStoreService}.</p>
+     *
+     * @param passwordChars the password characters as returned by {@code UserCredential.getPassword()};
+     *                      may be {@code null}. The array is mutated (zeroed) as a side effect.
+     * @return a new String containing the password, or {@code null} if {@code passwordChars} is {@code null}
+     */
+    static String toStringAndZero(char[] passwordChars) {
+        if (passwordChars == null) {
+            return null;
+        }
+        try {
+            return new String(passwordChars);
+        } finally {
+            Arrays.fill(passwordChars, ' ');
+        }
+    }
+
+    /**
      * Get an SSLContext configured with KeyManager and TrustManager from CPI Keystore.
      */
     public static SSLContext getSSLContext(String keystoreAlias) {
+        return sslContextResolver.resolveSslContext(keystoreAlias);
+    }
+
+    private static SSLContext resolveSslContextFromKeystore(String keystoreAlias) {
         try {
             KeystoreService keystoreService = ITApiFactory.getService(KeystoreService.class, null);
 

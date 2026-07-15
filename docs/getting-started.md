@@ -1,12 +1,18 @@
 # Getting Started
 
-## Prerequisites
+## Download
+
+Get the ready-to-deploy ESA archive from the [GitHub Releases page](https://github.com/FinkeFlo/cpi-kafka-adapter-plus/releases) — no build required.
+
+Download the `.esa` file attached to the latest release and continue with the deployment steps below.
+
+## Building from Source (optional)
+
+If you want to build the adapter yourself instead of using a release artifact:
 
 - **Java 17+** — Compiles to Java 8 bytecode for CPI runtime compatibility
 - **Maven 3.8+**
 - **SAP ADK artifacts** in your local Maven repository
-
-## Build
 
 ```bash
 mvn clean install
@@ -17,13 +23,7 @@ This produces two artifacts:
 1. **OSGi bundle JAR** — Fat bundle with embedded Kafka, Avro, Confluent, and Jackson dependencies
 2. **ESA archive** — Deployable to SAP CPI via the ADK `build` goal
 
-## Run Tests
-
-```bash
-mvn test
-```
-
-Tests run without a Kafka broker — no external dependencies required.
+Run the test suite with `mvn test` (no Kafka broker required).
 
 ## Deployment to SAP CPI
 
