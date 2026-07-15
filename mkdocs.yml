@@ -5,6 +5,8 @@ edit_uri: edit/main/docs/
 
 theme:
   name: material
+  logo: assets/branding/icon.png
+  favicon: assets/branding/icon.png
   palette:
     - scheme: default
       primary: indigo
