@@ -4,23 +4,14 @@
 
 The Kafka adapter polls Kafka at regular intervals (`pollingIntervalSeconds`) and processes records as batches through the CPI iFlow.
 
-```
-Camel timer fires (every pollingIntervalSeconds)
-  |
-  v
-kafkaConsumer.poll() -> fetches up to maxPollRecords records
-  |
-  v
-Records are split into batches (batchSize)
-  |
-  v
-Each batch -> 1 iFlow execution (1 MPL entry)
-  |
-  v
-Offsets are committed (BATCH_COMPLETE)
-  |
-  v
-Timer waits pollingIntervalSeconds -> next poll
+```mermaid
+flowchart TD
+    A["Camel timer fires<br>(every pollingIntervalSeconds)"] --> B["kafkaConsumer.poll()<br>fetches up to maxPollRecords records"]
+    B --> C["Records are split into batches<br>(batchSize)"]
+    C --> D["Each batch -> 1 iFlow execution<br>(1 MPL entry)"]
+    D --> E["Offsets are committed<br>(BATCH_COMPLETE)"]
+    E --> F["Timer waits pollingIntervalSeconds"]
+    F --> A
 ```
 
 ## The three configuration groups
@@ -51,11 +42,11 @@ Timer waits pollingIntervalSeconds -> next poll
 
 ### Example 1: Default configuration
 
-```
-Polling Interval:  5s
-Max Poll Records:  500
-Batch Size:        100
-```
+| Parameter | Value |
+|---|---|
+| Polling Interval | 5s |
+| Max Poll Records | 500 |
+| Batch Size | 100 |
 
 Per poll cycle:
 - `kafkaConsumer.poll()` fetches up to 500 records
@@ -65,11 +56,11 @@ Throughput: 500 records / 5s = 100 msg/s
 
 ### Example 2: High throughput
 
-```
-Polling Interval:  1s
-Max Poll Records:  2000
-Batch Size:        500
-```
+| Parameter | Value |
+|---|---|
+| Polling Interval | 1s |
+| Max Poll Records | 2000 |
+| Batch Size | 500 |
 
 Per poll cycle: 2000 records, 4 iFlow executions
 
@@ -77,16 +68,17 @@ Throughput: 2000 / 1s = 2000 msg/s
 
 ### Example 3: Infrequent polling (hourly)
 
-```
-Polling Interval:  3600s (1 hour)
-Max Poll Records:  500
-Batch Size:        500
-Drain Backlog:     OFF
-```
+| Parameter | Value |
+|---|---|
+| Polling Interval | 3600s (1 hour) |
+| Max Poll Records | 500 |
+| Batch Size | 500 |
+| Drain Backlog | OFF |
 
-Warning: at 10 msg/s, 36,000 messages arrive per hour. Only 500 are fetched per poll, so the backlog keeps growing.
+!!! warning
+    At 10 msg/s, 36,000 messages arrive per hour. Only 500 are fetched per poll, so the backlog keeps growing.
 
-Solution: enable Drain Backlog (see below).
+    Solution: enable Drain Backlog (see below).
 
 ---
 
@@ -96,33 +88,27 @@ Solution: enable Drain Backlog (see below).
 
 Without drain mode, each poll cycle fetches at most `maxPollRecords` records. If more messages arrive than can be processed per cycle, a backlog grows:
 
-```
-Production:        50 msg/s
-Consumption rate:  500 records / 30s interval = ~17 msg/s
-Difference:        33 msg/s backlog growth
-After 1 hour:      118,800 unprocessed messages
-```
+| Metric | Value |
+|---|---|
+| Production | 50 msg/s |
+| Consumption rate | 500 records / 30s interval = ~17 msg/s |
+| Difference | 33 msg/s backlog growth |
+| After 1 hour | 118,800 unprocessed messages |
 
 ### The solution: enable Drain Backlog
 
 With `Drain Backlog = ON`, the consumer fetches all available records in a single timer fire, not just `maxPollRecords`:
 
+```mermaid
+flowchart TD
+    A["Timer fires"] --> B["poll() + process batch\n(up to maxPollRecords records)"]
+    B --> C{"records returned\n== maxPollRecords?"}
+    C -- "yes, more may be available" --> B
+    C -- "no, topic almost empty -> STOP" --> D["Timer waits pollingIntervalSeconds"]
+    D --> A
 ```
-Timer fires
-  |
-  v
-Iteration 1: poll() -> 500 records -> process
-  |  (500 == maxPollRecords -> more records may be available -> continue)
-  v
-Iteration 2: poll() -> 500 records -> process
-  |  (500 == maxPollRecords -> continue)
-  v
-...
-Iteration N: poll() -> 238 records -> process
-  |  (238 < 500 -> topic is almost empty -> STOP)
-  v
-Timer waits pollingIntervalSeconds -> next cycle
-```
+
+Example with `maxPollRecords = 500`: iteration 1 returns 500 records (continue), iteration 2 returns 500 records (continue), ..., iteration N returns 238 records (`238 < 500` → topic is almost empty → stop).
 
 Drain continues until the topic is almost empty. Stop conditions:
 
@@ -143,21 +129,18 @@ With a constant message stream, drain mode could keep running because new messag
 
 Example with `Min Backlog to Drain = 100`, `Max Poll Records = 500`:
 
-```
 Topic has 1,200 messages, 5 msg/s continue to arrive:
 
-  Iteration 1: poll() -> 500 records -> process
-    (500 >= 100 threshold -> continue)
-  Iteration 2: poll() -> 500 records -> process
-    (500 >= 100 -> continue)
-  Iteration 3: poll() -> 220 records -> process
-    (220 >= 100 -> continue)
-  Iteration 4: poll() -> 30 records -> process
-    (30 < 100 threshold -> STOP!)
+| Iteration | `poll()` returns | Threshold check | Action |
+|---|---|---|---|
+| 1 | 500 | 500 ≥ 100 | continue |
+| 2 | 500 | 500 ≥ 100 | continue |
+| 3 | 220 | 220 ≥ 100 | continue |
+| 4 | 30 | 30 < 100 | **STOP** |
 
-  30 records remain in the topic and are fetched in the next interval.
-  Result: ~1,250 records processed, topic almost empty, no endless drain.
-```
+!!! note
+    30 records remain in the topic and are fetched in the next interval.
+    Result: ~1,250 records processed, topic almost empty, no endless drain.
 
 Without a threshold (default 0), drain would continue in iteration 4 and also fetch the 30 remaining records. With a threshold > 0, drain stops earlier and leaves small remaining batches for the next regular poll cycle.
 
@@ -175,99 +158,102 @@ Drain Backlog is not compatible with `Offset Commit Strategy = Auto Commit`. The
 
 ### Scenario A: Normal operation (5 msg/s)
 
-```
-Configuration:
-  Polling Interval:  30s
-  Max Poll Records:  500
-  Batch Size:        100
-  Drain Backlog:     OFF
+| Parameter | Value |
+|---|---|
+| Polling Interval | 30s |
+| Max Poll Records | 500 |
+| Batch Size | 100 |
+| Drain Backlog | OFF |
 
-Calculation:
-  Arrive per 30s:       5 msg/s x 30s = 150 records
-  Fetched per poll:     150 (< 500 maxPollRecords)
-  iFlow executions:     150 / 100 = 2 (batches with 100 and 50 records)
-  MPL entries/minute:   ~4
-  Backlog:              0 (consumption rate > production rate)
-```
+| Metric | Value |
+|---|---|
+| Arrive per 30s | 5 msg/s x 30s = 150 records |
+| Fetched per poll | 150 (< 500 maxPollRecords) |
+| iFlow executions | 150 / 100 = 2 (batches with 100 and 50 records) |
+| MPL entries/minute | ~4 |
+| Backlog | 0 (consumption rate > production rate) |
 
-Drain is not needed; standard polling is sufficient.
+!!! note
+    Drain is not needed; standard polling is sufficient.
 
 ### Scenario B: Traffic spike (200 msg/s, 2 hours)
 
-```
-Configuration:
-  Polling Interval:  30s
-  Max Poll Records:  500
-  Batch Size:        500
-  Drain Backlog:     ON
+| Parameter | Value |
+|---|---|
+| Polling Interval | 30s |
+| Max Poll Records | 500 |
+| Batch Size | 500 |
+| Drain Backlog | ON |
 
-Calculation WITHOUT drain:
-  500 records / 30s = ~17 msg/s consumption rate
-  200 msg/s production -> backlog grows by 183 msg/s
-  After 2h: 1,317,600 unprocessed messages
+**Without drain:**
 
-Calculation WITH drain:
-  Arrive per 30s: 200 x 30 = 6,000 records
-  Drain fetches all 6,000 in one timer fire:
-    12 iterations x 500 records x ~50ms = ~0.6 seconds
-  Then: 30s pause
-  Effective consumption rate: 6,000 / 30s = 200 msg/s
-  Backlog: stable at 0
-  MPL entries: 12 per cycle, ~24/minute
-```
+| Metric | Value |
+|---|---|
+| Consumption rate | 500 records / 30s = ~17 msg/s |
+| Production | 200 msg/s |
+| Backlog growth | 183 msg/s |
+| After 2h | 1,317,600 unprocessed messages |
+
+**With drain:**
+
+| Metric | Value |
+|---|---|
+| Arrive per 30s | 200 x 30 = 6,000 records |
+| Drain fetches | all 6,000 in one timer fire: 12 iterations x 500 records x ~50ms = ~0.6 seconds |
+| Pause after drain | 30s |
+| Effective consumption rate | 6,000 / 30s = 200 msg/s |
+| Backlog | stable at 0 |
+| MPL entries | 12 per cycle, ~24/minute |
 
 ### Scenario C: 8-hour polling with 1 million messages/day
 
-```
-Configuration:
-  Polling Interval:  28800s (8 hours)
-  Max Poll Records:  500
-  Batch Size:        500
-  Drain Backlog:     ON
+| Parameter | Value |
+|---|---|
+| Polling Interval | 28800s (8 hours) |
+| Max Poll Records | 500 |
+| Batch Size | 500 |
+| Drain Backlog | ON |
 
-Calculation:
-  Arrive per 8h:     ~333,000 records
-  Drain duration:    333,000 / 500 = 666 iterations x ~50ms = ~33 seconds
-  iFlow executions:  666
-  MPL entries:       666
+| Metric | Value |
+|---|---|
+| Arrive per 8h | ~333,000 records |
+| Drain duration | 333,000 / 500 = 666 iterations x ~50ms = ~33 seconds |
+| iFlow executions | 666 |
+| MPL entries | 666 |
 
-  During the 33s drain, ~380 new records arrive
-  -> they are fetched in the last iterations
-  -> topic is empty after ~33s
-  -> next drain after 8 hours
-```
+!!! note
+    During the 33s drain, ~380 new records arrive → they are fetched in the last iterations → topic is empty after ~33s → next drain after 8 hours.
 
 ### Scenario D: Testing/debugging (small batches)
 
-```
-Configuration:
-  Polling Interval:  60s
-  Max Poll Records:  20
-  Batch Size:        5
-  Drain Backlog:     ON
+| Parameter | Value |
+|---|---|
+| Polling Interval | 60s |
+| Max Poll Records | 20 |
+| Batch Size | 5 |
+| Drain Backlog | ON |
 
 100 records in the topic:
-  Iteration 1: 20 records -> 4 batches of 5 -> 4 iFlow executions
-  Iteration 2: 20 records -> 4 iFlow executions
-  ...
-  Iteration 5: 20 records -> 4 iFlow executions
-  Iteration 6: 0 records  -> STOP
-  Total: 20 iFlow executions, < 1 second
-```
+
+| Iteration | `poll()` returns | Action |
+|---|---|---|
+| 1 | 20 records | 4 batches of 5 → 4 iFlow executions |
+| 2 | 20 records | 4 iFlow executions |
+| ... | ... | ... |
+| 5 | 20 records | 4 iFlow executions |
+| 6 | 0 records | **STOP** |
+
+!!! note
+    Total: 20 iFlow executions, < 1 second
 
 ---
 
-## Configuration recommendations
+## Choosing values for your scenario
 
-| Use case | Interval | Max Poll | Batch Size | Drain | Min Backlog |
-|---|---|---|---|---|---|
-| Near real-time (< 1s latency) | 1 | 500 | 500 | OFF | - |
-| Standard | 5 | 500 | 100 | OFF | - |
-| Moderate load with spikes | 30 | 500 | 500 | ON | 0 |
-| Constant stream + spikes | 30 | 500 | 500 | ON | 100 |
-| High load (>100 msg/s) | 5 | 2000 | 500 | ON | 0 |
-| Hourly polling | 3600 | 500 | 500 | ON | 0 |
-| Daily batch processing | 28800 | 500 | 500 | ON | 0 |
+There is no single correct configuration — the right values depend on your message
+rate, latency requirements, and how bursty the traffic is. Use the scenarios above and
+the rules of thumb below to derive values for your own case instead of copying fixed
+numbers.
 
 ### Rule of thumb
 
@@ -280,10 +266,10 @@ Configuration:
 
 ### Throughput formula
 
-```
-Without drain:  maxPollRecords / pollingIntervalSeconds  msg/s
-With drain:     Unbounded (limited by iFlow processing time + network)
-```
+| Mode | Throughput |
+|---|---|
+| Without drain | `maxPollRecords / pollingIntervalSeconds` msg/s |
+| With drain | Unbounded (limited by iFlow processing time + network) |
 
 ---
 
@@ -380,23 +366,15 @@ When `embedXmlValues=true`, values that look like XML are embedded as parsed chi
 
 **CPI iFlow pattern:**
 
-```
-Kafka Adapter (XML_LIST)
-  |
-  v
-Iterating Splitter (XPath: /kafkaRecords/record)
-  |
-  v
-Router / branch on value/@format
-  |-- format="xml"  -> mapping can access value/root/...
-  |-- format="text" -> extract string(value), then parse if needed
+```mermaid
+flowchart TD
+    A["Kafka Adapter (XML_LIST)"] --> B["Iterating Splitter\n(XPath: /kafkaRecords/record)"]
+    B --> C{"Router / branch on\nvalue/@format"}
+    C -- "format=\"xml\"" --> D["mapping can access value/root/..."]
+    C -- "format=\"text\"" --> E["extract string(value),\nthen parse if needed"]
 ```
 
 Alternative filter: `/kafkaRecords/record[value/@format='xml']` to process only XML records.
-
-!!! info "Compatibility"
-    Existing iFlows that access embedded XML under `value/...` require `embedXmlValues=true`.
-    With the default `embedXmlValues=false`, values are emitted as text/CDATA and should be read with `string(value)`.
 
 !!! warning "XML well-formedness"
     XML values must be well-formed when `embedXmlValues=true`. The adapter only uses a lightweight check before embedding; malformed XML content can make the batch XML invalid.

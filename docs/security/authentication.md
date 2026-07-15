@@ -20,21 +20,21 @@ The most common setup for managed Kafka services (Confluent Cloud, MSK, etc.):
 1. Create a **User Credentials** artifact in CPI Secure Store with your Kafka API key and secret
 2. Configure the adapter:
 
-```
-securityProtocol = SASL_SSL
-saslMechanism = PLAIN
-credentialAlias = MyKafkaCredentials
-```
+| Parameter | Value |
+|---|---|
+| `securityProtocol` | `SASL_SSL` |
+| `saslMechanism` | `PLAIN` |
+| `credentialAlias` | `MyKafkaCredentials` |
 
 ### SASL/SCRAM
 
 For Kafka clusters using SCRAM authentication:
 
-```
-securityProtocol = SASL_SSL
-saslMechanism = SCRAM-SHA-256
-credentialAlias = MyKafkaCredentials
-```
+| Parameter | Value |
+|---|---|
+| `securityProtocol` | `SASL_SSL` |
+| `saslMechanism` | `SCRAM-SHA-256` |
+| `credentialAlias` | `MyKafkaCredentials` |
 
 Supported SCRAM mechanisms: `SCRAM-SHA-256` and `SCRAM-SHA-512`.
 
@@ -43,19 +43,19 @@ Supported SCRAM mechanisms: `SCRAM-SHA-256` and `SCRAM-SHA-512`.
 For broker connections that need a private/custom CA and/or client certificate
 authentication, configure a CPI keystore alias:
 
-```
-securityProtocol = SSL
-sslKeystoreAlias = MyKafkaKeystore
-```
+| Parameter | Value |
+|---|---|
+| `securityProtocol` | `SSL` |
+| `sslKeystoreAlias` | `MyKafkaKeystore` |
 
 Or, when SASL and custom TLS material are both required:
 
-```
-securityProtocol = SASL_SSL
-saslMechanism = PLAIN
-credentialAlias = MyKafkaCredentials
-sslKeystoreAlias = MyKafkaKeystore
-```
+| Parameter | Value |
+|---|---|
+| `securityProtocol` | `SASL_SSL` |
+| `saslMechanism` | `PLAIN` |
+| `credentialAlias` | `MyKafkaCredentials` |
+| `sslKeystoreAlias` | `MyKafkaKeystore` |
 
 How it works at runtime:
 
@@ -76,13 +76,3 @@ All credentials are managed through the SAP CPI Secure Store:
 - **Keystore entries**: Private keys/certificates and trusted CA certificates for SSL/TLS
 
 Credential artifacts are referenced by their **alias** in the adapter configuration. The adapter resolves them at runtime via the `ITApiFactory`.
-
-!!! warning
-    Never hardcode credentials in IFlow configurations. Always use the CPI Secure Store.
-
-## Recommendations
-
-- Use `SASL_SSL` for managed Kafka services (Confluent Cloud, Amazon MSK)
-- Leave `sslKeystoreAlias` empty for public-CA brokers
-- Set `sslKeystoreAlias` when your organization uses a private CA or requires mTLS
-- Avoid `PLAINTEXT` and `SASL_PLAINTEXT` in production environments
