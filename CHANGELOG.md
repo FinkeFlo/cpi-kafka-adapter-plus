@@ -4,13 +4,13 @@ All notable changes to this project are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and the project follows [Semantic Versioning](https://semver.org/). See
-[VERSIONING.md](VERSIONING.md) for how the adapter version maps to SAP CPI
+[VERSIONING.md](https://github.com/finkeflo/cpi-kafka-adapter-plus/blob/main/VERSIONING.md) for how the adapter version maps to SAP CPI
 iFlow compatibility.
 
 ## [1.0.7] - 2026-07-14
 
 ### Added
-- Design-time validation for `pollingIntervalSeconds` (sender): the Web UI/Eclipse configuration dialog now rejects values outside 1-21600 immediately, instead of only at IFlow start. (#44)
+- Design-time validation for `pollingIntervalSeconds` (sender): the configuration dialog in the Web UI now rejects values outside 1-21600 immediately, instead of only at IFlow start. (#44)
 - Design-time validation for `credentialAlias` (sender + receiver): now enforced as non-empty when Security Protocol is `SASL_SSL` or `SASL_PLAINTEXT`.
 
 ### Changed

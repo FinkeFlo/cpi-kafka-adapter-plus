@@ -10,7 +10,7 @@ iFlow compatibility.
 ## [1.0.7] - 2026-07-14
 
 ### Added
-- Design-time validation for `pollingIntervalSeconds` (sender): the Web UI/Eclipse configuration dialog now rejects values outside 1-21600 immediately, instead of only at IFlow start. (#44)
+- Design-time validation for `pollingIntervalSeconds` (sender): the configuration dialog in the Web UI now rejects values outside 1-21600 immediately, instead of only at IFlow start. (#44)
 - Design-time validation for `credentialAlias` (sender + receiver): now enforced as non-empty when Security Protocol is `SASL_SSL` or `SASL_PLAINTEXT`.
 
 ### Changed
