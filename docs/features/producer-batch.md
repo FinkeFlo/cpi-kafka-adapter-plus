@@ -13,27 +13,40 @@ for maximum throughput.
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| **Batch Send Mode** | `NONE` | `NONE` = 1 exchange = 1 Kafka message. `JSON_ARRAY` = split a JSON array. `XML_LIST` = split XML `kafkaRecords`. |
+| **Batch Send Mode** | `NONE` | `NONE` = 1 exchange = 1 Kafka message. `JSON_ARRAY` = split records from `kafkaRecords.record` (see Input formats). `XML_LIST` = split XML `kafkaRecords`. |
 
 ## Input formats
 
 ### JSON_ARRAY
 
 ```json
-[
-  {"key": "order-1", "value": {"id": 1, "amount": 99.90}},
-  {"key": "order-2", "value": {"id": 2, "amount": 45.00}},
-  {"value": "message without key"}
-]
+{
+  "kafkaRecords": {
+    "record": [
+      {"key": "order-1", "value": {"id": 1, "amount": 99.90}},
+      {"key": "order-2", "value": {"id": 2, "amount": 45.00}},
+      {"value": "message without key"}
+    ]
+  }
+}
 ```
 
+This is exactly the shape the consumer produces in `JSON_ARRAY` mode — the extra
+`record` level exists because the CPI standard JSON→XML converter rejects root
+objects whose only member is a multi-element array, so a plain `[...]` root
+doesn't round-trip cleanly through CPI's own converters.
+
 **Rules:**
-- Root must be a JSON array
-- Each element must contain at least `value`
+- Root must be `{"kafkaRecords": {"record": [...]}}`
+- Each element in `record` must contain at least `value`
 - `key` is optional (if missing: falls back to the `kafka.KEY` header, then `null`)
 - A `value` given as a JSON object is serialized to a JSON string
 - `value: null` produces a Kafka tombstone message
 - Unknown fields (`topic`, `partition`, `offset`, `timestamp`) are ignored
+
+**Also accepted (legacy/compatibility forms):**
+- `{"kafkaRecords": [...]}` — wrapped array without the `record` level
+- `[...]` — a bare JSON array as root
 
 ### XML_LIST
 
@@ -130,7 +143,7 @@ def Message processData(Message message) {
         [key: order.orderId.toString(), value: order]
     }
 
-    message.setBody(new JsonBuilder(batch).toString())
+    message.setBody(new JsonBuilder([kafkaRecords: [record: batch]]).toString())
     return message
 }
 ```
