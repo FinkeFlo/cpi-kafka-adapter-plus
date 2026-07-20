@@ -205,11 +205,11 @@ public final class ProducerBatchHelper {
                                                   String batchMode, BatchSendResult result) {
         message.setHeader("SAP_Receiver", topic);
         message.setHeader("CamelKafkaTopic", topic);
-        message.setHeader("CpiKafkaPlusBatchRecordCount", result.getRecordCount());
+        message.setHeader("CpiKafkaPlusRecordCount", result.getRecordCount());
         message.setHeader("CpiKafkaPlusBatchInputFormat", batchMode);
-        message.setHeader("CpiKafkaPlusBatchFirstOffset", result.getFirstOffset());
-        message.setHeader("CpiKafkaPlusBatchLastOffset", result.getLastOffset());
-        message.setHeader("CpiKafkaPlusBatchPartitions", result.getPartitions());
+        message.setHeader("CpiKafkaPlusFirstOffset", result.getFirstOffset());
+        message.setHeader("CpiKafkaPlusLastOffset", result.getLastOffset());
+        message.setHeader("CpiKafkaPlusPartitions", result.getPartitions());
 
         // XML summary body
         StringBuilder sb = new StringBuilder();

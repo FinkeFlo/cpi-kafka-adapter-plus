@@ -86,11 +86,11 @@ Priority (high to low):
 |--------|-------------|
 | `SAP_Receiver` | Topic name (MPL monitoring) |
 | `CamelKafkaTopic` | Topic |
-| `CpiKafkaPlusBatchRecordCount` | Number of records sent |
+| `CpiKafkaPlusRecordCount` | Number of records sent |
 | `CpiKafkaPlusBatchInputFormat` | Configured batch mode |
-| `CpiKafkaPlusBatchFirstOffset` | Offset of the first record |
-| `CpiKafkaPlusBatchLastOffset` | Offset of the last record |
-| `CpiKafkaPlusBatchPartitions` | Partitions involved (comma-separated) |
+| `CpiKafkaPlusFirstOffset` | Offset of the first record |
+| `CpiKafkaPlusLastOffset` | Offset of the last record |
+| `CpiKafkaPlusPartitions` | Partitions involved (comma-separated) |
 
 ### Body — XML summary
 
