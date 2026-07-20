@@ -205,6 +205,7 @@ public final class ProducerBatchHelper {
                                                   String batchMode, BatchSendResult result) {
         message.setHeader("SAP_Receiver", topic);
         message.setHeader("CamelKafkaTopic", topic);
+        message.setHeader("CpiKafkaPlusTopic", topic);
         message.setHeader("CpiKafkaPlusRecordCount", result.getRecordCount());
         message.setHeader("CpiKafkaPlusBatchInputFormat", batchMode);
         message.setHeader("CpiKafkaPlusFirstOffset", result.getFirstOffset());
