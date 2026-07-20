@@ -18,7 +18,8 @@
              MetadataVersion="2.0"
              gen:RuntimeComponentBaseUri="cpi-kafka-plus"
              AttachmentBehavior="Preserve"
-             supportsPolling="false">
+             supportsPolling="false"
+             IsRequestResponse="true">
         <InputContent Cardinality="1" Scope="outsidepool" MessageCardinality="1" isStreaming="false">
             <Content>
                 <ContentType>Any</ContentType>
