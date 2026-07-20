@@ -289,6 +289,7 @@ public class ProducerBatchSendIT {
         // Headers
         Assert.assertEquals(topic, out.getHeader("SAP_Receiver"));
         Assert.assertEquals(topic, out.getHeader("CamelKafkaTopic"));
+        Assert.assertEquals(topic, out.getHeader("CpiKafkaPlusTopic"));
         Assert.assertEquals(3, out.getHeader("CpiKafkaPlusRecordCount"));
         Assert.assertEquals("JSON_ARRAY", out.getHeader("CpiKafkaPlusBatchInputFormat"));
         Assert.assertNotNull(out.getHeader("CpiKafkaPlusFirstOffset"));

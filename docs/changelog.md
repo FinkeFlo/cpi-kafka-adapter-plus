@@ -7,6 +7,11 @@ and the project follows [Semantic Versioning](https://semver.org/). See
 [VERSIONING.md](https://github.com/finkeflo/cpi-kafka-adapter-plus/blob/main/VERSIONING.md) for how the adapter version maps to SAP CPI
 iFlow compatibility.
 
+## [1.0.10] - 2026-07-20
+
+### Added
+- Producer (Receiver adapter) now also sets `CpiKafkaPlusTopic` on the response, mirroring the consumer's header name (same value as the existing `CamelKafkaTopic`/`SAP_Receiver`). Lets the same downstream mapping script read the topic on both consumer and producer sides. `CpiKafkaPlusConsumerGroup` remains consumer-only (no such concept on the producer side).
+
 ## [1.0.9] - 2026-07-20
 
 ### Changed
