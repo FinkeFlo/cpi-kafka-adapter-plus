@@ -183,6 +183,15 @@ public final class ProducerBatchHelper {
                 headerAdder.addHeaders(pr, message);
             }
 
+            if (record.getHeaders() != null) {
+                for (java.util.Map.Entry<String, String> entry : record.getHeaders().entrySet()) {
+                    if (entry.getValue() != null) {
+                        pr.headers().remove(entry.getKey()); // overwrite if added by headerAdder
+                        pr.headers().add(entry.getKey(), entry.getValue().getBytes(StandardCharsets.UTF_8));
+                    }
+                }
+            }
+
             try {
                 futures.add(producer.send(pr));
             } catch (Exception e) {

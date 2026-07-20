@@ -119,7 +119,7 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
     /** @return true if the KafkaProducer was created successfully */
     private boolean createKafkaProducer() {
         try {
-            Properties props = buildProducerProperties();
+            Properties props = ProducerConfigFactory.buildProducerProperties(endpoint);
             LOG.debug("[CPI-KAFKA-PLUS-DIAG] ensureInitialized: producer properties built, security={}, sasl={}",
                     endpoint.getSecurityProtocol(), endpoint.getSaslMechanism());
             kafkaProducer = BundleBackedClassLoader.withBundleClassLoader(getClass(),
@@ -372,6 +372,8 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
 
     private void addRecordHeaders(ProducerRecord<byte[], byte[]> record, Message message) {
         Map<String, Object> headers = message.getHeaders();
+        String allowedHeadersPattern = endpoint.getAllowedHeaders();
+        
         for (Map.Entry<String, Object> entry : headers.entrySet()) {
             String name = entry.getKey();
             // Skip internal Camel headers and our kafka.* control headers
@@ -379,52 +381,16 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
                     || name.startsWith("kafka.") || name.startsWith("CpiKafkaPlus")) {
                 continue;
             }
+            
+            if (!HeaderFilterStrategy.isHeaderAllowed(name, allowedHeadersPattern)) {
+                continue;
+            }
+            
             Object val = entry.getValue();
             if (val != null) {
                 record.headers().add(name, val.toString().getBytes(StandardCharsets.UTF_8));
             }
         }
-    }
-
-    private Properties buildProducerProperties() {
-        Properties props = new Properties();
-        props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, endpoint.getBootstrapServers());
-        // Serializers are passed as instances to the KafkaProducer constructor
-        // to avoid OSGi classloading issues with Class.forName()
-
-        String acks = endpoint.getAcks();
-        if (endpoint.isEnableIdempotence() && !"all".equals(acks) && !"-1".equals(acks)) {
-            LOG.warn("[CPI-KAFKA-PLUS-DIAG] buildProducerProperties: enableIdempotence=true requires acks=all, "
-                    + "overriding configured acks='{}' to 'all'", acks);
-            acks = "all";
-        }
-        props.put(ProducerConfig.ACKS_CONFIG, acks);
-        props.put(ProducerConfig.COMPRESSION_TYPE_CONFIG, endpoint.getCompressionType());
-        props.put(ProducerConfig.MAX_REQUEST_SIZE_CONFIG, endpoint.getMaxRequestSizeKb() * 1024);
-        props.put(ProducerConfig.LINGER_MS_CONFIG, 0L);
-        props.put(ProducerConfig.BATCH_SIZE_CONFIG, endpoint.getProducerBatchSizeKb() * 1024);
-        props.put(ProducerConfig.BUFFER_MEMORY_CONFIG, endpoint.getBufferMemoryKb() * 1024L);
-        props.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, endpoint.isEnableIdempotence());
-        // retries: not configurable — Kafka uses Integer.MAX_VALUE with idempotence,
-        // deliveryTimeoutSeconds is the effective limit
-        int deliveryMs = endpoint.getDeliveryTimeoutSeconds() * 1000;
-        props.put(ProducerConfig.DELIVERY_TIMEOUT_MS_CONFIG, deliveryMs);
-        // request.timeout.ms must be <= delivery.timeout.ms; cap it accordingly
-        int requestTimeoutMs = Math.min(30000, deliveryMs);
-        props.put(ProducerConfig.REQUEST_TIMEOUT_MS_CONFIG, requestTimeoutMs);
-
-        // client.id — auto-generated from adapter instance ID
-        String adapterInstanceId = endpoint.getCamelContext() != null
-                ? endpoint.getCamelContext().getGlobalOption("adapterInstanceID") : null;
-        if (adapterInstanceId != null && !adapterInstanceId.isEmpty()) {
-            props.put(ProducerConfig.CLIENT_ID_CONFIG,
-                    "cpi-kafka-plus-producer-" + adapterInstanceId);
-        }
-
-        // Security - reuse same logic as consumer
-        SecurityConfigHelper.configureSecurityProperties(props, endpoint);
-
-        return props;
     }
 
     private void recordSendSuccess() {
