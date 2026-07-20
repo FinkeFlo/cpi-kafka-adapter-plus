@@ -117,6 +117,7 @@ public final class BatchParser {
      * Accepts three root shapes for backward compatibility:
      * <ul>
      *   <li>{@code {"kafkaRecords":{"record":[...]}}} — current consumer output (CPI JSON→XML compatible)</li>
+     *   <li>{@code {"kafkaRecords":{"record":{...}}}} — single record object instead of array</li>
      *   <li>{@code {"kafkaRecords":[...]}} — legacy wrapped-array form</li>
      *   <li>{@code [...]} — legacy root-array form</li>
      * </ul>
@@ -130,13 +131,20 @@ public final class BatchParser {
             if (wrapped.isArray()) {
                 return (ArrayNode) wrapped;
             }
-            if (wrapped.isObject() && wrapped.has("record") && wrapped.get("record").isArray()) {
-                return (ArrayNode) wrapped.get("record");
+            if (wrapped.isObject() && wrapped.has("record")) {
+                JsonNode recordNode = wrapped.get("record");
+                if (recordNode.isArray()) {
+                    return (ArrayNode) recordNode;
+                } else if (recordNode.isObject()) {
+                    ArrayNode arrayNode = MAPPER.createArrayNode();
+                    arrayNode.add(recordNode);
+                    return arrayNode;
+                }
             }
         }
         throw new IllegalArgumentException(
                 "Producer batch mode expects a JSON array, "
-                + "{\"kafkaRecords\":[...]}, or {\"kafkaRecords\":{\"record\":[...]}}, but received: "
+                + "{\"kafkaRecords\":[...]}, {\"kafkaRecords\":{\"record\":[...]}}, or a single record object, but received: "
                 + root.getNodeType());
     }
 
