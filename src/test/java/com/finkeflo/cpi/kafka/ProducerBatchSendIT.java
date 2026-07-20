@@ -289,11 +289,11 @@ public class ProducerBatchSendIT {
         // Headers
         Assert.assertEquals(topic, out.getHeader("SAP_Receiver"));
         Assert.assertEquals(topic, out.getHeader("CamelKafkaTopic"));
-        Assert.assertEquals(3, out.getHeader("CpiKafkaPlusBatchRecordCount"));
+        Assert.assertEquals(3, out.getHeader("CpiKafkaPlusRecordCount"));
         Assert.assertEquals("JSON_ARRAY", out.getHeader("CpiKafkaPlusBatchInputFormat"));
-        Assert.assertNotNull(out.getHeader("CpiKafkaPlusBatchFirstOffset"));
-        Assert.assertNotNull(out.getHeader("CpiKafkaPlusBatchLastOffset"));
-        Assert.assertNotNull(out.getHeader("CpiKafkaPlusBatchPartitions"));
+        Assert.assertNotNull(out.getHeader("CpiKafkaPlusFirstOffset"));
+        Assert.assertNotNull(out.getHeader("CpiKafkaPlusLastOffset"));
+        Assert.assertNotNull(out.getHeader("CpiKafkaPlusPartitions"));
 
         // Body — XML summary
         String body = out.getBody(String.class);
@@ -356,7 +356,7 @@ public class ProducerBatchSendIT {
             producer.process(exchange);
 
             Assert.assertEquals(3,
-                    exchange.getIn().getHeader("CpiKafkaPlusBatchRecordCount"));
+                    exchange.getIn().getHeader("CpiKafkaPlusRecordCount"));
         } finally {
             producer.doStop();
         }
