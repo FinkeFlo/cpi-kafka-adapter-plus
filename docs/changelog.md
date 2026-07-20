@@ -7,6 +7,16 @@ and the project follows [Semantic Versioning](https://semver.org/). See
 [VERSIONING.md](https://github.com/finkeflo/cpi-kafka-adapter-plus/blob/main/VERSIONING.md) for how the adapter version maps to SAP CPI
 iFlow compatibility.
 
+## [1.0.9] - 2026-07-20
+
+### Changed
+- **Breaking (runtime headers only, no channel/metadata impact):** renamed the producer (Receiver adapter) response headers to match the consumer's naming convention, dropping the redundant `Batch` infix: `CpiKafkaPlusBatchRecordCount` → `CpiKafkaPlusRecordCount`, `CpiKafkaPlusBatchFirstOffset` → `CpiKafkaPlusFirstOffset`, `CpiKafkaPlusBatchLastOffset` → `CpiKafkaPlusLastOffset`, `CpiKafkaPlusBatchPartitions` → `CpiKafkaPlusPartitions`. `CpiKafkaPlusBatchInputFormat`/`CpiKafkaPlusBatchOutputFormat` are unaffected. If any downstream flow step (Groovy, Mapping, Router) reads the old names, update it to the new ones.
+
+## [1.0.8] - 2026-07-20
+
+### Fixed
+- Receiver variant was missing the ADK `IsRequestResponse` flag, so SAP Cloud Integration rejected the adapter with "is not supported for the adapter" on **Send** and **Request-Reply** steps. It only worked on a plain End Message Event channel. Now works on Send/Request-Reply too, and the Request-Reply call returns the producer result in the response body.
+
 ## [1.0.7] - 2026-07-14
 
 ### Added
