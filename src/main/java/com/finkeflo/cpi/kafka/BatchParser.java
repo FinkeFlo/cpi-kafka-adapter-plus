@@ -108,7 +108,20 @@ public final class BatchParser {
                         : valueNode.toString();
             }
 
-            records.add(new BatchRecord(key, value));
+            // Headers: optional
+            java.util.Map<String, String> headers = null;
+            if (element.has("headers") && element.get("headers").isObject()) {
+                headers = new java.util.HashMap<>();
+                java.util.Iterator<java.util.Map.Entry<String, JsonNode>> fields = element.get("headers").fields();
+                while (fields.hasNext()) {
+                    java.util.Map.Entry<String, JsonNode> field = fields.next();
+                    if (!field.getValue().isNull()) {
+                        headers.put(field.getKey(), field.getValue().isTextual() ? field.getValue().asText() : field.getValue().toString());
+                    }
+                }
+            }
+
+            records.add(new BatchRecord(key, value, headers));
         }
         return records;
     }
@@ -206,7 +219,25 @@ public final class BatchParser {
             Element valueEl = (Element) valueNodes.item(0);
             String value = extractValueContent(valueEl);
 
-            records.add(new BatchRecord(key, value));
+            // Headers: optional
+            java.util.Map<String, String> headers = null;
+            NodeList headersNodes = recordEl.getElementsByTagName("headers");
+            if (headersNodes.getLength() > 0) {
+                Element headersEl = (Element) headersNodes.item(0);
+                NodeList headerList = headersEl.getElementsByTagName("header");
+                if (headerList.getLength() > 0) {
+                    headers = new java.util.HashMap<>();
+                    for (int j = 0; j < headerList.getLength(); j++) {
+                        Element hEl = (Element) headerList.item(j);
+                        String hName = hEl.getAttribute("name");
+                        if (hName != null && !hName.isEmpty()) {
+                            headers.put(hName, hEl.getTextContent());
+                        }
+                    }
+                }
+            }
+
+            records.add(new BatchRecord(key, value, headers));
         }
         return records;
     }

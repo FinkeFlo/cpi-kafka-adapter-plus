@@ -28,10 +28,16 @@ public final class BatchRecord {
 
     private final String key;
     private final String value;
+    private final java.util.Map<String, String> headers;
 
     public BatchRecord(String key, String value) {
+        this(key, value, null);
+    }
+
+    public BatchRecord(String key, String value, java.util.Map<String, String> headers) {
         this.key = key;
         this.value = value;
+        this.headers = headers;
     }
 
     /** Record key, may be null (Kafka round-robin partitioning). */
@@ -39,4 +45,7 @@ public final class BatchRecord {
 
     /** Record value, may be null (Kafka tombstone). */
     public String getValue() { return value; }
+
+    /** Record specific headers, may be null. */
+    public java.util.Map<String, String> getHeaders() { return headers; }
 }
