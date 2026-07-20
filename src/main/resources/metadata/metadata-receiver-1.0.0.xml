@@ -157,6 +157,16 @@
                     <ErrorMessage>Please enter a positive number in KB (e.g. 32768 for 32 MB)</ErrorMessage>
                 </AttributeReference>
             </AttributeGroup>
+            <AttributeGroup id="producerHeaders">
+                <Name xsi:type="xs:string" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">Header Details</Name>
+                <GuiLabels guid="a2000003-0000-0000-0000-000000000020">
+                    <Label language="EN">Header Details</Label>
+                </GuiLabels>
+                <AttributeReference>
+                    <ReferenceName>allowedHeaders</ReferenceName>
+                    <description>Pipe-separated list of headers to send to Kafka (e.g. SAP_*|MyHeader|*). Use * for all. Note: Headers explicitly mapped in a batch payload (JSON/XML) bypass this filter and overwrite exchange headers of the same name.</description>
+                </AttributeReference>
+            </AttributeGroup>
         </Tab>
 
         <!-- ===== Tab: Avro / Schema Registry ===== -->
@@ -568,6 +578,15 @@
         <Length/>
         <isparameterized>true</isparameterized>
         <GuiLabels guid="b1000004-0000-0000-0000-000000000009"><Label language="EN">Delivery Timeout (Seconds)</Label></GuiLabels>
+    </AttributeMetadata>
+    <AttributeMetadata>
+        <Name>allowedHeaders</Name>
+        <Usage>false</Usage>
+        <DataType>xsd:string</DataType>
+        <Default>*</Default>
+        <Length>2000</Length>
+        <isparameterized>true</isparameterized>
+        <GuiLabels guid="b1000004-0000-0000-0000-000000000010"><Label language="EN">Allowed Headers</Label></GuiLabels>
     </AttributeMetadata>
     <!-- Avro / Schema Registry -->
     <AttributeMetadata>

@@ -65,6 +65,7 @@ In `XML_LIST` mode, each `<value>` element carries a `format` attribute (`"xml"`
 | `bufferMemoryKb` | `32768` | Total memory for producer buffering in KB. |
 | `enableIdempotence` | `true` | Enable idempotent producer. |
 | `deliveryTimeoutSeconds` | `120` | Maximum delivery time in seconds, including retries. |
+| `allowedHeaders` | `*` | Pipe-separated list of headers to send to Kafka. Use `*` for all. Note: Headers explicitly mapped in a batch payload (JSON/XML) bypass this filter and overwrite exchange headers of the same name. |
 
 ## Error Handling
 

@@ -158,6 +158,10 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
             description = "Enable idempotent producer (exactly-once semantics)")
     private boolean enableIdempotence = true;
 
+    @UriParam(label = "producer", defaultValue = "*",
+            description = "Pipe-separated list of headers to send to Kafka (e.g. SAP_*|MyHeader|*). Use * for all.")
+    private String allowedHeaders = "*";
+
     // retries: commented out — deliveryTimeoutSeconds is the effective limit.
     // Kafka uses Integer.MAX_VALUE retries internally when idempotence is enabled.
     // Re-enable if a use case requires explicit retry control.
@@ -488,6 +492,9 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
 
     public boolean isEnableIdempotence() { return enableIdempotence; }
     public void setEnableIdempotence(boolean enableIdempotence) { this.enableIdempotence = enableIdempotence; }
+
+    public String getAllowedHeaders() { return allowedHeaders; }
+    public void setAllowedHeaders(String allowedHeaders) { this.allowedHeaders = allowedHeaders; }
 
     // public int getRetries() { return retries; }
     // public void setRetries(int retries) { this.retries = retries; }
