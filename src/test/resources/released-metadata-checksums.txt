@@ -3,3 +3,4 @@
 # Grow-only: add an entry when a metadata file becomes a prior version; NEVER edit a frozen file.
 # Format: <filename>=<sha256>
 metadata.xml=f0fbd904e74bee51e17405fd1ba58a1ba215c5b42771c805035e4db8d6fe09ed
+metadata-sender-1.0.0.xml=f034282ec731937b193148d036c9c65e8f9fd4ec317d20022a734e64f5d8b34c
