@@ -86,6 +86,7 @@ Priority (high to low):
 |--------|-------------|
 | `SAP_Receiver` | Topic name (MPL monitoring) |
 | `CamelKafkaTopic` | Topic |
+| `CpiKafkaPlusTopic` | Topic (same value as `CamelKafkaTopic`/`SAP_Receiver`, aligned with the consumer's header name) |
 | `CpiKafkaPlusRecordCount` | Number of records sent |
 | `CpiKafkaPlusBatchInputFormat` | Configured batch mode |
 | `CpiKafkaPlusFirstOffset` | Offset of the first record |
