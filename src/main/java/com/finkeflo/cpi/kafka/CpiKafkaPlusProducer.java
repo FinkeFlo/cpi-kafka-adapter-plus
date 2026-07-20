@@ -372,6 +372,8 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
 
     private void addRecordHeaders(ProducerRecord<byte[], byte[]> record, Message message) {
         Map<String, Object> headers = message.getHeaders();
+        String allowedHeadersPattern = endpoint.getAllowedHeaders();
+        
         for (Map.Entry<String, Object> entry : headers.entrySet()) {
             String name = entry.getKey();
             // Skip internal Camel headers and our kafka.* control headers
@@ -379,11 +381,50 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
                     || name.startsWith("kafka.") || name.startsWith("CpiKafkaPlus")) {
                 continue;
             }
+            
+            if (!isHeaderAllowed(name, allowedHeadersPattern)) {
+                continue;
+            }
+            
             Object val = entry.getValue();
             if (val != null) {
                 record.headers().add(name, val.toString().getBytes(StandardCharsets.UTF_8));
             }
         }
+    }
+
+    private boolean isHeaderAllowed(String headerName, String allowedPatternStr) {
+        if (allowedPatternStr == null || allowedPatternStr.trim().isEmpty()) {
+            return false;
+        }
+        if ("*".equals(allowedPatternStr.trim())) {
+            return true;
+        }
+        String[] patterns = allowedPatternStr.split("\\|");
+        for (String pattern : patterns) {
+            pattern = pattern.trim();
+            if (pattern.isEmpty()) {
+                continue;
+            }
+            if (pattern.endsWith("*") && pattern.startsWith("*") && pattern.length() > 2) {
+                if (headerName.contains(pattern.substring(1, pattern.length() - 1))) {
+                    return true;
+                }
+            } else if (pattern.endsWith("*")) {
+                if (headerName.startsWith(pattern.substring(0, pattern.length() - 1))) {
+                    return true;
+                }
+            } else if (pattern.startsWith("*")) {
+                if (headerName.endsWith(pattern.substring(1))) {
+                    return true;
+                }
+            } else {
+                if (headerName.equals(pattern)) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private Properties buildProducerProperties() {
