@@ -5,7 +5,7 @@
     <modelVersion>4.0.0</modelVersion>
     <groupId>com.finkeflo.cpi.kafka</groupId>
     <artifactId>cpi-kafka-adapter-plus</artifactId>
-    <version>1.0.7</version>
+    <version>1.0.8</version>
     <packaging>bundle</packaging>
     <name>Kafka Adapter Plus</name>
     <description>Custom Apache Kafka adapter for SAP Cloud Integration (CPI) with advanced batch processing, Avro/Schema Registry support, and SASL/SSL security.</description>
