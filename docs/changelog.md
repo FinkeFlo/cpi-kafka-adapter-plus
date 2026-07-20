@@ -7,6 +7,11 @@ and the project follows [Semantic Versioning](https://semver.org/). See
 [VERSIONING.md](https://github.com/finkeflo/cpi-kafka-adapter-plus/blob/main/VERSIONING.md) for how the adapter version maps to SAP CPI
 iFlow compatibility.
 
+## [1.0.11] - 2026-07-20
+
+### Fixed
+- **Producer (Receiver adapter)**: Fixed an issue where the batch mode would reject a single JSON object. It now correctly wraps a single object into an array, accommodating SAP CPI's standard XML-to-JSON conversion behavior where arrays of size 1 are flattened to single objects.
+
 ## [1.0.10] - 2026-07-20
 
 ### Added
