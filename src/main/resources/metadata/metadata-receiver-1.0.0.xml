@@ -164,7 +164,7 @@
                 </GuiLabels>
                 <AttributeReference>
                     <ReferenceName>allowedHeaders</ReferenceName>
-                    <description>Pipe-separated list of headers to send to Kafka (e.g. SAP_*|MyHeader|*). Use * for all.</description>
+                    <description>Pipe-separated list of headers to send to Kafka (e.g. SAP_*|MyHeader|*). Use * for all. Note: Headers explicitly mapped in a batch payload (JSON/XML) bypass this filter and overwrite exchange headers of the same name.</description>
                 </AttributeReference>
             </AttributeGroup>
         </Tab>

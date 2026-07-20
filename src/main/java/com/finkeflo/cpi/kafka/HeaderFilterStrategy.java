@@ -45,26 +45,29 @@ public final class HeaderFilterStrategy {
         if ("*".equals(allowedPatternStr.trim())) {
             return true;
         }
+        
+        String headerNameLower = headerName.toLowerCase();
         String[] patterns = allowedPatternStr.split("\\|");
+        
         for (String pattern : patterns) {
-            pattern = pattern.trim();
+            pattern = pattern.trim().toLowerCase();
             if (pattern.isEmpty()) {
                 continue;
             }
             if (pattern.endsWith("*") && pattern.startsWith("*") && pattern.length() > 2) {
-                if (headerName.contains(pattern.substring(1, pattern.length() - 1))) {
+                if (headerNameLower.contains(pattern.substring(1, pattern.length() - 1))) {
                     return true;
                 }
             } else if (pattern.endsWith("*")) {
-                if (headerName.startsWith(pattern.substring(0, pattern.length() - 1))) {
+                if (headerNameLower.startsWith(pattern.substring(0, pattern.length() - 1))) {
                     return true;
                 }
             } else if (pattern.startsWith("*")) {
-                if (headerName.endsWith(pattern.substring(1))) {
+                if (headerNameLower.endsWith(pattern.substring(1))) {
                     return true;
                 }
             } else {
-                if (headerName.equals(pattern)) {
+                if (headerNameLower.equals(pattern)) {
                     return true;
                 }
             }

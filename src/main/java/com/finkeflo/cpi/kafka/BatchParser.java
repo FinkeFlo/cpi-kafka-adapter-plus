@@ -221,9 +221,17 @@ public final class BatchParser {
 
             // Headers: optional
             java.util.Map<String, String> headers = null;
-            NodeList headersNodes = recordEl.getElementsByTagName("headers");
-            if (headersNodes.getLength() > 0) {
-                Element headersEl = (Element) headersNodes.item(0);
+            Element headersEl = null;
+            NodeList recordChildren = recordEl.getChildNodes();
+            for (int j = 0; j < recordChildren.getLength(); j++) {
+                Node child = recordChildren.item(j);
+                if (child.getNodeType() == Node.ELEMENT_NODE && "headers".equals(child.getNodeName())) {
+                    headersEl = (Element) child;
+                    break;
+                }
+            }
+
+            if (headersEl != null) {
                 NodeList headerList = headersEl.getElementsByTagName("header");
                 if (headerList.getLength() > 0) {
                     headers = new java.util.HashMap<>();
