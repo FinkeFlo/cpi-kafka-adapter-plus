@@ -7,6 +7,18 @@ and the project follows [Semantic Versioning](https://semver.org/). See
 [VERSIONING.md](https://github.com/finkeflo/cpi-kafka-adapter-plus/blob/main/VERSIONING.md) for how the adapter version maps to SAP CPI
 iFlow compatibility.
 
+## [1.0.12] - 2026-07-20
+
+### Added
+- **Producer (Receiver adapter)**: Support for configurable header mapping (`allowedHeaders`). Headers matching the pattern will be sent to Kafka.
+- **Producer (Receiver adapter)**: Batch records (JSON/XML) can now contain explicit `headers` that bypass the exchange filter and overwrite exchange headers of the same name.
+
+### Fixed
+- **XML Batch Parser**: Fixed a critical bug where `<headers>` tags nested inside the XML payload of a record were falsely extracted.
+
+### Changed
+- **Dependencies**: Bumped `awaitility` to 4.3.0 and `jacoco-maven-plugin` to 0.8.15.
+
 ## [1.0.11] - 2026-07-20
 
 ### Fixed

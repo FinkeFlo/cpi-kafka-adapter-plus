@@ -24,7 +24,7 @@ for maximum throughput.
   "kafkaRecords": {
     "record": [
       {"key": "order-1", "value": {"id": 1, "amount": 99.90}},
-      {"key": "order-2", "value": {"id": 2, "amount": 45.00}},
+      {"key": "order-2", "headers": {"target": "erp", "priority": "high"}, "value": {"id": 2, "amount": 45.00}},
       {"value": "message without key"}
     ]
   }
@@ -40,6 +40,7 @@ doesn't round-trip cleanly through CPI's own converters.
 - Root must be `{"kafkaRecords": {"record": [...]}}`
 - Each element in `record` must contain at least `value`
 - `key` is optional (if missing: falls back to the `kafka.KEY` header, then `null`)
+- `headers` is optional (an object mapping string keys to string values; these bypass the exchange filter and override exchange-level headers)
 - A `value` given as a JSON object is serialized to a JSON string
 - `value: null` produces a Kafka tombstone message
 - Unknown fields (`topic`, `partition`, `offset`, `timestamp`) are ignored
@@ -54,9 +55,20 @@ doesn't round-trip cleanly through CPI's own converters.
 <kafkaRecords>
   <record>
     <key>order-1</key>
-    <value>{"id": 1, "amount": 99.90}</value>
+    <!-- Native XML: automatically re-serialized to a string by the adapter -->
+    <value>
+      <order>
+        <id>1</id>
+        <amount>99.90</amount>
+      </order>
+    </value>
   </record>
   <record>
+    <headers>
+      <target>erp</target>
+      <priority>high</priority>
+    </headers>
+    <!-- Alternatively: using CDATA -->
     <value><![CDATA[<order><id>2</id></order>]]></value>
   </record>
 </kafkaRecords>
@@ -66,8 +78,9 @@ doesn't round-trip cleanly through CPI's own converters.
 - Root element must be `<kafkaRecords>`
 - Each `<record>` must contain at least `<value>`
 - `<key>` is optional; missing = null key, empty = explicit empty-string key
+- `<headers>` is optional; child elements become header keys/values; these bypass the exchange filter and override exchange-level headers
 - An empty `<value/>` produces a tombstone message
-- For XML content as a value: **use CDATA** (recommended)
+- For XML content as a value: CDATA is optional. If you provide nested XML elements (e.g. `<value><order>...</order></value>`), the adapter automatically re-serializes them to an XML string for the Kafka message.
 - Unknown elements are ignored (round-trip symmetry with the consumer)
 
 ## Key handling
@@ -120,7 +133,7 @@ On error, the body is left unchanged (for debugging).
 
 - JSON Schema validation is skipped in batch mode (logged as a warning)
 - `kafka.PARTITION_KEY` and `kafka.OVERRIDE_TIMESTAMP` apply to all records in the batch
-- Exchange headers are copied to all Kafka records (no per-record headers)
+- Exchange headers are copied to all Kafka records (unless overridden by per-record `headers` inside the payload)
 - Avro serialization is not supported in batch mode (v1)
 
 ---
@@ -200,11 +213,11 @@ def Message processData(Message message) {
 }
 ```
 
-### Note: CDATA for XML values
+### Note: XML values
 
-Always use CDATA for XML content used as a value:
+If you want to send XML payloads as the Kafka message value, you have two options:
 
-- **XSLT:** `cdata-section-elements="value"` in `<xsl:output>`
-- **Groovy:** insert `<![CDATA[...]]>` manually
-
-The XML parser automatically un-escapes CDATA.
+1. **Native XML (Recommended):** Just nest the XML elements directly inside `<value>`. The adapter's batch parser detects child elements and automatically re-serializes them into an XML string. This is often the easiest approach when using standard CPI message mappings.
+2. **CDATA:** Wrap the XML string in `<![CDATA[...]]>`. The parser will read it as a raw string.
+   - **XSLT:** `cdata-section-elements="value"` in `<xsl:output>`
+   - **Groovy:** insert `<![CDATA[...]]>` manually
