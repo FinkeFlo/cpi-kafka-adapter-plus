@@ -112,11 +112,26 @@ public final class BatchParser {
             java.util.Map<String, String> headers = null;
             if (element.has("headers") && element.get("headers").isObject()) {
                 headers = new java.util.HashMap<>();
-                java.util.Iterator<java.util.Map.Entry<String, JsonNode>> fields = element.get("headers").fields();
-                while (fields.hasNext()) {
-                    java.util.Map.Entry<String, JsonNode> field = fields.next();
-                    if (!field.getValue().isNull()) {
-                        headers.put(field.getKey(), field.getValue().isTextual() ? field.getValue().asText() : field.getValue().toString());
+                JsonNode headersNode = element.get("headers");
+                
+                // Support CPI XML-to-JSON converted headers
+                if (headersNode.has("header") && (headersNode.get("header").isArray() || headersNode.get("header").isObject())) {
+                    JsonNode headerNode = headersNode.get("header");
+                    if (headerNode.isObject()) {
+                        extractCpiJsonHeader(headerNode, headers);
+                    } else {
+                        for (JsonNode hNode : headerNode) {
+                            extractCpiJsonHeader(hNode, headers);
+                        }
+                    }
+                } else {
+                    // Standard native JSON map
+                    java.util.Iterator<java.util.Map.Entry<String, JsonNode>> fields = headersNode.fields();
+                    while (fields.hasNext()) {
+                        java.util.Map.Entry<String, JsonNode> field = fields.next();
+                        if (!field.getValue().isNull()) {
+                            headers.put(field.getKey(), field.getValue().isTextual() ? field.getValue().asText() : field.getValue().toString());
+                        }
                     }
                 }
             }
@@ -294,5 +309,16 @@ public final class BatchParser {
             return null; // tombstone
         }
         return text;
+    }
+
+    private static void extractCpiJsonHeader(JsonNode node, java.util.Map<String, String> headers) {
+        if (node != null && node.isObject() && node.has("@name") && node.has("$")) {
+            String key = node.get("@name").asText();
+            JsonNode valNode = node.get("$");
+            if (!valNode.isNull()) {
+                String val = valNode.isTextual() ? valNode.asText() : valNode.toString();
+                headers.put(key, val);
+            }
+        }
     }
 }
