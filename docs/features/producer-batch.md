@@ -65,8 +65,8 @@ doesn't round-trip cleanly through CPI's own converters.
   </record>
   <record>
     <headers>
-      <target>erp</target>
-      <priority>high</priority>
+      <header name="target">erp</header>
+      <header name="priority">high</header>
     </headers>
     <!-- Alternatively: using CDATA -->
     <value><![CDATA[<order><id>2</id></order>]]></value>
@@ -78,7 +78,7 @@ doesn't round-trip cleanly through CPI's own converters.
 - Root element must be `<kafkaRecords>`
 - Each `<record>` must contain at least `<value>`
 - `<key>` is optional; missing = null key, empty = explicit empty-string key
-- `<headers>` is optional; child elements become header keys/values; these bypass the exchange filter and override exchange-level headers
+- `<headers>` is optional; contains `<header name="key">value</header>` elements; these bypass the exchange filter and override exchange-level headers
 - An empty `<value/>` produces a tombstone message
 - For XML content as a value: CDATA is optional. If you provide nested XML elements (e.g. `<value><order>...</order></value>`), the adapter automatically re-serializes them to an XML string for the Kafka message.
 - Unknown elements are ignored (round-trip symmetry with the consumer)
