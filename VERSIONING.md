@@ -54,9 +54,10 @@ released version avoids that trap entirely.
 The repository features a fully automated release pipeline (`.github/workflows/release.yml`). You never need to build or upload the `.esa` file manually for a release. 
 
 To publish a new release:
-1. Complete the version bumps described above (`config.adk`, metadata files) and commit them to `main`.
+1. Complete the version bumps described above (`config.adk`, metadata files) and commit them to a new branch.
 2. Ensure you have added a corresponding section in `CHANGELOG.md` with the exact version number (e.g., `## [1.0.13] - YYYY-MM-DD`).
-3. Tag the commit and push the tag to trigger the pipeline:
+3. Create a Pull Request and merge these changes into `main` (since `main` is a protected branch).
+4. After merging, tag the commit on `main` and push the tag to trigger the pipeline:
 
 ```bash
 git tag v1.0.13
