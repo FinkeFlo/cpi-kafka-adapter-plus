@@ -1,7 +1,7 @@
 # ADR 0001: Handling Concurrency in Transactional Kafka Batching
 
 ## Status
-Proposed / Under Validation
+Accepted (Option 2 — see Decision below), pending review
 
 ## Context
 When sending large data sets in "Producer Batch Mode" (e.g. 10.000 records), network timeouts or broker errors can lead to a partial batch failure / data inconsistency. The first records might be committed to Kafka, while the rest fail. If the SAP CPI retries the message, it creates duplicates.
@@ -29,8 +29,29 @@ Implement an object pool (e.g., using Apache Commons Pool) that maintains a set 
 *   **Pros:** Best of both worlds. Zero connection overhead and non-blocking parallel execution (up to the pool size limit).
 *   **Cons:** High implementation complexity. Managing producer lifecycles, pool exhaustion, and connection validation adds significant technical debt to the adapter.
 
+## Local Validation
+Before deciding, we validated all three options locally with a Docker/Testcontainers-based spike (Kafka broker running in Docker, no changes to production code) against a real Kafka broker rather than deciding on paper alone.
+
+**Spike A — Concurrency proof.** A single shared, transactional `KafkaProducer` with 10 concurrent threads calling `beginTransaction()`/`commitTransaction()` without external synchronization fails for 9/10 threads (`IllegalStateException: Invalid transition ... IN_TRANSACTION to IN_TRANSACTION`, the client-side equivalent of `ConcurrentTransactionsException`). This confirms the premise of this ADR: a shared producer instance cannot safely run concurrent transactions without coordination.
+
+**Spike B — Comparing Options 1/2/3 under concurrent load** (10 threads x 2000 records each): Option 1 (synchronized) showed clear head-of-line blocking (threads waiting a large share of the total run time for the lock); Option 2 (new producer per transaction) ran fully in parallel with only a one-time producer/connection-init overhead per batch; Option 3 (mini pool, size 4) was fastest. A follow-up burst test against Option 3 (20 threads vs. a pool of 4, i.e. 5x oversubscription) showed graceful degradation (bounded queuing, no outright rejections) at this local scale — but this only rules out failure at small scale, not at production peak concurrency.
+
+**Spike C — Failure injection mid-batch.** Sending a 10,000-record batch and pausing the broker mid-flight (after the first half was flushed) reproduced the exact defect this ADR exists to fix: **without transactions, 5,711 of 10,000 records ended up visible** (a genuine partial batch / data inconsistency). **With transactions, 0 of 10,000 records were visible** to a `read_committed` consumer after the failure — the transaction was never committed, even though part of the data had already been physically written to the broker's log. The producer surfaced a clear signal (`KafkaException: ... safe to abort the transaction and continue`) that the real implementation needs to catch and explicitly resolve via `abortTransaction()`.
+
+**Multi-node consideration.** SAP CPI runs multiple worker nodes concurrently in production (not just multiple threads within one JVM, which is all the spike above exercised). For Option 2, each worker node independently creates its own short-lived transactional producers. Kafka fences (aborts) a producer as soon as another producer starts a transaction under the *same* `transactional.id` (zombie fencing) — so the `transactionalIdPrefix` alone is not sufficient; the generated `transactional.id` must be unique per worker node as well as per in-flight transaction. The adapter's consumer side already solves an analogous problem for `group.instance.id` (`CpiKafkaPlusConsumer.resolveStaticMemberSuffix()`, using `CF_INSTANCE_INDEX` with a `HOSTNAME` fallback to get a stable per-worker-node identifier) — the producer-side implementation should reuse the same pattern rather than inventing a new one.
+
 ## Decision
-[To be decided after validation]
+**Option 2: New Producer Instance Per Transaction.**
+
+Reasoning:
+- It fully resolves the concurrency problem from the Context section (validated in Spike A/B), without introducing the thread-exhaustion risk of Option 1 or the pooling/lifecycle complexity of Option 3.
+- It is the most backward-compatible of the three options: the existing long-lived, lazily-initialized `KafkaProducer` used for the current (non-transactional) send path in `CpiKafkaPlusProducer` is left completely untouched. The transactional path (gated behind `enableTransactions`) is fully additive — it creates, uses, and closes its own producer per transaction, so there is no shared state or locking that could affect the default (non-transactional) behavior. Option 1 cannot make this guarantee cleanly, since a Kafka producer that has been initialized with a `transactional.id` must use transactions for every send from then on.
+- The measured connection/init overhead (Spike B) is a one-time cost per batch and is negligible relative to the multi-second processing time of the large batches this feature targets.
+- Option 3 was fastest in the local spike but is not being chosen now: it adds real lifecycle complexity (pool sizing, health-checking/eviction of a producer after a failed transaction, pool shutdown handling) that isn't justified given Option 2 already meets the correctness and performance bar. It remains a candidate for later if producer-creation overhead is measured to be a real problem in production.
 
 ## Consequences
-[To be documented based on the decision]
+- `CpiKafkaPlusProducer`/`ProducerBatchHelper` gain a new, isolated transactional code path (active only when `enableTransactions=true`); the existing non-transactional path and its shared producer are unaffected.
+- The implementation must generate a globally unique `transactional.id` per transaction: `transactionalIdPrefix` + a stable per-worker-node identifier (reusing the existing `resolveStaticMemberSuffix()` pattern: `CF_INSTANCE_INDEX` with `HOSTNAME` fallback) + a per-transaction unique suffix. Without this, concurrent transactions from different CPI worker nodes risk fencing each other via Kafka's zombie-fencing mechanism.
+- The implementation must explicitly handle the commit/abort recovery sequence surfaced in Spike C: a failed `commitTransaction()` (timeout or unacknowledged-messages error) requires calling `abortTransaction()`, and the resulting state needs to be handled correctly rather than assumed to always succeed on the first attempt.
+- Option 3 (pool) is not ruled out permanently — if producer-creation overhead becomes a measured problem in production after Option 2 ships, it can be revisited, informed by a dedicated pool-exhaustion load test under realistic peak concurrency (the local burst test only validated small scale).
+
