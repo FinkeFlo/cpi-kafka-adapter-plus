@@ -195,9 +195,9 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
         Message in = exchange.getIn();
 
         // Determine topic - header overrides config
-        String topic = in.getHeader("CamelKafkaTopic", String.class);
+        String topic = resolveTopic(exchange, in.getHeader("CamelKafkaTopic", String.class));
         if (topic == null || topic.isEmpty()) {
-            topic = endpoint.getEffectiveTopic();
+            topic = resolveTopic(exchange, endpoint.getEffectiveTopic());
         }
 
         String batchMode = endpoint.getProducerBatchMode();
@@ -339,6 +339,31 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
             }
         }
         return null;
+    }
+
+    static String resolveTopic(Exchange exchange, String topicCandidate) {
+        if (topicCandidate == null) {
+            return null;
+        }
+
+        String trimmed = topicCandidate.trim();
+        if (trimmed.isEmpty() || !trimmed.contains("${")) {
+            return trimmed;
+        }
+
+        String normalized = trimmed
+                .replace("${property.", "${exchangeProperty.")
+                .replace("${property[", "${exchangeProperty[");
+        String resolved = exchange.getContext()
+                .resolveLanguage("simple")
+                .createExpression(normalized)
+                .evaluate(exchange, String.class);
+
+        if (resolved == null || resolved.trim().isEmpty() || resolved.contains("${")) {
+            throw new IllegalArgumentException(
+                    "Topic expression '" + topicCandidate + "' could not be resolved to a valid topic name.");
+        }
+        return resolved.trim();
     }
 
     private byte[] serializeValue(String topic, Message message) {
