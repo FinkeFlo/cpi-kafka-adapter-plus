@@ -12,3 +12,7 @@
 
 # OS
 .DS_Store
+
+# Temp files
+.tmp
+.tmp/
