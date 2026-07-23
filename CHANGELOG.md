@@ -10,7 +10,7 @@ iFlow compatibility.
 ## [1.0.14] - 2026-07-23
 
 ### Fixed
-- **Producer (Receiver adapter)**: Configured Kafka topics are now resolved at runtime from Camel Simple expressions, including header and exchange-property lookups (e.g. `${header.myTopic}`, `${exchangeProperty.myTopic}`). Property-alias expressions are normalized to exchange properties for CPI compatibility, and the adapter fails fast when an expression cannot be resolved to a concrete topic.
+- **Producer (Receiver adapter)**: Configured Kafka topics are now resolved at runtime from Camel Simple expressions, including header and exchange-property lookups (e.g. `${header.topic}`, `${property.topic}`). Property-alias expressions are normalized to exchange properties for CPI compatibility, and the adapter fails fast when an expression cannot be resolved to a concrete topic.
 
 ## [1.0.13] - 2026-07-21
 
