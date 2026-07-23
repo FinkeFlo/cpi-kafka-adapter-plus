@@ -7,6 +7,11 @@ and the project follows [Semantic Versioning](https://semver.org/). See
 [VERSIONING.md](https://github.com/finkeflo/cpi-kafka-adapter-plus/blob/main/VERSIONING.md) for how the adapter version maps to SAP CPI
 iFlow compatibility.
 
+## [1.0.15] - 2026-07-23
+
+### Added
+- **Producer (Receiver adapter)**: Added optional Transactional Batching mode (ADR 0001). When `enableTransactions` is enabled, each batch is sent within an isolated Kafka transaction (`producer.beginTransaction()`, `commitTransaction()`). A bounded number of transaction IDs (`transactionalIdPrefix`) are reused across worker nodes to avoid producer fencing and coordinator bloat.
+
 ## [1.0.14] - 2026-07-23
 
 ### Fixed

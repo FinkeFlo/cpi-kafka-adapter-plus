@@ -52,6 +52,9 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
     private AdapterTracingHelper tracingHelper;
     private JsonSchemaValidator jsonSchemaValidator;
 
+    private java.util.concurrent.Semaphore txnSlotSemaphore;
+    private boolean[] txnSlotInUse;
+
     private volatile boolean initialized = false;
     private volatile int consecutiveSendFailures = 0;
     private volatile int consecutiveInitFailures = 0;
@@ -72,6 +75,17 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
                 endpoint.getEffectiveTopic());
 
         tracingHelper = new AdapterTracingHelper(endpoint);
+
+        if (endpoint.isEnableTransactions()) {
+            if (endpoint.getTransactionalIdPrefix() == null || endpoint.getTransactionalIdPrefix().trim().isEmpty()) {
+                throw new IllegalArgumentException("transactionalIdPrefix is required when enableTransactions is true");
+            }
+            int slots = endpoint.getMaxConcurrentTransactions();
+            txnSlotSemaphore = new java.util.concurrent.Semaphore(slots, true);
+            txnSlotInUse = new boolean[slots];
+            LOG.info("[CPI-KAFKA-PLUS-DIAG] Transactional batching enabled with max {} concurrent transactions. Prefix: {}",
+                    slots, endpoint.getTransactionalIdPrefix());
+        }
     }
 
     @Override
@@ -226,17 +240,99 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
 
         ProducerBatchHelper.ByteSerializer valueSerializer = buildBatchValueSerializer();
 
+        if (endpoint.isEnableTransactions()) {
+            sendTransactionalBatch(in, topic, batchMode, records, fallbackKey, partition, timestamp, valueSerializer);
+        } else {
+            try {
+                ProducerBatchHelper.BatchSendResult result = ProducerBatchHelper.sendBatch(
+                        kafkaProducer, records, topic, fallbackKey, partition, timestamp,
+                        in, this::addRecordHeaders, valueSerializer, null);
+
+                ProducerBatchHelper.setResponseHeadersAndBody(in, topic, batchMode, result);
+                recordSendSuccess();
+            } catch (Exception e) {
+                handleSendFailure(e);
+                throw new RuntimeException(
+                        "Failed to send batch to Kafka topic '" + topic + "': " + e.getMessage(), e);
+            }
+        }
+    }
+
+    private void sendTransactionalBatch(Message in, String topic, String batchMode,
+                                        java.util.List<BatchRecord> records, String fallbackKey,
+                                        Integer partition, Long timestamp,
+                                        ProducerBatchHelper.ByteSerializer valueSerializer) throws Exception {
+        int slotId = -1;
         try {
+            txnSlotSemaphore.acquire();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException("Interrupted while waiting for a transaction slot", e);
+        }
+
+        KafkaProducer<byte[], byte[]> txnProducer = null;
+        try {
+            synchronized (txnSlotInUse) {
+                for (int i = 0; i < txnSlotInUse.length; i++) {
+                    if (!txnSlotInUse[i]) {
+                        txnSlotInUse[i] = true;
+                        slotId = i;
+                        break;
+                    }
+                }
+            }
+            if (slotId == -1) {
+                throw new IllegalStateException("Acquired semaphore but no slot was free. This is a bug.");
+            }
+
+            String memberSuffix = CpiKafkaPlusConsumer.resolveStaticMemberSuffix();
+            String transactionalId = endpoint.getTransactionalIdPrefix() + "-" + memberSuffix + "-" + slotId;
+
+            java.util.Properties props = ProducerConfigFactory.buildProducerProperties(endpoint);
+            props.put(org.apache.kafka.clients.producer.ProducerConfig.TRANSACTIONAL_ID_CONFIG, transactionalId);
+
+            txnProducer = BundleBackedClassLoader.withBundleClassLoader(getClass(),
+                    () -> new KafkaProducer<>(props,
+                            new org.apache.kafka.common.serialization.ByteArraySerializer(),
+                            new org.apache.kafka.common.serialization.ByteArraySerializer()));
+
+            txnProducer.initTransactions();
+            txnProducer.beginTransaction();
+
             ProducerBatchHelper.BatchSendResult result = ProducerBatchHelper.sendBatch(
-                    kafkaProducer, records, topic, fallbackKey, partition, timestamp,
+                    txnProducer, records, topic, fallbackKey, partition, timestamp,
                     in, this::addRecordHeaders, valueSerializer, null);
+
+            txnProducer.commitTransaction();
 
             ProducerBatchHelper.setResponseHeadersAndBody(in, topic, batchMode, result);
             recordSendSuccess();
+
         } catch (Exception e) {
+            if (txnProducer != null) {
+                try {
+                    txnProducer.abortTransaction();
+                } catch (Exception abortEx) {
+                    LOG.warn("[CPI-KAFKA-PLUS-DIAG] Failed to abort transaction for slot {}: {}", slotId, abortEx.getMessage(), abortEx);
+                    e.addSuppressed(abortEx);
+                }
+            }
             handleSendFailure(e);
-            throw new RuntimeException(
-                    "Failed to send batch to Kafka topic '" + topic + "': " + e.getMessage(), e);
+            throw new RuntimeException("Failed to send transactional batch to Kafka topic '" + topic + "': " + e.getMessage(), e);
+        } finally {
+            if (txnProducer != null) {
+                try {
+                    txnProducer.close();
+                } catch (Exception closeEx) {
+                    LOG.warn("[CPI-KAFKA-PLUS-DIAG] Failed to close transactional producer for slot {}: {}", slotId, closeEx.getMessage(), closeEx);
+                }
+            }
+            if (slotId != -1) {
+                synchronized (txnSlotInUse) {
+                    txnSlotInUse[slotId] = false;
+                }
+            }
+            txnSlotSemaphore.release();
         }
     }
 

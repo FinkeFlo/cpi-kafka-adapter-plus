@@ -158,6 +158,18 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
             description = "Enable idempotent producer (exactly-once semantics)")
     private boolean enableIdempotence = true;
 
+    @UriParam(label = "producer", defaultValue = "false",
+            description = "Enable transactional batching (creates a new transactional producer per batch)")
+    private boolean enableTransactions = false;
+
+    @UriParam(label = "producer",
+            description = "Prefix for transactional.id (e.g. my-app-txn). Required if enableTransactions is true.")
+    private String transactionalIdPrefix;
+
+    @UriParam(label = "producer", defaultValue = "5",
+            description = "Maximum number of concurrent transactional producers per worker node")
+    private int maxConcurrentTransactions = 5;
+
     @UriParam(label = "producer", defaultValue = "*",
             description = "Pipe-separated list of headers to send to Kafka (e.g. SAP_*|MyHeader|*). Use * for all.")
     private String allowedHeaders = "*";
@@ -492,6 +504,15 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
 
     public boolean isEnableIdempotence() { return enableIdempotence; }
     public void setEnableIdempotence(boolean enableIdempotence) { this.enableIdempotence = enableIdempotence; }
+
+    public boolean isEnableTransactions() { return enableTransactions; }
+    public void setEnableTransactions(boolean enableTransactions) { this.enableTransactions = enableTransactions; }
+
+    public String getTransactionalIdPrefix() { return transactionalIdPrefix; }
+    public void setTransactionalIdPrefix(String transactionalIdPrefix) { this.transactionalIdPrefix = transactionalIdPrefix; }
+
+    public int getMaxConcurrentTransactions() { return maxConcurrentTransactions; }
+    public void setMaxConcurrentTransactions(int maxConcurrentTransactions) { this.maxConcurrentTransactions = maxConcurrentTransactions; }
 
     public String getAllowedHeaders() { return allowedHeaders; }
     public void setAllowedHeaders(String allowedHeaders) { this.allowedHeaders = allowedHeaders; }
