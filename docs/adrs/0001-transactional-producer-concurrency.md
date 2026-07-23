@@ -51,7 +51,16 @@ Reasoning:
 
 ## Consequences
 - `CpiKafkaPlusProducer`/`ProducerBatchHelper` gain a new, isolated transactional code path (active only when `enableTransactions=true`); the existing non-transactional path and its shared producer are unaffected.
-- The implementation must generate a globally unique `transactional.id` per transaction: `transactionalIdPrefix` + a stable per-worker-node identifier (reusing the existing `resolveStaticMemberSuffix()` pattern: `CF_INSTANCE_INDEX` with `HOSTNAME` fallback) + a per-transaction unique suffix. Without this, concurrent transactions from different CPI worker nodes risk fencing each other via Kafka's zombie-fencing mechanism.
+- The implementation must generate a `transactional.id` that is unique per worker node and bounded per node — **not** a fresh random value (e.g. a `UUID`) per transaction. A brand-new `transactional.id` on every transaction would never be reused, and Kafka retains transaction-coordinator state (in the internal `__transaction_state` topic) for each distinct `transactional.id` until `transactional.id.expiration.ms` (default 7 days) elapses — at high batch throughput this would accumulate large numbers of never-reused, orphaned IDs and needlessly bloat coordinator state. Instead, use a small, bounded, *reused* ID space:
+  - Format: `transactionalIdPrefix` + `-` + a stable per-worker-node identifier (reusing the existing `resolveStaticMemberSuffix()` pattern: `CF_INSTANCE_INDEX` with `HOSTNAME` fallback) + `-` + a bounded slot index (e.g. `0`–`3`, sized to the max. concurrent transactions allowed per node), e.g.:
+    ```
+    cpi-kafka-adapter-txn-0-0   (worker node 0, slot 0)
+    cpi-kafka-adapter-txn-0-1   (worker node 0, slot 1)
+    cpi-kafka-adapter-txn-1-0   (worker node 1, slot 0)
+    ```
+  - Slots are managed with a simple bounded resource (e.g. a `Semaphore(N)` per node): a transaction acquires a free slot, builds its `transactional.id` from that slot number, creates a new `KafkaProducer` for the transaction (Option 2's model is unaffected — the producer/connection is still created and closed per transaction), and releases the slot when the transaction finishes (commit or abort).
+  - Reusing the same `transactional.id` string across successive, non-overlapping transactions on the same slot is safe: the transaction coordinator tracks state by ID (bumping the producer epoch on every `initTransactions()` call), not by producer object/connection. If a previous transaction on that slot crashed without committing, the *next* `initTransactions()` call with the same ID automatically fences/aborts the dangling one — this is the intended zombie-recovery behavior, not a risk.
+  - This keeps the total number of distinct `transactional.id`s bounded (worker nodes × slots per node) and reused indefinitely, avoiding the coordinator-state bloat of a per-transaction GUID, while still preventing cross-node fencing collisions.
 - The implementation must explicitly handle the commit/abort recovery sequence surfaced in Spike C: a failed `commitTransaction()` (timeout or unacknowledged-messages error) requires calling `abortTransaction()`, and the resulting state needs to be handled correctly rather than assumed to always succeed on the first attempt.
 - Option 3 (pool) is not ruled out permanently — if producer-creation overhead becomes a measured problem in production after Option 2 ships, it can be revisited, informed by a dedicated pool-exhaustion load test under realistic peak concurrency (the local burst test only validated small scale).
 
