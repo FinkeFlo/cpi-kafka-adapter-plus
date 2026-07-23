@@ -4,4 +4,3 @@
 # Format: <filename>=<sha256>
 metadata.xml=f0fbd904e74bee51e17405fd1ba58a1ba215c5b42771c805035e4db8d6fe09ed
 metadata-sender-1.0.0.xml=f034282ec731937b193148d036c9c65e8f9fd4ec317d20022a734e64f5d8b34c
-metadata-receiver-1.0.0.xml=791e384512c9b20ffca64739f87e41e08999055f35be99b09d4341dc6ba0d371
