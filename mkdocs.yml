@@ -60,5 +60,5 @@ nav:
   - Security:
       - Authentication: security/authentication.md
   - Architecture Decisions:
-      - ADR 0001: Transactional Concurrency: adrs/0001-transactional-producer-concurrency.md
+      - "ADR 0001: Transactional Concurrency": adrs/0001-transactional-producer-concurrency.md
   - Changelog: changelog.md
