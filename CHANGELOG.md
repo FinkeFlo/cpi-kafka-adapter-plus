@@ -7,6 +7,11 @@ and the project follows [Semantic Versioning](https://semver.org/). See
 [VERSIONING.md](https://github.com/finkeflo/cpi-kafka-adapter-plus/blob/main/VERSIONING.md) for how the adapter version maps to SAP CPI
 iFlow compatibility.
 
+## [1.1.0] - 2026-07-23
+
+### Added
+- **Producer (Receiver adapter)**: Configured Kafka topics can now be resolved at runtime from Camel Simple expressions, including header and exchange-property lookups (e.g. `${header.myTopic}`, `${exchangeProperty.myTopic}`). Property-alias expressions are normalized to exchange properties for CPI compatibility, and the adapter fails fast when an expression cannot be resolved to a concrete topic.
+
 ## [1.0.13] - 2026-07-21
 
 ### Fixed
