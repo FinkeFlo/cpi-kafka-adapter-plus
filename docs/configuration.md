@@ -64,6 +64,9 @@ In `XML_LIST` mode, each `<value>` element carries a `format` attribute (`"xml"`
 | `producerBatchSizeKb` | `1024` | Producer batch size in KB. |
 | `bufferMemoryKb` | `32768` | Total memory for producer buffering in KB. |
 | `enableIdempotence` | `true` | Enable idempotent producer. |
+| `enableTransactions` | `false` | Enable transactional batching (creates a new transactional producer per batch). |
+| `transactionalIdPrefix` | — | Prefix for `transactional.id` (e.g. `my-app-txn`). Required if `enableTransactions` is `true`. |
+| `maxConcurrentTransactions` | `5` | Maximum number of concurrent transactional producers per worker node. |
 | `deliveryTimeoutSeconds` | `120` | Maximum delivery time in seconds, including retries. |
 | `allowedHeaders` | `*` | Pipe-separated list of headers to send to Kafka. Use `*` for all. Note: Headers explicitly mapped in a batch payload (JSON/XML) bypass this filter and overwrite exchange headers of the same name. |
 
