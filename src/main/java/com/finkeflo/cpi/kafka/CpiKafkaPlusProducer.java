@@ -82,17 +82,21 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
 
         if (endpoint.isEnableTransactions()) {
             if (endpoint.getTransactionalIdPrefix() == null || endpoint.getTransactionalIdPrefix().trim().isEmpty()) {
-                throw new IllegalArgumentException("transactionalIdPrefix is required when enableTransactions is true");
+                throw new IllegalArgumentException(
+                        "Please configure transactionalIdPrefix — it is required whenever "
+                        + "transactional batching is switched on");
             }
             if (!endpoint.isEnableIdempotence()) {
                 throw new IllegalArgumentException(
-                        "enableTransactions requires enableIdempotence=true "
-                        + "(Kafka transactional producers cannot disable idempotence)");
+                        "Please leave idempotence switched on — it cannot be turned off "
+                        + "while transactional batching is enabled");
             }
             int slots = endpoint.getMaxConcurrentTransactions();
             if (slots < 1) {
                 throw new IllegalArgumentException(
-                        "maxConcurrentTransactions must be >= 1 when enableTransactions is true (was: " + slots + ")");
+                        "Please set maxConcurrentTransactions to 1 or higher (configured value: " + slots
+                        + ") — with transactional batching enabled, a value below 1 would leave the "
+                        + "adapter unable to send anything");
             }
             // Resolved once at startup and reused for every transactional.id below — avoids
             // re-reading env vars per exchange and prevents a literal "null" segment in the
@@ -106,9 +110,9 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
             resolvedMemberSuffix = CpiKafkaPlusConsumer.resolveStaticMemberSuffix();
             if (resolvedMemberSuffix == null) {
                 resolvedMemberSuffix = "r" + java.util.UUID.randomUUID().toString().replace("-", "").substring(0, 12);
-                LOG.warn("[CPI-KAFKA-PLUS-DIAG] Neither CF_INSTANCE_INDEX nor HOSTNAME is set; using a random "
-                        + "per-startup member suffix '{}' for transactional.id. This avoids fencing collisions "
-                        + "between nodes but means the transactional.id will change on every restart.",
+                LOG.warn("[CPI-KAFKA-PLUS-DIAG] Could not determine a stable identifier for this worker node, "
+                        + "so a random one ('{}') will be used instead. This is safe, but note that it will "
+                        + "change on every restart.",
                         resolvedMemberSuffix);
             }
             txnSlotSemaphore = new java.util.concurrent.Semaphore(slots, true);

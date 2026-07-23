@@ -112,8 +112,8 @@ public class ProducerTransactionalConfigTest {
             producer.doStart();
             Assert.fail("Expected IllegalArgumentException for enableIdempotence=false with enableTransactions=true");
         } catch (IllegalArgumentException e) {
-            Assert.assertTrue("Message should mention enableIdempotence: " + e.getMessage(),
-                    e.getMessage().contains("enableIdempotence"));
+            Assert.assertTrue("Message should mention idempotence: " + e.getMessage(),
+                    e.getMessage().toLowerCase().contains("idempotence"));
         }
     }
 
