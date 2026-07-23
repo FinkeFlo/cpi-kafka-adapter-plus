@@ -45,6 +45,7 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
 
     private static final Logger LOG = LoggerFactory.getLogger(CpiKafkaPlusProducer.class);
     private static final int MAX_CONSECUTIVE_SEND_FAILURES = 3;
+    private static final Duration TXN_PRODUCER_CLOSE_TIMEOUT = Duration.ofSeconds(5);
 
     private final CpiKafkaPlusEndpoint endpoint;
     private KafkaProducer<byte[], byte[]> kafkaProducer;
@@ -54,9 +55,12 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
 
     private java.util.concurrent.Semaphore txnSlotSemaphore;
     private boolean[] txnSlotInUse;
+    private String resolvedMemberSuffix;
 
     private volatile boolean initialized = false;
+    private volatile boolean helpersInitialized = false;
     private volatile int consecutiveSendFailures = 0;
+    private volatile int consecutiveTxnSendFailures = 0;
     private volatile int consecutiveInitFailures = 0;
     private volatile Throwable lastInitException = null;
 
@@ -80,11 +84,38 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
             if (endpoint.getTransactionalIdPrefix() == null || endpoint.getTransactionalIdPrefix().trim().isEmpty()) {
                 throw new IllegalArgumentException("transactionalIdPrefix is required when enableTransactions is true");
             }
+            if (!endpoint.isEnableIdempotence()) {
+                throw new IllegalArgumentException(
+                        "enableTransactions requires enableIdempotence=true "
+                        + "(Kafka transactional producers cannot disable idempotence)");
+            }
             int slots = endpoint.getMaxConcurrentTransactions();
+            if (slots < 1) {
+                throw new IllegalArgumentException(
+                        "maxConcurrentTransactions must be >= 1 when enableTransactions is true (was: " + slots + ")");
+            }
+            // Resolved once at startup and reused for every transactional.id below — avoids
+            // re-reading env vars per exchange and prevents a literal "null" segment in the
+            // transactional.id, which would cause fencing collisions between worker nodes that both
+            // fail to resolve a suffix. If neither CF_INSTANCE_INDEX nor HOSTNAME is available, fall
+            // back to a random-but-unique suffix rather than hard-failing startup: this keeps the
+            // adapter usable in environments without those env vars, at the cost of the
+            // transactional.id no longer being stable across restarts on the same node (so a
+            // crashed producer's old transactional.id will not be actively fenced by the new one —
+            // it will simply expire via transaction.timeout.ms).
+            resolvedMemberSuffix = CpiKafkaPlusConsumer.resolveStaticMemberSuffix();
+            if (resolvedMemberSuffix == null) {
+                resolvedMemberSuffix = "r" + java.util.UUID.randomUUID().toString().replace("-", "").substring(0, 12);
+                LOG.warn("[CPI-KAFKA-PLUS-DIAG] Neither CF_INSTANCE_INDEX nor HOSTNAME is set; using a random "
+                        + "per-startup member suffix '{}' for transactional.id. This avoids fencing collisions "
+                        + "between nodes but means the transactional.id will change on every restart.",
+                        resolvedMemberSuffix);
+            }
             txnSlotSemaphore = new java.util.concurrent.Semaphore(slots, true);
             txnSlotInUse = new boolean[slots];
-            LOG.info("[CPI-KAFKA-PLUS-DIAG] Transactional batching enabled with max {} concurrent transactions. Prefix: {}",
-                    slots, endpoint.getTransactionalIdPrefix());
+            LOG.info("[CPI-KAFKA-PLUS-DIAG] Transactional batching enabled with max {} concurrent transactions. "
+                    + "Prefix: {}, memberSuffix: {}",
+                    slots, endpoint.getTransactionalIdPrefix(), resolvedMemberSuffix);
         }
     }
 
@@ -92,7 +123,9 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
     protected void doStop() throws Exception {
         LOG.info("[CPI-KAFKA-PLUS-DIAG] Stopping CPI Kafka Producer for topic '{}'", endpoint.getEffectiveTopic());
         initialized = false;
+        helpersInitialized = false;
         consecutiveSendFailures = 0;
+        consecutiveTxnSendFailures = 0;
         consecutiveInitFailures = 0;
         closeProducerQuietly();
         jsonSchemaValidator = null;
@@ -117,7 +150,7 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
             if (!createKafkaProducer()) {
                 return;
             }
-            if (!createProducerHelpers()) {
+            if (!ensureHelpersInitializedLocked()) {
                 return;
             }
 
@@ -128,6 +161,33 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
             LOG.info("[CPI-KAFKA-PLUS-DIAG] ensureInitialized: Producer READY for topic='{}'",
                     endpoint.getEffectiveTopic());
         }
+    }
+
+    /**
+     * Initializes the serialization/validation helpers (Avro, JSON Schema) independently of the
+     * shared (non-transactional) KafkaProducer. This lets a purely transactional producer
+     * (enableTransactions=true with a batch mode) become usable without ever creating the unused
+     * shared producer connection.
+     */
+    private void ensureHelpersInitialized() {
+        if (helpersInitialized) {
+            return;
+        }
+        synchronized (this) {
+            ensureHelpersInitializedLocked();
+        }
+    }
+
+    /** Must be called while holding the {@code this} monitor. @return true if helpers are ready */
+    private boolean ensureHelpersInitializedLocked() {
+        if (helpersInitialized) {
+            return true;
+        }
+        if (!createProducerHelpers()) {
+            return false;
+        }
+        helpersInitialized = true;
+        return true;
     }
 
     /** @return true if the KafkaProducer was created successfully */
@@ -188,22 +248,32 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
 
     @Override
     public void process(Exchange exchange) throws Exception {
-        ensureInitialized();
-        if (kafkaProducer == null) {
-            String msg = "Kafka producer not initialized — init failed, will retry on next exchange";
-            if (lastInitException != null) {
-                StringBuilder chain = new StringBuilder();
-                Throwable t = lastInitException;
-                while (t != null) {
-                    if (chain.length() > 0) {
-                        chain.append(" -> ");
+        String batchMode = endpoint.getProducerBatchMode();
+        // When every exchange goes through the transactional path (enableTransactions with a batch
+        // mode), the shared non-transactional KafkaProducer is never used and must not gate
+        // processing — only the serialization/validation helpers are needed here.
+        boolean transactionalOnlyPath = endpoint.isEnableTransactions() && !"NONE".equalsIgnoreCase(batchMode);
+
+        if (transactionalOnlyPath) {
+            ensureHelpersInitialized();
+        } else {
+            ensureInitialized();
+            if (kafkaProducer == null) {
+                String msg = "Kafka producer not initialized — init failed, will retry on next exchange";
+                if (lastInitException != null) {
+                    StringBuilder chain = new StringBuilder();
+                    Throwable t = lastInitException;
+                    while (t != null) {
+                        if (chain.length() > 0) {
+                            chain.append(" -> ");
+                        }
+                        chain.append(t.getClass().getSimpleName()).append(": ").append(t.getMessage());
+                        t = t.getCause();
                     }
-                    chain.append(t.getClass().getSimpleName()).append(": ").append(t.getMessage());
-                    t = t.getCause();
+                    msg += ". Cause: " + chain;
                 }
-                msg += ". Cause: " + chain;
+                throw new IllegalStateException(msg, lastInitException);
             }
-            throw new IllegalStateException(msg, lastInitException);
         }
 
         Message in = exchange.getIn();
@@ -214,7 +284,6 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
             topic = resolveTopic(exchange, endpoint.getEffectiveTopic());
         }
 
-        String batchMode = endpoint.getProducerBatchMode();
         if (!"NONE".equalsIgnoreCase(batchMode)) {
             processBatch(exchange, in, topic, batchMode);
         } else {
@@ -285,8 +354,8 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
                 throw new IllegalStateException("Acquired semaphore but no slot was free. This is a bug.");
             }
 
-            String memberSuffix = CpiKafkaPlusConsumer.resolveStaticMemberSuffix();
-            String transactionalId = endpoint.getTransactionalIdPrefix() + "-" + memberSuffix + "-" + slotId;
+            // resolvedMemberSuffix is resolved once (fail-fast) in doStart() — never null here.
+            String transactionalId = endpoint.getTransactionalIdPrefix() + "-" + resolvedMemberSuffix + "-" + slotId;
 
             java.util.Properties props = ProducerConfigFactory.buildProducerProperties(endpoint);
             props.put(org.apache.kafka.clients.producer.ProducerConfig.TRANSACTIONAL_ID_CONFIG, transactionalId);
@@ -306,7 +375,7 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
             txnProducer.commitTransaction();
 
             ProducerBatchHelper.setResponseHeadersAndBody(in, topic, batchMode, result);
-            recordSendSuccess();
+            recordTxnSendSuccess();
 
         } catch (Exception e) {
             if (txnProducer != null) {
@@ -317,12 +386,15 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
                     e.addSuppressed(abortEx);
                 }
             }
-            handleSendFailure(e);
+            handleTxnSendFailure(e);
             throw new RuntimeException("Failed to send transactional batch to Kafka topic '" + topic + "': " + e.getMessage(), e);
         } finally {
             if (txnProducer != null) {
                 try {
-                    txnProducer.close();
+                    // Bounded close — an unreachable broker must not hang here indefinitely, since
+                    // the transaction slot below is only released once close() returns. Without a
+                    // timeout, a broker outage could permanently exhaust all txn slots (deadlock).
+                    txnProducer.close(TXN_PRODUCER_CLOSE_TIMEOUT);
                 } catch (Exception closeEx) {
                     LOG.warn("[CPI-KAFKA-PLUS-DIAG] Failed to close transactional producer for slot {}: {}", slotId, closeEx.getMessage(), closeEx);
                 }
@@ -538,6 +610,32 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
                     consecutiveSendFailures);
             triggerReconnect();
         }
+    }
+
+    /**
+     * Success/failure tracking for the transactional batch path, kept entirely separate from
+     * {@link #recordSendSuccess()}/{@link #handleSendFailure(Exception)}. Each transactional batch
+     * uses its own short-lived KafkaProducer (created and closed per call), so there is nothing to
+     * "reconnect" here — and, critically, a failure in this path must never close or reset the
+     * shared, independent {@link #kafkaProducer} used by the non-transactional send path (and vice
+     * versa a transactional success must not mask a degraded shared producer by resetting its
+     * failure counter).
+     */
+    private void recordTxnSendSuccess() {
+        boolean wasRecovering = consecutiveTxnSendFailures > 0;
+        consecutiveTxnSendFailures = 0;
+        if (wasRecovering) {
+            LOG.info("[CPI-KAFKA-PLUS-DIAG] Transactional send recovered after previous failures for topic='{}'",
+                    endpoint.getEffectiveTopic());
+        }
+    }
+
+    private void handleTxnSendFailure(Exception e) {
+        consecutiveTxnSendFailures++;
+        Throwable cause = KafkaErrorHelper.extractKafkaCause(e);
+        LOG.error("[CPI-KAFKA-PLUS-DIAG] Transactional send failure ({} consecutive) for topic='{}': {}",
+                consecutiveTxnSendFailures, endpoint.getEffectiveTopic(),
+                cause != null ? cause.getClass().getSimpleName() : e.getMessage());
     }
 
     private void triggerReconnect() {
