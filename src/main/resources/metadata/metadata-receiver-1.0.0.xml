@@ -131,6 +131,28 @@
                     <description>Enable idempotent producer to guarantee exactly-once delivery per partition. Prevents duplicate messages on retries. Recommended to keep enabled (default: true).</description>
                 </AttributeReference>
                 <AttributeReference>
+                    <ReferenceName>enableTransactions</ReferenceName>
+                    <description>Enable transactional batching. Each batch is sent in an isolated Kafka transaction. Requires Transactional ID Prefix and idempotent producer.</description>
+                </AttributeReference>
+                <AttributeReference>
+                    <ReferenceName>transactionalIdPrefix</ReferenceName>
+                    <description>Prefix for transactional.id (for example my-app-txn). Required when transactional batching is enabled.</description>
+                    <ErrorMessage>Please enter a Transactional ID Prefix when transactions are enabled</ErrorMessage>
+                    <EditCondition>
+                        <AttributeName>enableTransactions</AttributeName>
+                        <AttributeValue>true</AttributeValue>
+                    </EditCondition>
+                </AttributeReference>
+                <AttributeReference>
+                    <ReferenceName>maxConcurrentTransactions</ReferenceName>
+                    <description>Maximum number of concurrent transactional producers per worker node. Higher values increase parallelism but also resource usage.</description>
+                    <ErrorMessage>Please enter a positive number for Max Concurrent Transactions</ErrorMessage>
+                    <EditCondition>
+                        <AttributeName>enableTransactions</AttributeName>
+                        <AttributeValue>true</AttributeValue>
+                    </EditCondition>
+                </AttributeReference>
+                <AttributeReference>
                     <ReferenceName>deliveryTimeoutSeconds</ReferenceName>
                     <description>Maximum time in seconds for message delivery, including retries. Default: 120 seconds (2 minutes). If delivery fails within this time, the send is reported as failed.</description>
                     <ErrorMessage>Please enter a positive number in seconds (e.g. 120 for 2 minutes)</ErrorMessage>
@@ -567,6 +589,33 @@
         <Length/>
         <isparameterized>true</isparameterized>
         <GuiLabels guid="b1000004-0000-0000-0000-000000000007"><Label language="EN">Enable Idempotent Producer</Label></GuiLabels>
+    </AttributeMetadata>
+    <AttributeMetadata>
+        <Name>enableTransactions</Name>
+        <Usage>false</Usage>
+        <DataType>xsd:boolean</DataType>
+        <Default>false</Default>
+        <Length/>
+        <isparameterized>true</isparameterized>
+        <GuiLabels guid="b1000004-0000-0000-0000-000000000008"><Label language="EN">Enable Transactions</Label></GuiLabels>
+    </AttributeMetadata>
+    <AttributeMetadata>
+        <Name>transactionalIdPrefix</Name>
+        <Usage>false</Usage>
+        <DataType>xsd:string</DataType>
+        <Default/>
+        <Length>200</Length>
+        <isparameterized>true</isparameterized>
+        <GuiLabels guid="b1000004-0000-0000-0000-000000000014"><Label language="EN">Transactional ID Prefix</Label></GuiLabels>
+    </AttributeMetadata>
+    <AttributeMetadata>
+        <Name>maxConcurrentTransactions</Name>
+        <Usage>false</Usage>
+        <DataType>xsd:integer</DataType>
+        <Default>5</Default>
+        <Length/>
+        <isparameterized>true</isparameterized>
+        <GuiLabels guid="b1000004-0000-0000-0000-000000000015"><Label language="EN">Max Concurrent Transactions</Label></GuiLabels>
     </AttributeMetadata>
     <!-- retries: removed from UI — Kafka uses Integer.MAX_VALUE with idempotence,
          deliveryTimeoutSeconds is the effective limit. Can be re-enabled if needed. -->
