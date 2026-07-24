@@ -38,6 +38,13 @@ For Kafka clusters using SCRAM authentication:
 
 Supported SCRAM mechanisms: `SCRAM-SHA-256` and `SCRAM-SHA-512`.
 
+!!! note "Kerberos / GSSAPI is not supported"
+    Only `PLAIN`, `SCRAM-SHA-256` and `SCRAM-SHA-512` are supported. SASL/GSSAPI
+    (Kerberos) is intentionally **not** available: CPI's OSGi runtime does not export
+    the `org.ietf.jgss` package, so the adapter ships empty stubs for it purely to let
+    the Kafka client resolve and start. These stubs are never invoked at runtime — a
+    GSSAPI login would fail. Use `PLAIN`, `SCRAM`, or mTLS instead.
+
 ## SSL/TLS and mTLS
 
 For broker connections that need a private/custom CA and/or client certificate

@@ -12,11 +12,11 @@
 
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <maven.compiler.source>1.8</maven.compiler.source>
-        <maven.compiler.target>1.8</maven.compiler.target>
+        <maven.compiler.source>11</maven.compiler.source>
+        <maven.compiler.target>11</maven.compiler.target>
         <camel.version>3.14.7</camel.version>
         <adk.version>2.3.0</adk.version>
-        <kafka.version>3.9.2</kafka.version>
+        <kafka.version>4.3.1</kafka.version>
         <avro.version>1.12.1</avro.version>
         <confluent.version>7.9.8</confluent.version>
         <jackson.version>2.22.1</jackson.version>
@@ -100,6 +100,11 @@
                     <groupId>at.yawk.lz4</groupId>
                     <artifactId>lz4-java</artifactId>
                 </exclusion>
+                <!-- Exclude fat zstd-jni to replace it with a smaller linux_amd64 classifier -->
+                <exclusion>
+                    <groupId>com.github.luben</groupId>
+                    <artifactId>zstd-jni</artifactId>
+                </exclusion>
             </exclusions>
         </dependency>
 
@@ -118,6 +123,15 @@
             <groupId>org.xerial.snappy</groupId>
             <artifactId>snappy-java</artifactId>
             <version>1.1.10.8</version>
+            <scope>runtime</scope>
+        </dependency>
+
+        <!-- Zstd compression (Linux AMD64 only to save size) -->
+        <dependency>
+            <groupId>com.github.luben</groupId>
+            <artifactId>zstd-jni</artifactId>
+            <version>1.5.6-4</version>
+            <classifier>linux_amd64</classifier>
             <scope>runtime</scope>
         </dependency>
 
@@ -336,7 +350,15 @@
                             org.slf4j.helpers;resolution:=optional,
                             org.slf4j.spi;resolution:=optional,
                             com.sap.it.api.*;resolution:=optional,
-                            <!-- JDK security packages - optional for OSGi, resolved via composite classloader -->
+                            <!-- org.ietf.jgss: Kafka's SaslChannelBuilder statically references this
+                                 package even for SASL PLAIN, but CPI's OSGi runtime does not export it.
+                                 We ship empty stubs (src/stubs/java, compiled with release 8) inside the
+                                 bundle. This optional import is the substitutability hook: on CPI it stays
+                                 UNWIRED (no exporter) so the bundle-local stubs resolve the class; if a
+                                 framework ever exported the real java.security.jgss, the import would wire
+                                 and the real classes would replace the stubs. CAVEAT: the stubs are empty,
+                                 so SASL/GSSAPI (Kerberos) would fail silently — only PLAIN/SCRAM/OAuth are
+                                 supported. Other JDK security packages below are plain optional imports. -->
                             org.ietf.jgss;resolution:=optional,
                             javax.security.*;resolution:=optional,
                             javax.net.ssl;resolution:=optional,
@@ -404,36 +426,33 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
                 <version>3.15.0</version>
-                <configuration>
-                    <source>1.8</source>
-                    <target>1.8</target>
-                </configuration>
-            </plugin>
-            <!-- Java 8 API gate: fail the build if any Java 9+ API is referenced.
-                 Needed because compilation uses source/target 1.8 (not release-8 mode), so the
-                 compiler links against the JDK 17/21 rt and does NOT reject newer APIs.
-                 Bound to process-classes for fail-fast (runs on 'mvn test' too, no Docker). -->
-            <plugin>
-                <groupId>org.codehaus.mojo</groupId>
-                <artifactId>animal-sniffer-maven-plugin</artifactId>
-                <version>1.27</version>
-                <configuration>
-                    <signature>
-                        <groupId>org.codehaus.mojo.signature</groupId>
-                        <artifactId>java18</artifactId>
-                        <version>1.0</version>
-                    </signature>
-                </configuration>
                 <executions>
                     <execution>
-                        <id>check-java8-api</id>
-                        <phase>process-classes</phase>
+                        <id>compile-jgss-stubs</id>
+                        <phase>generate-sources</phase>
                         <goals>
-                            <goal>check</goal>
+                            <goal>compile</goal>
                         </goals>
+                        <configuration>
+                            <compileSourceRoots>
+                                <compileSourceRoot>${project.basedir}/src/stubs/java</compileSourceRoot>
+                            </compileSourceRoots>
+                            <!-- release 8 already implies source/target 8 and, crucially, selects the
+                                 Java 8 platform API (no JPMS). That is what lets us compile classes into
+                                 org.ietf.jgss; under release >= 9 javac rejects this with
+                                 "package exists in another module: java.security.jgss". Do NOT also set
+                                 <source>/<target> here — combining them with <release> is redundant and
+                                 conflicts on some maven-compiler-plugin versions. -->
+                            <release>8</release>
+                        </configuration>
                     </execution>
                 </executions>
+                <configuration>
+                    <source>11</source>
+                    <target>11</target>
+                </configuration>
             </plugin>
+
             <!-- JaCoCo coverage reporting. Bind once for local/unit-test runs (`mvn test`)
                  and again after `verify` so full local verification can include IT coverage
                  in the final report without changing test selection or CI sharding. -->
