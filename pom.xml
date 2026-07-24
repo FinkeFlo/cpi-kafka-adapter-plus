@@ -12,11 +12,11 @@
 
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <maven.compiler.source>1.8</maven.compiler.source>
-        <maven.compiler.target>1.8</maven.compiler.target>
+        <maven.compiler.source>11</maven.compiler.source>
+        <maven.compiler.target>11</maven.compiler.target>
         <camel.version>3.14.7</camel.version>
         <adk.version>2.3.0</adk.version>
-        <kafka.version>3.9.2</kafka.version>
+        <kafka.version>4.3.1</kafka.version>
         <avro.version>1.12.1</avro.version>
         <confluent.version>7.9.8</confluent.version>
         <jackson.version>2.22.1</jackson.version>
@@ -419,35 +419,11 @@
                 <artifactId>maven-compiler-plugin</artifactId>
                 <version>3.15.0</version>
                 <configuration>
-                    <source>1.8</source>
-                    <target>1.8</target>
+                    <source>11</source>
+                    <target>11</target>
                 </configuration>
             </plugin>
-            <!-- Java 8 API gate: fail the build if any Java 9+ API is referenced.
-                 Needed because compilation uses source/target 1.8 (not release-8 mode), so the
-                 compiler links against the JDK 17/21 rt and does NOT reject newer APIs.
-                 Bound to process-classes for fail-fast (runs on 'mvn test' too, no Docker). -->
-            <plugin>
-                <groupId>org.codehaus.mojo</groupId>
-                <artifactId>animal-sniffer-maven-plugin</artifactId>
-                <version>1.27</version>
-                <configuration>
-                    <signature>
-                        <groupId>org.codehaus.mojo.signature</groupId>
-                        <artifactId>java18</artifactId>
-                        <version>1.0</version>
-                    </signature>
-                </configuration>
-                <executions>
-                    <execution>
-                        <id>check-java8-api</id>
-                        <phase>process-classes</phase>
-                        <goals>
-                            <goal>check</goal>
-                        </goals>
-                    </execution>
-                </executions>
-            </plugin>
+
             <!-- JaCoCo coverage reporting. Bind once for local/unit-test runs (`mvn test`)
                  and again after `verify` so full local verification can include IT coverage
                  in the final report without changing test selection or CI sharding. -->
