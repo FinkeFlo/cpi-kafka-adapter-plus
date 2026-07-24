@@ -350,7 +350,15 @@
                             org.slf4j.helpers;resolution:=optional,
                             org.slf4j.spi;resolution:=optional,
                             com.sap.it.api.*;resolution:=optional,
-                            <!-- JDK security packages - optional for OSGi, resolved via composite classloader -->
+                            <!-- org.ietf.jgss: Kafka's SaslChannelBuilder statically references this
+                                 package even for SASL PLAIN, but CPI's OSGi runtime does not export it.
+                                 We ship empty stubs (src/stubs/java, compiled with release 8) inside the
+                                 bundle. This optional import is the substitutability hook: on CPI it stays
+                                 UNWIRED (no exporter) so the bundle-local stubs resolve the class; if a
+                                 framework ever exported the real java.security.jgss, the import would wire
+                                 and the real classes would replace the stubs. CAVEAT: the stubs are empty,
+                                 so SASL/GSSAPI (Kerberos) would fail silently — only PLAIN/SCRAM/OAuth are
+                                 supported. Other JDK security packages below are plain optional imports. -->
                             org.ietf.jgss;resolution:=optional,
                             javax.security.*;resolution:=optional,
                             javax.net.ssl;resolution:=optional,
@@ -429,9 +437,13 @@
                             <compileSourceRoots>
                                 <compileSourceRoot>${project.basedir}/src/stubs/java</compileSourceRoot>
                             </compileSourceRoots>
+                            <!-- release 8 already implies source/target 8 and, crucially, selects the
+                                 Java 8 platform API (no JPMS). That is what lets us compile classes into
+                                 org.ietf.jgss; under release >= 9 javac rejects this with
+                                 "package exists in another module: java.security.jgss". Do NOT also set
+                                 <source>/<target> here — combining them with <release> is redundant and
+                                 conflicts on some maven-compiler-plugin versions. -->
                             <release>8</release>
-                            <source>8</source>
-                            <target>8</target>
                         </configuration>
                     </execution>
                 </executions>
