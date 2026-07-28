@@ -92,9 +92,6 @@ jobs:
           # Checkout main branch to apply the commit onto main
           git checkout main
           
-          # Copy the changed files from the detached HEAD workspace
-          git checkout HEAD -- config.adk pom.xml src/main/resources/metadata/ CHANGELOG.md
-          
           git add config.adk pom.xml src/main/resources/metadata/ CHANGELOG.md
           git commit -m "chore: bump version to $VERSION [skip ci]"
           git push origin main
