@@ -1,4 +1,4 @@
-name: ESA Preview
+name: Build ESA Preview
 
 on:
   workflow_dispatch:
