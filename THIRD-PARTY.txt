@@ -91,7 +91,7 @@ Lists of 116 third-party dependencies.
      (Apache-2.0) Apache Commons Compress (org.apache.commons:commons-compress:1.28.0 - https://commons.apache.org/proper/commons-compress/)
      (Apache-2.0) Apache Commons Lang (org.apache.commons:commons-lang3:3.20.0 - https://commons.apache.org/proper/commons-lang/)
      (Apache License, Version 2.0) Apache Felix Framework (org.apache.felix:org.apache.felix.framework:7.0.5 - http://felix.apache.org/org.apache.felix.framework/)
-     (The Apache License, Version 2.0) Apache Kafka (org.apache.kafka:kafka-clients:3.9.2 - https://kafka.apache.org)
+     (The Apache License, Version 2.0) Apache Kafka (org.apache.kafka:kafka-clients:4.3.1 - https://kafka.apache.org)
      (The Apache Software License, Version 2.0) Maven Plugin API (org.apache.maven:maven-plugin-api:2.0 - http://maven.apache.org/maven2/maven-plugin-api/)
      (Apache License, Version 2.0) AssertJ fluent assertions (org.assertj:assertj-core:3.21.0 - https://assertj.github.io/doc/assertj-core/)
      (Apache 2.0) Awaitility (org.awaitility:awaitility:4.3.0 - http://awaitility.org)
