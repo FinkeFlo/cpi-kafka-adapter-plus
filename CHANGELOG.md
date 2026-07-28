@@ -7,6 +7,20 @@ and the project follows [Semantic Versioning](https://semver.org/). See
 [VERSIONING.md](https://github.com/finkeflo/cpi-kafka-adapter-plus/blob/main/VERSIONING.md) for how the adapter version maps to SAP CPI
 iFlow compatibility.
 
+## [Unreleased]
+
+## [1.0.19] - 2026-07-28
+### Fixed
+- Re-released to fix broken versions inside metadata resulting from a CI bug.
+
+## [1.0.18] - 2026-07-28
+### Fixed
+- Fixed bug in GitHub Actions release workflow that wiped uncommitted version bumps.
+
+## [1.0.17] - 2026-07-28
+### Fixed
+- Updated GitHub Actions release workflow to only target active minor version variants and avoid replacing `version::` in frozen metadata files.
+
 ## [1.0.16] - 2026-07-28
 
 ### Added
