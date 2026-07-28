@@ -51,21 +51,19 @@ released version avoids that trap entirely.
 
 ## How to release (GitHub Actions)
 
-The repository features a fully automated release pipeline (`.github/workflows/release.yml`). You never need to build or upload the `.esa` file manually for a release. 
+The repository features a fully automated release pipeline (`.github/workflows/release.yml`). You never need to build or upload the `.esa` file manually, nor do you need to edit version numbers in the code files or changelog heading manually.
 
 To publish a new release:
-1. Complete the version bumps described above (`config.adk`, metadata files) and commit them to a new branch.
-2. Ensure you have added a corresponding section in `CHANGELOG.md` with the exact version number (e.g., `## [1.0.13] - YYYY-MM-DD`).
-3. Create a Pull Request and merge these changes into `main` (since `main` is a protected branch).
-4. After merging, tag the commit on `main` and push the tag to trigger the pipeline:
-
-```bash
-git tag v1.0.13
-git push origin v1.0.13
-```
-
-The GitHub Action will automatically:
-- Verify that your tag matches the version in `config.adk`.
-- Run the full build and tests (`mvn clean install`).
-- Extract the release notes for this specific version from `CHANGELOG.md`.
-- Create a GitHub Release and attach the compiled `.esa` file.
+1. Ensure all changes are merged into the `main` branch. All release notes must be written under the `## [Unreleased]` section of [CHANGELOG.md](file:///Users/fkube/github/sap-cpi-kafka-adapter-plus/CHANGELOG.md).
+2. Create and push a git tag on the `main` branch:
+   ```bash
+   git tag v1.0.17
+   git push origin v1.0.17
+   ```
+3. The GitHub Actions release bot will automatically:
+   - Extract the version from the tag (e.g., `1.0.17`).
+   - Bump version settings in `config.adk`, `pom.xml`, and the metadata XML files in the repository.
+   - Rename the `## [Unreleased]` heading to `## [1.0.17] - YYYY-MM-DD` in `CHANGELOG.md`.
+   - Commit and push these changes back to the `main` branch.
+   - Re-target the tag to the version-bump commit.
+   - Run the build and tests, build the `.esa` archive, and publish the GitHub Release with the correct release notes.

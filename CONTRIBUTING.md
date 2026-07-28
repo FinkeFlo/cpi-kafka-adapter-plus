@@ -92,11 +92,23 @@ getter/setter and a default-value assertion in `CpiKafkaPlusComponentTest`.
 
 ## Versioning and Releases
 
-We follow standard [Semantic Versioning (SemVer)](https://semver.org/) driven by our Conventional Commits.
+We follow standard [Semantic Versioning (SemVer)](https://semver.org/). Please refer to [VERSIONING.md](file:///Users/fkube/github/sap-cpi-kafka-adapter-plus/VERSIONING.md) for detailed rules on how adapter version bumps affect SAP CPI iFlow compatibility.
 
-To create a new release:
-1. Bump the version in `pom.xml`.
-2. Document the release using GitHub Releases.
+Releases are fully automated via GitHub Actions:
+1. During development, add all change descriptions under the `## [Unreleased]` section in [CHANGELOG.md](file:///Users/fkube/github/sap-cpi-kafka-adapter-plus/CHANGELOG.md). Do not manually bump versions in code files or edit the unreleased heading.
+2. To trigger a new release, simply create and push a git tag matching the version format:
+   ```bash
+   git tag v1.0.17
+   git push origin v1.0.17
+   ```
+3. The release bot will automatically:
+   - Extract the version from the tag.
+   - Update the versions in `pom.xml`, `config.adk`, and the adapter metadata XML files.
+   - Rename `## [Unreleased]` to `## [1.0.17] - YYYY-MM-DD` in `CHANGELOG.md`.
+   - Commit and push these updates back to the `main` branch.
+   - Update the tag to point to the version-bump commit.
+   - Build the `.esa` package and publish the GitHub Release with the correct release notes.
+
 
 ---
 
