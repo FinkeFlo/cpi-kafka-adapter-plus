@@ -30,7 +30,7 @@ jobs:
       - name: Extract version from tag
         id: ver
         run: |
-          VERSION="${GITHUB_REF_NAME#refs/tags/v}"
+          VERSION="${GITHUB_REF_NAME#v}"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Target Release Version: $VERSION"
 
