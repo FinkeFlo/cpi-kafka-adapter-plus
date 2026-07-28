@@ -103,7 +103,8 @@ public class SecurityConfigHelperTest {
 
         SecurityConfigHelper.configureSecurityProperties(props, endpoint);
 
-        Assert.assertEquals("TLSv1.3", props.getProperty(SslConfigs.SSL_PROTOCOL_CONFIG));
+        Assert.assertNull("ssl.protocol should not be set explicitly; Kafka 4.x defaults to TLSv1.3",
+                props.getProperty(SslConfigs.SSL_PROTOCOL_CONFIG));
         Assert.assertNull(props.getProperty(SslConfigs.SSL_ENGINE_FACTORY_CLASS_CONFIG));
         Assert.assertNull(props.getProperty(CpiKafkaPlusSslEngineFactory.SSL_KEYSTORE_ALIAS_CONFIG));
     }
@@ -117,7 +118,8 @@ public class SecurityConfigHelperTest {
 
         SecurityConfigHelper.configureSecurityProperties(props, endpoint);
 
-        Assert.assertEquals("TLSv1.3", props.getProperty(SslConfigs.SSL_PROTOCOL_CONFIG));
+        Assert.assertNull("ssl.protocol should not be set explicitly; Kafka 4.x defaults to TLSv1.3",
+                props.getProperty(SslConfigs.SSL_PROTOCOL_CONFIG));
         Assert.assertEquals(CpiKafkaPlusSslEngineFactory.class.getName(),
                 props.getProperty(SslConfigs.SSL_ENGINE_FACTORY_CLASS_CONFIG));
         Assert.assertEquals("tenant-kafka",

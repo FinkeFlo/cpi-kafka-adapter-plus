@@ -7,6 +7,13 @@ and the project follows [Semantic Versioning](https://semver.org/). See
 [VERSIONING.md](https://github.com/finkeflo/cpi-kafka-adapter-plus/blob/main/VERSIONING.md) for how the adapter version maps to SAP CPI
 iFlow compatibility.
 
+## [1.0.16] - 2026-07-28
+
+### Changed
+- Upgraded Apache Kafka client library from 3.x to 4.x (`kafka-clients 4.3.1`).
+- Removed deprecated `ProducerConfig.RETRIES_CONFIG` from DLQ producer; retry behavior is now governed by `delivery.timeout.ms` (Kafka default: 120s).
+- Removed deprecated `SslConfigs.SSL_PROTOCOL_CONFIG`; TLSv1.3 is the Kafka 4.x default.
+
 ## [1.0.15] - 2026-07-23
 
 ### Added
