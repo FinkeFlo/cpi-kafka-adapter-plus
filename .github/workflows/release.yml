@@ -1,9 +1,12 @@
 name: Release
 
 on:
-  push:
-    tags:
-      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g. 1.0.17)'
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -13,30 +16,57 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v7
+      - name: Generate GitHub App Token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+
+      - name: Checkout main branch
+        uses: actions/checkout@v7
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          ref: main
+
+      - name: Configure Git Bot
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Update versions in codebase
+        run: |
+          VERSION="${{ inputs.version }}"
+          echo "Setting codebase version to $VERSION"
+          
+          # 1. Update config.adk
+          sed -i "s/^Adapter-Version=.*/Adapter-Version=$VERSION/" config.adk
+          
+          # 2. Update pom.xml
+          mvn versions:set -DnewVersion=$VERSION -DgenerateBackupPoms=false
+          
+          # 3. Update Metadata XMLs (ComponentId und VariantId)
+          find src/main/resources/metadata -name "metadata-*.xml" -type f -exec sed -i "s/\/version::[0-9.]*\"/\/version::$VERSION\"/g" {} +
+          find src/main/resources/metadata -name "metadata-*.xml" -type f -exec sed -i "s/\/version::[0-9.]*<\/Name>/\/version::$VERSION<\/Name>/g" {} +
+
+      - name: Commit and push version bump
+        run: |
+          VERSION="${{ inputs.version }}"
+          git add config.adk pom.xml src/main/resources/metadata/
+          git commit -m "chore: bump version to $VERSION [skip ci]"
+          git push origin main
+
+      - name: Tag the commit
+        run: |
+          VERSION="${{ inputs.version }}"
+          git tag "v$VERSION"
+          git push origin "v$VERSION"
 
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
           cache: maven
-
-      - name: Derive version from tag
-        id: ver
-        run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "Release version: $VERSION"
-
-      - name: Verify tag matches config.adk (single source of truth)
-        run: |
-          ADK_VERSION="$(grep -E '^Adapter-Version=' config.adk | cut -d= -f2 | tr -d '[:space:]')"
-          echo "Tag version:        ${{ steps.ver.outputs.version }}"
-          echo "config.adk version: $ADK_VERSION"
-          if [ "$ADK_VERSION" != "${{ steps.ver.outputs.version }}" ]; then
-            echo "::error::Tag v${{ steps.ver.outputs.version }} does not match config.adk Adapter-Version=$ADK_VERSION"
-            exit 1
-          fi
 
       - name: Build, test and package (produces the ESA)
         run: mvn -B clean install
@@ -55,7 +85,7 @@ jobs:
       - name: Extract release notes from CHANGELOG
         id: notes
         run: |
-          VERSION="${{ steps.ver.outputs.version }}"
+          VERSION="${{ inputs.version }}"
           awk -v v="$VERSION" '
             $0 ~ ("^## \\[" v "\\]") { flag=1; next }
             flag && /^## \[/ { exit }
@@ -69,23 +99,10 @@ jobs:
 
       - name: Create GitHub Release
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
-          PRERELEASE=""
-          case "${{ steps.ver.outputs.version }}" in
-            *-*) PRERELEASE="--prerelease" ;;
-          esac
-          gh release create "${GITHUB_REF_NAME}" \
+          VERSION="${{ inputs.version }}"
+          gh release create "v${VERSION}" \
             "${{ steps.esa.outputs.path }}" \
-            --title "v${{ steps.ver.outputs.version }}" \
-            --notes-file release-notes.md \
-            $PRERELEASE
-
-      - name: Job summary
-        run: |
-          {
-            echo "### Release v${{ steps.ver.outputs.version }} published :rocket:"
-            echo ""
-            echo "- **Asset:** \`$(basename "${{ steps.esa.outputs.path }}")\`"
-            echo "- **Tag:** \`${GITHUB_REF_NAME}\`"
-          } >> "$GITHUB_STEP_SUMMARY"
+            --title "v${VERSION}" \
+            --notes-file release-notes.md
