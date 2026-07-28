@@ -54,7 +54,7 @@ released version avoids that trap entirely.
 The repository features a fully automated release pipeline (`.github/workflows/release.yml`). You never need to build or upload the `.esa` file manually, nor do you need to edit version numbers in the code files or changelog heading manually.
 
 To publish a new release:
-1. Ensure all changes are merged into the `main` branch. All release notes must be written under the `## [Unreleased]` section of [CHANGELOG.md](file:///Users/fkube/github/sap-cpi-kafka-adapter-plus/CHANGELOG.md).
+1. Ensure all changes are merged into the `main` branch. All release notes must be written under the `## [Unreleased]` section of [CHANGELOG.md](CHANGELOG.md).
 2. Create and push a git tag on the `main` branch:
    ```bash
    git tag v1.0.17

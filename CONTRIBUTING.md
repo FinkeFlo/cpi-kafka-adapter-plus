@@ -92,10 +92,10 @@ getter/setter and a default-value assertion in `CpiKafkaPlusComponentTest`.
 
 ## Versioning and Releases
 
-We follow standard [Semantic Versioning (SemVer)](https://semver.org/). Please refer to [VERSIONING.md](file:///Users/fkube/github/sap-cpi-kafka-adapter-plus/VERSIONING.md) for detailed rules on how adapter version bumps affect SAP CPI iFlow compatibility.
+We follow standard [Semantic Versioning (SemVer)](https://semver.org/). Please refer to [VERSIONING.md](VERSIONING.md) for detailed rules on how adapter version bumps affect SAP CPI iFlow compatibility.
 
 Releases are fully automated via GitHub Actions:
-1. During development, add all change descriptions under the `## [Unreleased]` section in [CHANGELOG.md](file:///Users/fkube/github/sap-cpi-kafka-adapter-plus/CHANGELOG.md). Do not manually bump versions in code files or edit the unreleased heading.
+1. During development, add all change descriptions under the `## [Unreleased]` section in [CHANGELOG.md](CHANGELOG.md). Do not manually bump versions in code files or edit the unreleased heading.
 2. To trigger a new release, simply create and push a git tag matching the version format:
    ```bash
    git tag v1.0.17
