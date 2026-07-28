@@ -55,7 +55,7 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Update versions in codebase
+      - name: Update versions and changelog in codebase
         if: steps.guard.outputs.already_bumped == 'false'
         run: |
           VERSION="${{ steps.ver.outputs.version }}"
@@ -70,6 +70,15 @@ jobs:
           # 3. Update Metadata XMLs (ComponentId und VariantId)
           find src/main/resources/metadata -name "metadata-*.xml" -type f -exec sed -i "s/\/version::[0-9.]*\"/\/version::$VERSION\"/g" {} +
           find src/main/resources/metadata -name "metadata-*.xml" -type f -exec sed -i "s/\/version::[0-9.]*<\/Name>/\/version::$VERSION<\/Name>/g" {} +
+          
+          # 4. Update CHANGELOG.md (replace Unreleased heading with the version and current date)
+          TODAY=$(date +%Y-%m-%d)
+          if grep -q "^## \[Unreleased\]" CHANGELOG.md; then
+            echo "Updating CHANGELOG.md: replacing [Unreleased] with [$VERSION] - $TODAY"
+            sed -i "s/^## \[Unreleased\]/## [$VERSION] - $TODAY/" CHANGELOG.md
+          else
+            echo "No [Unreleased] heading found in CHANGELOG.md. Skipping changelog update."
+          fi
 
       - name: Commit and push version bump to main
         if: steps.guard.outputs.already_bumped == 'false'
@@ -80,9 +89,9 @@ jobs:
           git checkout main
           
           # Copy the changed files from the detached HEAD workspace
-          git checkout HEAD -- config.adk pom.xml src/main/resources/metadata/
+          git checkout HEAD -- config.adk pom.xml src/main/resources/metadata/ CHANGELOG.md
           
-          git add config.adk pom.xml src/main/resources/metadata/
+          git add config.adk pom.xml src/main/resources/metadata/ CHANGELOG.md
           git commit -m "chore: bump version to $VERSION [skip ci]"
           git push origin main
 
