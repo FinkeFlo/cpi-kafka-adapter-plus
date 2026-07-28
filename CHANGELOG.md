@@ -7,9 +7,18 @@ and the project follows [Semantic Versioning](https://semver.org/). See
 [VERSIONING.md](https://github.com/finkeflo/cpi-kafka-adapter-plus/blob/main/VERSIONING.md) for how the adapter version maps to SAP CPI
 iFlow compatibility.
 
-## [Unreleased]
+## [1.0.16] - 2026-07-28
+
+### Added
+- **Receiver UI**: Exposed transactional producer settings (`enableTransactions`, `transactionalIdPrefix`, `maxConcurrentTransactions`) in the adapter variant metadata so they are configurable via the Integration Suite UI.
 
 ### Changed
+- **Java Upgrade**: Upgraded compiler source/target compatibility from Java 8 to **Java 11**.
+- **Kafka Upgrade**: Upgraded Apache Kafka client library from 3.x to **4.x** (`kafka-clients 4.3.1`).
+- **Dependency Optimization**: Excluded default multi-platform `zstd-jni` from `kafka-clients` and replaced it with a targeted `linux_amd64` variant, significantly reducing the final `.esa` archive size.
+- **Deprecation Cleanup**: Removed deprecated `ProducerConfig.RETRIES_CONFIG` from DLQ producer (now managed via `delivery.timeout.ms`) and `SslConfigs.SSL_PROTOCOL_CONFIG` (relying on Kafka 4.x TLSv1.3 default).
+- **OSGi Compatibility**: Refactored `org.ietf.jgss` empty security stubs into an isolated compiler execution block (`src/stubs/java` under JDK 8 release target) to avoid JPMS split-package errors on Java 11+.
+- **CI Workflows**: Renamed manual ESA preview workflow to "Build ESA Preview" to resolve a GitHub Actions sidebar display bug.
 - **Documentation**: Aligned `CONTRIBUTING.md` with FlowMate toolkit standards, including rules for Conventional Commits and Changelog Enforcement.
 
 ## [1.0.15] - 2026-07-23

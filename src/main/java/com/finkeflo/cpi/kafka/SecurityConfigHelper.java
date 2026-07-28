@@ -33,7 +33,6 @@ import org.slf4j.LoggerFactory;
 public final class SecurityConfigHelper {
 
     private static final Logger LOG = LoggerFactory.getLogger(SecurityConfigHelper.class);
-    private static final String DEFAULT_SSL_PROTOCOL = "TLSv1.3";
 
     private SecurityConfigHelper() {}
 
@@ -83,8 +82,6 @@ public final class SecurityConfigHelper {
     }
 
     private static void configureSsl(Properties props, CpiKafkaPlusEndpoint endpoint) {
-        props.put(SslConfigs.SSL_PROTOCOL_CONFIG, DEFAULT_SSL_PROTOCOL);
-
         String sslKeystoreAlias = trimToNull(endpoint.getSslKeystoreAlias());
         if (sslKeystoreAlias == null) {
             return;

@@ -216,7 +216,6 @@ public final class DlqProducerHelper implements Closeable {
         Properties props = new Properties();
         props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, endpoint.getBootstrapServers());
         props.put(ProducerConfig.ACKS_CONFIG, "all");
-        props.put(ProducerConfig.RETRIES_CONFIG, 3);
         props.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, true);
         props.put(ProducerConfig.MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION, 1);
 
