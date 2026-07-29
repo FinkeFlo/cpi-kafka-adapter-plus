@@ -7,7 +7,7 @@ and the project follows [Semantic Versioning](https://semver.org/). See
 [VERSIONING.md](https://github.com/finkeflo/cpi-kafka-adapter-plus/blob/main/VERSIONING.md) for how the adapter version maps to SAP CPI
 iFlow compatibility.
 
-## [Unreleased]
+## [1.1.0] - 2026-07-29
 ### Removed
 - Removed the dead legacy `metadata.xml` (superseded by the `metadata-sender-*.xml` / `metadata-receiver-*.xml` split; unreferenced by the build). No adapter behavior change.
 
