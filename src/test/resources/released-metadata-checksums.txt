@@ -2,4 +2,5 @@
 # A file is "frozen" once its version is BELOW the current config.adk Adapter-Version.
 # Grow-only: add an entry when a metadata file becomes a prior version; NEVER edit a frozen file.
 # Format: <filename>=<sha256>
-metadata-sender-1.0.0.xml=f034282ec731937b193148d036c9c65e8f9fd4ec317d20022a734e64f5d8b34c
+metadata-sender-1.0.0.xml=931eeabb56ceacac30b6e40b8d82c68911bdad0ed8e4a468f667296f02ae679e
+metadata-receiver-1.0.0.xml=2b7685edaff9a96cde452efe1cb461f0c0969842e569a081605c5eeee6413ba4
