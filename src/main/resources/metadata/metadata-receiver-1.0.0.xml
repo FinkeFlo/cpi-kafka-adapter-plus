@@ -415,6 +415,24 @@
         <GuiLabels guid="b1000003-0000-0000-0000-000000000002"><Label language="EN">Max Poll Records</Label></GuiLabels>
     </AttributeMetadata>
     <AttributeMetadata>
+        <Name>fetchMinBytes</Name>
+        <Usage>false</Usage>
+        <DataType>xsd:integer</DataType>
+        <Default>1</Default>
+        <Length/>
+        <isparameterized>true</isparameterized>
+        <GuiLabels guid="b1000003-0000-0000-0000-000000000103"><Label language="EN">Fetch Min Bytes</Label></GuiLabels>
+    </AttributeMetadata>
+    <AttributeMetadata>
+        <Name>fetchMaxWaitMs</Name>
+        <Usage>false</Usage>
+        <DataType>xsd:integer</DataType>
+        <Default>500</Default>
+        <Length/>
+        <isparameterized>true</isparameterized>
+        <GuiLabels guid="b1000003-0000-0000-0000-000000000104"><Label language="EN">Fetch Max Wait (ms)</Label></GuiLabels>
+    </AttributeMetadata>
+    <AttributeMetadata>
         <Name>maxPartitionFetchSizeKb</Name>
         <Usage>false</Usage>
         <DataType>xsd:integer</DataType>

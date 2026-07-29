@@ -40,6 +40,8 @@ For detailed security setup, see [Authentication](security/authentication.md).
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `maxPartitionFetchSizeKb` | `1024` | Maximum data returned by the broker per partition per poll, in KB. |
+| `fetchMinBytes` | `1` | Kafka `fetch.min.bytes`: minimum data (in bytes) the broker accumulates before responding to a fetch request. Raise this to encourage larger, more efficient batches under low load. |
+| `fetchMaxWaitMs` | `500` | Kafka `fetch.max.wait.ms`: maximum time the broker waits to satisfy `fetchMinBytes` before returning whatever records are currently available. |
 
 ## Batch
 

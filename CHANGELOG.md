@@ -9,6 +9,7 @@ iFlow compatibility.
 
 ## [Unreleased]
 ### Added
+- Added `fetchMinBytes` (`fetch.min.bytes`) and `fetchMaxWaitMs` (`fetch.max.wait.ms`) consumer endpoint properties, exposed in the adapter UI, to enable true broker-side batching and reduce small/frequent CPI executions under low load. Defaults (1 / 500) match the Kafka client defaults, so existing configurations are unaffected unless explicitly changed. (#88)
 - Added `CpiKafkaPlusStatus` header (value `"OK"`) to the batch producer response, alongside the existing `<status>OK</status>` XML summary body, for consistent success signaling. (#85)
 
 ### Removed
