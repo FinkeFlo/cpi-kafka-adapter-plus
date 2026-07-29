@@ -1,0 +1,9 @@
+{
+  "kafkaRecords": {
+    "record": [
+      {"key": "order-1", "value": {"testId": "__TEST_ID__", "seq": 1}},
+      {"key": "order-2", "value": {"testId": "__TEST_ID__", "seq": 2}},
+      {"value": {"testId": "__TEST_ID__", "seq": 3}}
+    ]
+  }
+}

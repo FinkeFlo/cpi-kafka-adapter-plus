@@ -1,0 +1,5 @@
+<order>
+  <testId>__TEST_ID__</testId>
+  <message>e2e test message xml topic</message>
+  <timestamp>__TIMESTAMP__</timestamp>
+</order>
