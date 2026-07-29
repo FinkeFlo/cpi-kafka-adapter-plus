@@ -8,6 +8,9 @@ and the project follows [Semantic Versioning](https://semver.org/). See
 iFlow compatibility.
 
 ## [Unreleased]
+### Added
+- Added `CpiKafkaPlusStatus` header (value `"OK"`) to the batch producer response, alongside the existing `<status>OK</status>` XML summary body, for consistent success signaling. (#85)
+
 ### Removed
 - Removed the dead `embedXmlValues` endpoint property, which was never wired into the `XML_LIST` batch formatting code path and had no UI exposure. The actual behavior (auto-detecting and embedding XML-looking values, falling back to CDATA text otherwise) is unchanged. (#89)
 
