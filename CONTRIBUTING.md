@@ -83,10 +83,25 @@ When writing documentation, creating test cases, or providing placeholder data, 
 
 ### Adding an endpoint option
 
-New `@UriParam` fields on `CpiKafkaPlusEndpoint` must also be added to
-`src/main/resources/metadata/metadata.xml` in **two** places (an
-`<AttributeReference>` and a top-level `<AttributeMetadata>`), plus a
-getter/setter and a default-value assertion in `CpiKafkaPlusComponentTest`.
+Adapter metadata is split by direction into two files:
+`src/main/resources/metadata/metadata-sender-*.xml` (Kafka **Consumer** /
+CPI "Sender" adapter options, e.g. `autoOffsetReset`, `maxPollRecords`) and
+`metadata-receiver-*.xml` (Kafka **Producer** / CPI "Receiver" adapter
+options). There is no single `metadata.xml` anymore.
+
+New `@UriParam` fields on `CpiKafkaPlusEndpoint` must be added to the file
+matching their direction, in **two** places within that file:
+1. An `<AttributeReference>` inside the appropriate `<Tab>`/`<AttributeGroup>`
+   (this is what actually makes the field appear in the adapter UI).
+2. A top-level `<AttributeMetadata>` entry (name, type, default, GUI label).
+
+Also add a getter/setter on `CpiKafkaPlusEndpoint` and a default-value
+assertion in `CpiKafkaPlusComponentTest`.
+
+Whether you edit the current variant file in place or must create a new
+`-<version>.xml` variant file depends on the kind of change — see
+[`VERSIONING.md`](VERSIONING.md) (micro bump = in-place edit, minor bump =
+new file, old file untouched).
 
 ---
 
