@@ -80,7 +80,10 @@ jobs:
           CPI_API_CLIENT_ID: ${{ secrets.CPI_API_CLIENT_ID }}
           CPI_API_CLIENT_SECRET: ${{ secrets.CPI_API_CLIENT_SECRET }}
           CPI_API_BASE_URL: ${{ secrets.CPI_API_BASE_URL }}
-          ADAPTER_ID: kafkaAdapterPlus
+          # Note: CPI appends a per-tenant/deployer suffix to custom adapter Ids on first
+          # deploy (verified live against the E2E tenant) - this is NOT simply config.adk's
+          # Adapter-ID.
+          ADAPTER_ID: kafkaAdapterPlus_FlorianKube
           ADAPTER_PACKAGE_ID: KafkaAdapterPlus
           ADAPTER_NAME: Kafka Adapter Plus
           ESA_PATH: ${{ steps.esa.outputs.path }}

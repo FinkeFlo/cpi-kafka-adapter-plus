@@ -99,12 +99,9 @@ def deploy_and_wait(base_url, token, adapter_id, timeout_seconds=600, poll_inter
     status, raw = api_request(
         base_url, token, "POST", f"/api/v1/DeployIntegrationAdapterDesigntimeArtifact?Id='{adapter_id}'",
     )
-    task_id = None
-    try:
-        parsed = json.loads(raw)
-        task_id = parsed.get("d", parsed).get("DeployIntegrationAdapterDesigntimeArtifact") if isinstance(parsed, dict) else None
-    except (json.JSONDecodeError, AttributeError):
-        pass
+    # The function import returns the task id as a bare string (Content-Type: text/plain),
+    # not wrapped in the usual OData V2 JSON envelope - verified against the live tenant.
+    task_id = raw.decode(errors="replace").strip().strip('"')
     if not task_id:
         print("Deploy triggered but no task id returned - assuming synchronous success.")
         return
