@@ -15,7 +15,8 @@ name: Deploy to CPI (E2E tenant)
 #     e2e-consumer-tests.yml on pull_request from trusted contexts), this workflow
 #     itself can only ever be started via workflow_dispatch and only proceeds past
 #     the environment gate with maintainer approval.
-#   - Extra actor guard below as defense in depth even if someone else has write access.
+#   - Extra guard below (actor must equal the repo owner) as defense in depth even
+#     if someone else has write access.
 #
 # Reuses the existing repository secrets already used by e2e-consumer-tests.yml:
 #   E2E_CPI_API_TOKEN_URL, E2E_CPI_API_CLIENT_ID, E2E_CPI_API_CLIENT_SECRET, E2E_CPI_API_BASE_URL
@@ -42,8 +43,8 @@ jobs:
     steps:
       - name: Restrict to maintainer
         run: |
-          if [ "${{ github.actor }}" != "FinkeFlo" ]; then
-            echo "::error::This workflow may only be run by the repository maintainer."
+          if [ "${{ github.actor }}" != "${{ github.repository_owner }}" ]; then
+            echo "::error::This workflow may only be run by the repository owner."
             exit 1
           fi
 
