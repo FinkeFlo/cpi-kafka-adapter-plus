@@ -10,14 +10,19 @@ name: Deploy to CPI (E2E tenant)
 #   - workflow_dispatch only: nobody can trigger this via a PR (incl. forks).
 #   - Restricted to a single GitHub Environment ("cpi-e2e-tenant") that must be
 #     configured with required reviewers (only the maintainer) in repo Settings ->
-#     Environments. The CPI_API_* secrets must live in that environment, not as
-#     repository-wide secrets, so they are only decrypted after manual approval.
+#     Environments, so this job only runs after manual approval - even though the
+#     E2E_CPI_API_* secrets it reuses are repository-wide (already used by
+#     e2e-consumer-tests.yml on pull_request from trusted contexts), this workflow
+#     itself can only ever be started via workflow_dispatch and only proceeds past
+#     the environment gate with maintainer approval.
 #   - Extra actor guard below as defense in depth even if someone else has write access.
 #
-# Required environment secrets (configure in the "cpi-e2e-tenant" GitHub Environment):
-#   CPI_API_TOKEN_URL, CPI_API_CLIENT_ID, CPI_API_CLIENT_SECRET, CPI_API_BASE_URL
-# Required environment variables (or hardcode below if they never change):
-#   ADAPTER_ID (kafkaAdapterPlus), ADAPTER_PACKAGE_ID (KafkaAdapterPlus)
+# Reuses the existing repository secrets already used by e2e-consumer-tests.yml:
+#   E2E_CPI_API_TOKEN_URL, E2E_CPI_API_CLIENT_ID, E2E_CPI_API_CLIENT_SECRET, E2E_CPI_API_BASE_URL
+# The "cpi-e2e-tenant" GitHub Environment (Settings -> Environments) still needs to be
+# created and configured with a required reviewer (the maintainer) - that gate applies
+# to any job referencing this environment regardless of where the secrets themselves
+# are defined, so no secrets need to be duplicated/moved into the environment.
 
 on:
   workflow_dispatch:
@@ -76,10 +81,10 @@ jobs:
 
       - name: Upload and deploy to CPI
         env:
-          CPI_API_TOKEN_URL: ${{ secrets.CPI_API_TOKEN_URL }}
-          CPI_API_CLIENT_ID: ${{ secrets.CPI_API_CLIENT_ID }}
-          CPI_API_CLIENT_SECRET: ${{ secrets.CPI_API_CLIENT_SECRET }}
-          CPI_API_BASE_URL: ${{ secrets.CPI_API_BASE_URL }}
+          CPI_API_TOKEN_URL: ${{ secrets.E2E_CPI_API_TOKEN_URL }}
+          CPI_API_CLIENT_ID: ${{ secrets.E2E_CPI_API_CLIENT_ID }}
+          CPI_API_CLIENT_SECRET: ${{ secrets.E2E_CPI_API_CLIENT_SECRET }}
+          CPI_API_BASE_URL: ${{ secrets.E2E_CPI_API_BASE_URL }}
           # Note: CPI appends a per-tenant/deployer suffix to custom adapter Ids on first
           # deploy (verified live against the E2E tenant) - this is NOT simply config.adk's
           # Adapter-ID.
