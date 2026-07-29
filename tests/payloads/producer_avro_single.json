@@ -1,0 +1,5 @@
+{
+  "testId": "__TEST_ID__",
+  "message": "e2e test message avro topic",
+  "timestamp": "__TIMESTAMP__"
+}

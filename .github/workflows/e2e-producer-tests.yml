@@ -1,0 +1,171 @@
+name: E2E Producer Tests
+
+# Validates the Kafka Adapter Plus producer against a real SAP CPI tenant and a real
+# Kafka broker (homeserver infrastructure, see .tmp/e2e_test_plan.md for details).
+# Requires the producer iFlows described in the E2E test plan to already be deployed
+# on the target CPI tenant.
+#
+# Required repository secrets:
+#   E2E_CPI_TOKEN_URL      - OAuth2 token endpoint of the CPI tenant
+#   E2E_CPI_CLIENT_ID      - OAuth2 client id (sender/runtime client, ESBMessaging.send scope)
+#   E2E_CPI_CLIENT_SECRET  - OAuth2 client secret
+#   E2E_CPI_BASE_URL       - Base URL of the CPI runtime host (.../it-cpi001-rt...)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  producer-e2e:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: json-single
+            endpoint: /http/kafkaadapterplus/producer/json
+            template: tests/payloads/producer_json_single.json
+            content-type: application/json
+            response-format: json
+            expected-topic: e2e.kafka-adapter-plus.json
+          - name: xml-single
+            endpoint: /http/kafkaadapterplus/producer/xml
+            template: tests/payloads/producer_xml_single.xml
+            content-type: application/xml
+            response-format: json
+            expected-topic: e2e.kafka-adapter-plus.xml
+          - name: avro-single
+            endpoint: /http/kafkaadapterplus/producer/avro
+            template: tests/payloads/producer_avro_single.json
+            content-type: application/json
+            response-format: json
+            expected-topic: e2e.kafka-adapter-plus.avro
+          - name: batch-json
+            endpoint: /http/kafkaadapterplus/producer/batch/json
+            template: tests/payloads/producer_batch_json.json
+            content-type: application/json
+            response-format: xml
+            expected-topic: e2e.kafka-adapter-plus.batch-json
+            expected-record-count: 3
+          - name: batch-xml
+            endpoint: /http/kafkaadapterplus/producer/batch/xml
+            template: tests/payloads/producer_batch_xml.xml
+            content-type: application/xml
+            response-format: xml
+            expected-topic: e2e.kafka-adapter-plus.batch-xml
+            expected-record-count: 3
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Get OAuth2 token
+        env:
+          TOKEN_URL: ${{ secrets.E2E_CPI_TOKEN_URL }}
+          CLIENT_ID: ${{ secrets.E2E_CPI_CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.E2E_CPI_CLIENT_SECRET }}
+        run: |
+          set -euo pipefail
+          resp=$(curl -sf -X POST "${TOKEN_URL}?grant_type=client_credentials" -u "${CLIENT_ID}:${CLIENT_SECRET}")
+          token=$(echo "$resp" | jq -r '.access_token')
+          if [ -z "$token" ] || [ "$token" = "null" ]; then
+            echo "::error::Failed to obtain OAuth2 token"
+            exit 1
+          fi
+          echo "::add-mask::$token"
+          echo "TOKEN=$token" >> "$GITHUB_ENV"
+
+      - name: Render payload with test UUID
+        id: render
+        run: |
+          set -euo pipefail
+          uuid=$(python3 -c "import uuid; print(uuid.uuid4())")
+          timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          rendered="$(mktemp)"
+          sed -e "s/__TEST_ID__/${uuid}/g" -e "s/__TIMESTAMP__/${timestamp}/g" \
+            "${{ matrix.template }}" > "$rendered"
+          echo "uuid=$uuid" >> "$GITHUB_OUTPUT"
+          echo "rendered_file=$rendered" >> "$GITHUB_OUTPUT"
+
+      - name: Send test message to CPI
+        id: send
+        env:
+          BASE_URL: ${{ secrets.E2E_CPI_BASE_URL }}
+        run: |
+          set -euo pipefail
+          http_code=$(curl -s -o response.txt -w "%{http_code}" -X POST \
+            "${BASE_URL}${{ matrix.endpoint }}" \
+            -H "Content-Type: ${{ matrix.content-type }}" \
+            -H "X-Kafka-Adapter-Plus-Trace-Uuid: ${{ steps.render.outputs.uuid }}" \
+            -H "Authorization: Bearer ${TOKEN}" \
+            --data @"${{ steps.render.outputs.rendered_file }}")
+          echo "http_code=$http_code" >> "$GITHUB_OUTPUT"
+          echo "--- Response ($http_code) ---"
+          cat response.txt
+
+      - name: Validate response
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import sys
+          import xml.etree.ElementTree as ET
+
+          http_code = "${{ steps.send.outputs.http_code }}"
+          response_format = "${{ matrix.response-format }}"
+          expected_topic = "${{ matrix.expected-topic }}"
+          expected_record_count = "${{ matrix.expected-record-count }}"
+
+          with open("response.txt") as f:
+              body = f.read()
+
+          errors = []
+          if http_code != "200":
+              errors.append(f"expected HTTP 200, got {http_code}")
+
+          if response_format == "json":
+              try:
+                  data = json.loads(body)
+              except ValueError as e:
+                  errors.append(f"response is not valid JSON: {e}")
+                  data = {}
+              if data.get("topic") != expected_topic:
+                  errors.append(f"expected topic '{expected_topic}', got '{data.get('topic')}'")
+              offset = data.get("offset")
+              if not isinstance(offset, int) or offset < 0:
+                  errors.append(f"expected offset to be an int >= 0, got {offset!r}")
+          elif response_format == "xml":
+              try:
+                  root = ET.fromstring(body)
+              except ET.ParseError as e:
+                  errors.append(f"response is not valid XML: {e}")
+                  root = None
+              if root is not None:
+                  topic = root.findtext("topic")
+                  if topic != expected_topic:
+                      errors.append(f"expected topic '{expected_topic}', got '{topic}'")
+                  record_count = root.findtext("recordCount")
+                  if expected_record_count and record_count != expected_record_count:
+                      errors.append(
+                          f"expected recordCount '{expected_record_count}', got '{record_count}'"
+                      )
+
+          summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+          status = "PASSED" if not errors else "FAILED"
+          if summary_path:
+              with open(summary_path, "a") as summary:
+                  summary.write(f"### Producer E2E test: `${{ matrix.name }}` - {status}\n\n")
+                  summary.write(f"- HTTP status: {http_code}\n")
+                  summary.write(f"- Expected topic: `{expected_topic}`\n")
+                  summary.write("```\n" + body + "\n```\n")
+                  if errors:
+                      summary.write("\nErrors:\n")
+                      for e in errors:
+                          summary.write(f"- {e}\n")
+
+          if errors:
+              for e in errors:
+                  print(f"::error::{e}")
+              sys.exit(1)
+          print(f"Producer E2E test '${{ matrix.name }}' passed.")
+          PY
