@@ -485,10 +485,15 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
             RecordMetadata metadata = future.get();
 
             in.setHeader("SAP_Receiver", metadata.topic());
-            in.setHeader("CamelKafkaTopic", metadata.topic());
-            in.setHeader("CamelKafkaPartition", metadata.partition());
-            in.setHeader("CamelKafkaOffset", metadata.offset());
-            in.setHeader("CamelKafkaTimestamp", metadata.timestamp());
+            // Adapter-native headers, consistent with the batch producer and consumer.
+            // Note: the previous CamelKafkaTopic/Partition/Offset/Timestamp headers are
+            // intentionally no longer set here (#84) - iFlows must use the CpiKafkaPlus*
+            // headers below instead.
+            in.setHeader("CpiKafkaPlusTopic", metadata.topic());
+            in.setHeader("CpiKafkaPlusPartition", metadata.partition());
+            in.setHeader("CpiKafkaPlusOffset", metadata.offset());
+            in.setHeader("CpiKafkaPlusTimestamp", metadata.timestamp());
+            in.setHeader("CpiKafkaPlusStatus", "OK");
 
             recordSendSuccess();
             LOG.debug("[CPI-KAFKA-PLUS-DIAG] Message sent to topic '{}' partition {} offset {}",

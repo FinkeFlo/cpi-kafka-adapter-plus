@@ -206,18 +206,20 @@ public class ProducerSendIT {
             producer.doStop();
         }
 
-        Assert.assertNotNull("CamelKafkaTopic must be set",
-                exchange.getIn().getHeader("CamelKafkaTopic"));
-        Assert.assertEquals("CamelKafkaTopic must match sent topic",
-                topic, exchange.getIn().getHeader("CamelKafkaTopic"));
         Assert.assertNotNull("SAP_Receiver must be set",
                 exchange.getIn().getHeader("SAP_Receiver"));
-        Assert.assertNotNull("CamelKafkaPartition must be set",
-                exchange.getIn().getHeader("CamelKafkaPartition"));
-        Assert.assertNotNull("CamelKafkaOffset must be set",
-                exchange.getIn().getHeader("CamelKafkaOffset"));
-        Assert.assertNotNull("CamelKafkaTimestamp must be set",
-                exchange.getIn().getHeader("CamelKafkaTimestamp"));
+        Assert.assertEquals("SAP_Receiver must match sent topic",
+                topic, exchange.getIn().getHeader("SAP_Receiver"));
+        Assert.assertEquals("CpiKafkaPlusTopic must match sent topic",
+                topic, exchange.getIn().getHeader("CpiKafkaPlusTopic"));
+        Assert.assertNotNull("CpiKafkaPlusPartition must be set",
+                exchange.getIn().getHeader("CpiKafkaPlusPartition"));
+        Assert.assertNotNull("CpiKafkaPlusOffset must be set",
+                exchange.getIn().getHeader("CpiKafkaPlusOffset"));
+        Assert.assertNotNull("CpiKafkaPlusTimestamp must be set",
+                exchange.getIn().getHeader("CpiKafkaPlusTimestamp"));
+        Assert.assertEquals("CpiKafkaPlusStatus must be OK",
+                "OK", exchange.getIn().getHeader("CpiKafkaPlusStatus"));
     }
 
     @Test
