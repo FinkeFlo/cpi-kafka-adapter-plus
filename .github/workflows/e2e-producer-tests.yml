@@ -13,6 +13,16 @@ name: E2E Producer Tests
 
 on:
   workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/main/java/com/finkeflo/cpi/kafka/**'
+      - 'tests/payloads/**'
+      - '.github/workflows/e2e-producer-tests.yml'
+      - 'pom.xml'
+  push:
+    tags:
+      - 'v*'
 
 permissions:
   contents: read
@@ -169,3 +179,19 @@ jobs:
               sys.exit(1)
           print(f"Producer E2E test '${{ matrix.name }}' passed.")
           PY
+
+  # Aggregating gate: gives branch protection a single, stable status check to require,
+  # since the matrix job above produces one dynamically-named check per scenario.
+  e2e-producer-tests-gate:
+    needs: [producer-e2e]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require all producer E2E scenarios to pass
+        run: |
+          echo "producer-e2e=${{ needs.producer-e2e.result }}"
+          if [ "${{ needs.producer-e2e.result }}" != "success" ]; then
+            echo "::error::One or more producer E2E scenarios did not succeed"
+            exit 1
+          fi
+          echo "All producer E2E scenarios passed."
