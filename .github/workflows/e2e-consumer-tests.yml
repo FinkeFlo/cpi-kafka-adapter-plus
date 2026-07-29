@@ -1,0 +1,131 @@
+name: E2E Consumer Tests
+
+# Validates the Kafka Adapter Plus consumer against a real SAP CPI tenant and a real
+# Kafka broker (homeserver infrastructure, see .tmp/e2e_test_plan.md for details).
+#
+# Unlike the producer E2E tests, test messages are written directly to Kafka (bypassing
+# the CPI producer adapter, which is not under test here) via tests/e2e/consumer_e2e_test.py.
+# Verification happens via the SAP CPI Message Processing Log (MPL) API, filtering on
+# ApplicationMessageId (single-message scenarios) or a LogEnd time window (batch scenarios),
+# and reading the "consumertest" persist-step payload.
+#
+# Requires the consumer iFlows described in the E2E test plan to already be deployed
+# on the target CPI tenant (see .tmp/e2e_test_plan.md, "Consumer-Testplan").
+#
+# Required repository secrets:
+#   E2E_KAFKA_BOOTSTRAP_SERVERS   - Kafka broker bootstrap servers (SASL_SSL/PLAIN)
+#   E2E_KAFKA_SASL_USERNAME       - Kafka SASL username
+#   E2E_KAFKA_SASL_PASSWORD       - Kafka SASL password
+#   E2E_CPI_API_BASE_URL          - CPI API base URL (design/monitoring scopes)
+#   E2E_CPI_API_TOKEN_URL         - OAuth2 token endpoint for the API client
+#   E2E_CPI_API_CLIENT_ID         - OAuth2 client id (MPL/message-store read scopes)
+#   E2E_CPI_API_CLIENT_SECRET     - OAuth2 client secret
+#   E2E_SCHEMA_REGISTRY_URL       - Schema Registry base URL (avro-json scenario only)
+#   E2E_SCHEMA_REGISTRY_USERNAME  - Schema Registry auth username
+#   E2E_SCHEMA_REGISTRY_PASSWORD  - Schema Registry auth password
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/main/java/com/finkeflo/cpi/kafka/**'
+      - 'tests/e2e/**'
+      - '.github/workflows/e2e-consumer-tests.yml'
+      - 'pom.xml'
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+jobs:
+  consumer-e2e:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: json-single
+            scenario: json-single
+            topic: e2e.kafka-adapter-plus.consumer.json
+            iflow-name: Kafka_Adapter_Plus_-_E2E_-_Consume_-_JSON
+            extra-args: ''
+          - name: avro-json
+            scenario: avro-json
+            topic: e2e.kafka-adapter-plus.consumer.avro
+            iflow-name: Kafka_Adapter_Plus_-_E2E_-_Consume_-_Avro
+            extra-args: '--topic-subject e2e.kafka-adapter-plus.avro-value'
+          - name: batch-json
+            scenario: batch-json
+            topic: e2e.kafka-adapter-plus.consumer.batch-json
+            iflow-name: Kafka_Adapter_Plus_-_E2E_-_Consume_-_Batch_-_JSON
+            extra-args: '--message-count 7 --batch-size 3 --partition 0 --timeout 45'
+          - name: batch-xml
+            scenario: batch-xml
+            topic: e2e.kafka-adapter-plus.consumer.batch-xml
+            iflow-name: Kafka_Adapter_Plus_-_E2E_-_Consume_-_Batch_-_XML
+            extra-args: '--message-count 7 --batch-size 3 --partition 0 --timeout 45'
+          - name: dlq
+            scenario: dlq
+            topic: e2e.kafka-adapter-plus.consumer.dlq
+            iflow-name: Kafka_Adapter_Plus_-_E2E_-_Consume_-_DLQ
+            extra-args: '--dlq-topic e2e.kafka-adapter-plus.consumer.dlq-dead-letter --partition 0 --timeout 40'
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install test dependencies
+        run: pip install -r tests/e2e/requirements.txt
+
+      - name: Run consumer E2E scenario
+        env:
+          E2E_KAFKA_BOOTSTRAP_SERVERS: ${{ secrets.E2E_KAFKA_BOOTSTRAP_SERVERS }}
+          E2E_KAFKA_SASL_USERNAME: ${{ secrets.E2E_KAFKA_SASL_USERNAME }}
+          E2E_KAFKA_SASL_PASSWORD: ${{ secrets.E2E_KAFKA_SASL_PASSWORD }}
+          E2E_CPI_API_BASE_URL: ${{ secrets.E2E_CPI_API_BASE_URL }}
+          E2E_CPI_API_TOKEN_URL: ${{ secrets.E2E_CPI_API_TOKEN_URL }}
+          E2E_CPI_API_CLIENT_ID: ${{ secrets.E2E_CPI_API_CLIENT_ID }}
+          E2E_CPI_API_CLIENT_SECRET: ${{ secrets.E2E_CPI_API_CLIENT_SECRET }}
+          E2E_SCHEMA_REGISTRY_URL: ${{ secrets.E2E_SCHEMA_REGISTRY_URL }}
+          E2E_SCHEMA_REGISTRY_USERNAME: ${{ secrets.E2E_SCHEMA_REGISTRY_USERNAME }}
+          E2E_SCHEMA_REGISTRY_PASSWORD: ${{ secrets.E2E_SCHEMA_REGISTRY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          python3 tests/e2e/consumer_e2e_test.py \
+            --scenario "${{ matrix.scenario }}" \
+            --topic "${{ matrix.topic }}" \
+            --iflow-name "${{ matrix.iflow-name }}" \
+            ${{ matrix.extra-args }} \
+            | tee result.txt
+
+      - name: Write job summary
+        if: always()
+        run: |
+          {
+            echo "### Consumer E2E test: \`${{ matrix.name }}\` - ${{ job.status == 'success' && 'PASSED' || 'FAILED' }}"
+            echo
+            echo '```'
+            cat result.txt 2>/dev/null || echo "(no output captured)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # Aggregating gate: gives branch protection a single, stable status check to require,
+  # since the matrix job above produces one dynamically-named check per scenario.
+  e2e-consumer-tests-gate:
+    needs: [consumer-e2e]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require all consumer E2E scenarios to pass
+        run: |
+          echo "consumer-e2e=${{ needs.consumer-e2e.result }}"
+          if [ "${{ needs.consumer-e2e.result }}" != "success" ]; then
+            echo "::error::One or more consumer E2E scenarios did not succeed"
+            exit 1
+          fi
+          echo "All consumer E2E scenarios passed."
