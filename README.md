@@ -44,7 +44,8 @@ as a workflow artifact for download.
 ### Deploy a pre-release build to the E2E test tenant (maintainer only)
 
 The **Deploy to CPI (E2E tenant)** workflow (`.github/workflows/deploy-to-cpi.yml`) builds a chosen
-branch/tag and uploads + deploys it directly to the maintainer's CPI E2E test tenant, so a
+branch/tag and uploads + deploys it directly to the maintainer's CPI E2E test tenant, then
+automatically runs the existing consumer/producer E2E round-trip suites against it, so a
 not-yet-released change can be validated end-to-end before merging. It is `workflow_dispatch`-only,
 restricted to the maintainer, and gated behind a protected GitHub Environment holding the CPI API
 credentials — see the workflow file header for the security rationale and required setup.

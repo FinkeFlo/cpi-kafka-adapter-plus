@@ -1,10 +1,12 @@
 name: Deploy to CPI (E2E tenant)
 
-# Maintainer-only, manually triggered deploy of a built .esa to the E2E test tenant.
-# Intended to test a not-yet-released branch/tag end-to-end before merging/releasing
-# (see VERSIONING.md - the CPI-visible version is deployed as-is, never a preview
-# qualifier). This is NOT part of the release pipeline (release.yml) and never runs
-# on pull_request / push, so forked PRs can never reach it or its secrets.
+# Maintainer-only, manually triggered deploy of a built .esa to the E2E test tenant,
+# followed by an automated round-trip smoke test (issue #15) reusing the existing
+# e2e-consumer-tests.yml / e2e-producer-tests.yml suites unchanged. Intended to test a
+# not-yet-released branch/tag end-to-end before merging/releasing (see VERSIONING.md -
+# the CPI-visible version is deployed as-is, never a preview qualifier). This is NOT
+# part of the release pipeline (release.yml) and never runs on pull_request / push, so
+# forked PRs can never reach it or its secrets.
 #
 # Security:
 #   - workflow_dispatch only: nobody can trigger this via a PR (incl. forks).
@@ -27,11 +29,6 @@ name: Deploy to CPI (E2E tenant)
 
 on:
   workflow_dispatch:
-    inputs:
-      ref:
-        description: 'Branch, tag, or commit to build and deploy'
-        required: true
-        default: 'main'
 
 permissions:
   contents: read
@@ -48,10 +45,12 @@ jobs:
             exit 1
           fi
 
-      - name: Checkout ${{ inputs.ref }}
+      # No custom `ref` input: workflow_dispatch already lets you pick the branch/tag
+      # to run from (UI dropdown / `gh workflow run --ref`), and actions/checkout without
+      # an explicit `ref:` checks out exactly that. Keeping this implicit also keeps the
+      # chained e2e-*-tests.yml jobs below checking out the same ref automatically.
+      - name: Checkout
         uses: actions/checkout@v7
-        with:
-          ref: ${{ inputs.ref }}
 
       - uses: actions/setup-java@v5
         with:
@@ -95,3 +94,17 @@ jobs:
           ESA_PATH: ${{ steps.esa.outputs.path }}
           ADAPTER_VERSION: ${{ steps.ver.outputs.version }}
         run: python3 scripts/deploy_adapter_to_cpi.py
+
+  # Automated post-deploy round-trip smoke test (see issue #15): reuses the existing,
+  # already-passing E2E suites as-is (no duplicated test logic) instead of writing a
+  # new one-off smoke test. Both assume the E2E test iFlows are already deployed on
+  # the tenant (true here - only the custom adapter itself is (re)deployed above).
+  smoke-test-consumer:
+    needs: deploy
+    uses: ./.github/workflows/e2e-consumer-tests.yml
+    secrets: inherit
+
+  smoke-test-producer:
+    needs: deploy
+    uses: ./.github/workflows/e2e-producer-tests.yml
+    secrets: inherit

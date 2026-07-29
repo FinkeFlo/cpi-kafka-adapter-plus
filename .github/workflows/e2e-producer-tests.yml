@@ -18,6 +18,11 @@ on:
   push:
     tags:
       - 'v*'
+  # Reusable-workflow trigger so deploy-to-cpi.yml can chain this as an automated
+  # post-deploy smoke test (see issue #15). github.event_name is 'workflow_call'
+  # in that case, so `changes.outputs.relevant` below evaluates to true and the
+  # full scenario matrix always runs (no path filtering, matching workflow_dispatch).
+  workflow_call:
 
 permissions:
   contents: read
