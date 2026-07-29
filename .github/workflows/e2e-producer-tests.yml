@@ -14,6 +14,9 @@ name: E2E Producer Tests
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   producer-e2e:
     runs-on: ubuntu-latest
