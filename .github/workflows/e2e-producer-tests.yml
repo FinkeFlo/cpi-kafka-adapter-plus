@@ -15,11 +15,6 @@ on:
   workflow_dispatch:
   pull_request:
     branches: [main]
-    paths:
-      - 'src/main/java/com/finkeflo/cpi/kafka/**'
-      - 'tests/payloads/**'
-      - '.github/workflows/e2e-producer-tests.yml'
-      - 'pom.xml'
   push:
     tags:
       - 'v*'
@@ -28,7 +23,33 @@ permissions:
   contents: read
 
 jobs:
+  # Always runs (no `paths:` filter on the trigger above) so that the required
+  # `e2e-producer-tests-gate` status check always gets reported for every PR to
+  # main - otherwise PRs that don't touch producer-relevant paths would block
+  # forever waiting on a check that never runs. See `changes.outputs.relevant`
+  # below: the actual E2E job is skipped (not failed) when irrelevant.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      # Non-PR events (workflow_dispatch, tag push) always run the full suite;
+      # only PRs get the path-filtered skip-if-irrelevant treatment.
+      relevant: ${{ github.event_name != 'pull_request' || steps.filter.outputs.relevant }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dorny/paths-filter@v3
+        if: github.event_name == 'pull_request'
+        id: filter
+        with:
+          filters: |
+            relevant:
+              - 'src/main/java/com/finkeflo/cpi/kafka/**'
+              - 'tests/payloads/**'
+              - '.github/workflows/e2e-producer-tests.yml'
+              - 'pom.xml'
+
   producer-e2e:
+    needs: [changes]
+    if: needs.changes.outputs.relevant == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -182,14 +203,21 @@ jobs:
 
   # Aggregating gate: gives branch protection a single, stable status check to require,
   # since the matrix job above produces one dynamically-named check per scenario.
+  # Always runs (see `changes` job above) so this required check is never left
+  # in "expected" limbo for PRs that don't touch producer-relevant paths.
   e2e-producer-tests-gate:
-    needs: [producer-e2e]
+    needs: [changes, producer-e2e]
     if: always()
     runs-on: ubuntu-latest
     steps:
-      - name: Require all producer E2E scenarios to pass
+      - name: Require all producer E2E scenarios to pass (when relevant)
         run: |
+          echo "changes.relevant=${{ needs.changes.outputs.relevant }}"
           echo "producer-e2e=${{ needs.producer-e2e.result }}"
+          if [ "${{ needs.changes.outputs.relevant }}" != "true" ]; then
+            echo "No producer-relevant changes in this PR - skipping E2E requirement."
+            exit 0
+          fi
           if [ "${{ needs.producer-e2e.result }}" != "success" ]; then
             echo "::error::One or more producer E2E scenarios did not succeed"
             exit 1
