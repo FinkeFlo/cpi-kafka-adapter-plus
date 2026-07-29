@@ -1,0 +1,88 @@
+name: Deploy to CPI (E2E tenant)
+
+# Maintainer-only, manually triggered deploy of a built .esa to the E2E test tenant.
+# Intended to test a not-yet-released branch/tag end-to-end before merging/releasing
+# (see VERSIONING.md - the CPI-visible version is deployed as-is, never a preview
+# qualifier). This is NOT part of the release pipeline (release.yml) and never runs
+# on pull_request / push, so forked PRs can never reach it or its secrets.
+#
+# Security:
+#   - workflow_dispatch only: nobody can trigger this via a PR (incl. forks).
+#   - Restricted to a single GitHub Environment ("cpi-e2e-tenant") that must be
+#     configured with required reviewers (only the maintainer) in repo Settings ->
+#     Environments. The CPI_API_* secrets must live in that environment, not as
+#     repository-wide secrets, so they are only decrypted after manual approval.
+#   - Extra actor guard below as defense in depth even if someone else has write access.
+#
+# Required environment secrets (configure in the "cpi-e2e-tenant" GitHub Environment):
+#   CPI_API_TOKEN_URL, CPI_API_CLIENT_ID, CPI_API_CLIENT_SECRET, CPI_API_BASE_URL
+# Required environment variables (or hardcode below if they never change):
+#   ADAPTER_ID (kafkaAdapterPlus), ADAPTER_PACKAGE_ID (KafkaAdapterPlus)
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Branch, tag, or commit to build and deploy'
+        required: true
+        default: 'main'
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: cpi-e2e-tenant
+    steps:
+      - name: Restrict to maintainer
+        run: |
+          if [ "${{ github.actor }}" != "FinkeFlo" ]; then
+            echo "::error::This workflow may only be run by the repository maintainer."
+            exit 1
+          fi
+
+      - name: Checkout ${{ inputs.ref }}
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+
+      - name: Build (produces the ESA)
+        run: mvn -B clean install -DskipITs
+
+      - name: Locate ESA artifact
+        id: esa
+        run: |
+          ESA="$(find target -name '*.esa' | head -1)"
+          if [ -z "$ESA" ]; then
+            echo "::error::No .esa archive was produced by the build"
+            exit 1
+          fi
+          echo "path=$ESA" >> "$GITHUB_OUTPUT"
+          echo "Found ESA: $ESA"
+
+      - name: Read adapter version from config.adk
+        id: ver
+        run: |
+          VERSION="$(grep -E '^Adapter-Version=' config.adk | cut -d= -f2 | tr -d '[:space:]')"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Deploying adapter version: $VERSION"
+
+      - name: Upload and deploy to CPI
+        env:
+          CPI_API_TOKEN_URL: ${{ secrets.CPI_API_TOKEN_URL }}
+          CPI_API_CLIENT_ID: ${{ secrets.CPI_API_CLIENT_ID }}
+          CPI_API_CLIENT_SECRET: ${{ secrets.CPI_API_CLIENT_SECRET }}
+          CPI_API_BASE_URL: ${{ secrets.CPI_API_BASE_URL }}
+          ADAPTER_ID: kafkaAdapterPlus
+          ADAPTER_PACKAGE_ID: KafkaAdapterPlus
+          ADAPTER_NAME: Kafka Adapter Plus
+          ESA_PATH: ${{ steps.esa.outputs.path }}
+          ADAPTER_VERSION: ${{ steps.ver.outputs.version }}
+        run: python3 scripts/deploy_adapter_to_cpi.py
