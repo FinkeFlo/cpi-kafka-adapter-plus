@@ -40,6 +40,8 @@ For detailed security setup, see [Authentication](security/authentication.md).
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `maxPartitionFetchSizeKb` | `1024` | Maximum data returned by the broker per partition per poll, in KB. |
+| `fetchMinBytes` | `1` | Kafka `fetch.min.bytes`: minimum data (in bytes) the broker accumulates before responding to a fetch request. Raise this to encourage larger, more efficient batches under low load. |
+| `fetchMaxWaitMs` | `500` | Kafka `fetch.max.wait.ms`: maximum time the broker waits to satisfy `fetchMinBytes` before returning whatever records are currently available. |
 
 ## Batch
 
@@ -49,9 +51,8 @@ For detailed security setup, see [Authentication](security/authentication.md).
 | `batchSize` | `100` | Maximum records per batch. |
 | `batchTimeout` | `5000` | Maximum wait time in milliseconds to fill a batch. |
 | `batchOutputFormat` | `JSON_ARRAY` | Batch output format: `JSON_ARRAY`, `XML_LIST`, `SPLIT_EXCHANGES`. |
-| `embedXmlValues` | `false` | In `XML_LIST` output, embed XML values as child elements instead of text. |
 
-In `XML_LIST` mode, each `<value>` element carries a `format` attribute (`"xml"` for directly embedded XML, `"text"` for text/CDATA content). See [Batch Processing](features/batch-processing.md) for details.
+In `XML_LIST` mode, each `<value>` element carries a `format` attribute (`"xml"` for directly embedded XML, `"text"` for text/CDATA content). Values that look like XML are always auto-detected and embedded; there is no configuration option for this. See [Batch Processing](features/batch-processing.md) for details.
 
 ## Producer
 

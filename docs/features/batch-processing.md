@@ -359,31 +359,7 @@ numbers.
 
 `XML_LIST` wraps records in `<kafkaRecords count="N"><record>...</record>...</kafkaRecords>`. Each record contains `key`, `value`, `topic`, `partition`, `offset`, and `timestamp`.
 
-By default, `embedXmlValues=false`. In this mode, every value is emitted as text/CDATA with `format="text"`, even if the value contains XML.
-
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<kafkaRecords count="2">
-  <record>
-    <key>k1</key>
-    <value format="text"><![CDATA[<root><field>v1</field></root>]]></value>
-    <topic>my-topic</topic>
-    <partition>0</partition>
-    <offset>100</offset>
-    <timestamp>1700000000000</timestamp>
-  </record>
-  <record>
-    <key>k2</key>
-    <value format="text"><![CDATA[{"field":"v2"}]]></value>
-    <topic>my-topic</topic>
-    <partition>0</partition>
-    <offset>101</offset>
-    <timestamp>1700000000001</timestamp>
-  </record>
-</kafkaRecords>
-```
-
-When `embedXmlValues=true`, values that look like XML are embedded as parsed child elements and marked with `format="xml"`. Non-XML, null, or empty values still use `format="text"`.
+Values that look like XML are automatically detected and embedded as parsed child elements, marked with `format="xml"`. Non-XML, null, or empty values use text/CDATA content with `format="text"`. This detection is always on and is not configurable.
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -428,7 +404,7 @@ flowchart TD
 Alternative filter: `/kafkaRecords/record[value/@format='xml']` to process only XML records.
 
 !!! warning "XML well-formedness"
-    XML values must be well-formed when `embedXmlValues=true`. The adapter only uses a lightweight check before embedding; malformed XML content can make the batch XML invalid.
+    XML values that look like XML must be well-formed. The adapter only uses a lightweight check before embedding; malformed XML content can make the batch XML invalid.
 
 ### SPLIT_EXCHANGES
 

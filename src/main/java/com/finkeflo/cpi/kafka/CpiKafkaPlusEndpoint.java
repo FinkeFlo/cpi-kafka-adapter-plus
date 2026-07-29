@@ -81,6 +81,19 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
             description = "Maximum records to poll per request")
     private int maxPollRecords = 500;
 
+    @UriParam(label = "processing", defaultValue = "1",
+            description = "Kafka fetch.min.bytes: minimum data (in bytes) the broker accumulates "
+                    + "before responding to a fetch request. Higher values allow larger, more "
+                    + "efficient batches at the cost of added latency (bounded by fetchMaxWaitMs). "
+                    + "Default (1) matches the Kafka client default, preserving existing behavior.")
+    private int fetchMinBytes = 1;
+
+    @UriParam(label = "processing", defaultValue = "500",
+            description = "Kafka fetch.max.wait.ms: maximum time the broker waits to satisfy "
+                    + "fetchMinBytes before returning whatever records are currently available. "
+                    + "Default (500) matches the Kafka client default, preserving existing behavior.")
+    private int fetchMaxWaitMs = 500;
+
     @UriParam(label = "processing", defaultValue = "BATCH_COMPLETE",
             description = "Offset commit strategy: AUTO, BATCH_COMPLETE")
     private String commitStrategy = "BATCH_COMPLETE";
@@ -120,12 +133,6 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
     @UriParam(label = "batch", defaultValue = "JSON_ARRAY",
             description = "Batch output format: JSON_ARRAY, XML_LIST, SPLIT_EXCHANGES")
     private String batchOutputFormat = "JSON_ARRAY";
-
-    @UriParam(label = "batch", defaultValue = "false",
-            description = "When enabled, XML values in XML_LIST batch output are embedded "
-            + "as child elements instead of text. Non-XML values use CDATA wrapping. "
-            + "Only applies when batchOutputFormat is XML_LIST.")
-    private boolean embedXmlValues = false;
 
     // --- Producer Settings ---
     @UriParam(label = "producer", defaultValue = "NONE",
@@ -398,6 +405,12 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
     public int getMaxPollRecords() { return maxPollRecords; }
     public void setMaxPollRecords(int maxPollRecords) { this.maxPollRecords = maxPollRecords; }
 
+    public int getFetchMinBytes() { return fetchMinBytes; }
+    public void setFetchMinBytes(int fetchMinBytes) { this.fetchMinBytes = fetchMinBytes; }
+
+    public int getFetchMaxWaitMs() { return fetchMaxWaitMs; }
+    public void setFetchMaxWaitMs(int fetchMaxWaitMs) { this.fetchMaxWaitMs = fetchMaxWaitMs; }
+
     public String getCommitStrategy() { return commitStrategy; }
     public void setCommitStrategy(String commitStrategy) { this.commitStrategy = commitStrategy; }
 
@@ -421,9 +434,6 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
 
     public String getBatchOutputFormat() { return batchOutputFormat; }
     public void setBatchOutputFormat(String batchOutputFormat) { this.batchOutputFormat = batchOutputFormat; }
-
-    public boolean isEmbedXmlValues() { return embedXmlValues; }
-    public void setEmbedXmlValues(boolean embedXmlValues) { this.embedXmlValues = embedXmlValues; }
 
     public boolean isJsonSchemaValidation() { return jsonSchemaValidation; }
     public void setJsonSchemaValidation(boolean jsonSchemaValidation) { this.jsonSchemaValidation = jsonSchemaValidation; }

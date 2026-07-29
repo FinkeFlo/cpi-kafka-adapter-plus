@@ -965,6 +965,11 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
         props.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, endpoint.getMaxPollRecords());
         props.put(ConsumerConfig.MAX_PARTITION_FETCH_BYTES_CONFIG,
                 endpoint.getMaxPartitionFetchSizeKb() * 1024);
+        // Enable true broker-side batching: the broker accumulates fetchMinBytes (or waits up to
+        // fetchMaxWaitMs) before responding, reducing small/frequent batches under low load.
+        // Defaults (1 / 500) match the Kafka client defaults, so existing configs are unaffected.
+        props.put(ConsumerConfig.FETCH_MIN_BYTES_CONFIG, endpoint.getFetchMinBytes());
+        props.put(ConsumerConfig.FETCH_MAX_WAIT_MS_CONFIG, endpoint.getFetchMaxWaitMs());
 
         boolean autoCommit = "AUTO".equalsIgnoreCase(endpoint.getCommitStrategy());
         props.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, autoCommit);

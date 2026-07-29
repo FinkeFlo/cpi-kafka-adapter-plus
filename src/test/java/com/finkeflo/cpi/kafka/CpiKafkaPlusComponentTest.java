@@ -548,10 +548,4 @@ public class CpiKafkaPlusComponentTest {
         ep.setCredentialAlias(null);
         ep.validateConfiguration(); // should not throw
     }
-
-    @Test
-    public void testEmbedXmlValuesDefaultFalse() {
-        CpiKafkaPlusEndpoint ep = new CpiKafkaPlusEndpoint();
-        Assert.assertFalse("embedXmlValues should default to false", ep.isEmbedXmlValues());
-    }
 }

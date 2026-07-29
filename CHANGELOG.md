@@ -8,6 +8,18 @@ and the project follows [Semantic Versioning](https://semver.org/). See
 iFlow compatibility.
 
 ## [Unreleased]
+### Removed
+- Removed the dead legacy `metadata.xml` (superseded by the `metadata-sender-*.xml` / `metadata-receiver-*.xml` split; unreferenced by the build). No adapter behavior change.
+
+### Changed
+- **Breaking (headers only):** The single-message producer no longer sets `CamelKafkaTopic`, `CamelKafkaPartition`, `CamelKafkaOffset`, or `CamelKafkaTimestamp` response headers. It now sets the adapter-native `CpiKafkaPlusTopic`, `CpiKafkaPlusPartition`, `CpiKafkaPlusOffset`, `CpiKafkaPlusTimestamp`, and `CpiKafkaPlusStatus` (`"OK"`) headers instead, consistent with the batch producer and consumer. `SAP_Receiver` is unchanged. **Action required:** any iFlow reading the old `CamelKafka*` headers after a single-message Kafka Adapter (Out) step (e.g. the E2E producer test iFlows) must be updated to read the new `CpiKafkaPlus*` headers. (#84, #85)
+
+### Added
+- Added `fetchMinBytes` (`fetch.min.bytes`) and `fetchMaxWaitMs` (`fetch.max.wait.ms`) consumer endpoint properties, exposed in the adapter UI, to enable true broker-side batching and reduce small/frequent CPI executions under low load. Defaults (1 / 500) match the Kafka client defaults, so existing configurations are unaffected unless explicitly changed. UI-visible via the new `metadata-sender-1.1.0.xml` variant (minor bump to `1.1.0`); existing iFlow channels stay on `1.0.19` until "Update Version" is used. (#88)
+- Added `CpiKafkaPlusStatus` header (value `"OK"`) to the batch producer response, alongside the existing `<status>OK</status>` XML summary body, for consistent success signaling. (#85)
+
+### Removed
+- Removed the dead `embedXmlValues` endpoint property, which was never wired into the `XML_LIST` batch formatting code path and had no UI exposure. The actual behavior (auto-detecting and embedding XML-looking values, falling back to CDATA text otherwise) is unchanged. (#89)
 
 ## [1.0.19] - 2026-07-28
 ### Fixed

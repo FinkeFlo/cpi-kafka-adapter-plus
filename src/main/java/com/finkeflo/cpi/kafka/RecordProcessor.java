@@ -556,6 +556,9 @@ final class RecordProcessor {
                 };
         String format = endpoint.getBatchOutputFormat();
         if ("XML_LIST".equalsIgnoreCase(format)) {
+            // Auto-detect is always on: values that look like XML are embedded as child
+            // elements, everything else falls back to CDATA text (see BatchFormatter).
+            // There is intentionally no endpoint property to toggle this.
             return BatchFormatter.toXml(batch, this::deserializeKey, cachedDeserializer, true);
         }
         return BatchFormatter.toJsonArray(batch, this::deserializeKey, cachedDeserializer);

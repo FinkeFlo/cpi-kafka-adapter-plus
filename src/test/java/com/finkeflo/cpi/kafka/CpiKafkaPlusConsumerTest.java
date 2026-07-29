@@ -163,6 +163,47 @@ public class CpiKafkaPlusConsumerTest {
     }
 
     @Test
+    public void testBuildConsumerPropertiesDefaultsFetchMinBytesAndMaxWait() throws Exception {
+        CpiKafkaPlusComponent component = new CpiKafkaPlusComponent();
+        try (DefaultCamelContext ctx = new DefaultCamelContext()) {
+            ctx.addComponent("cpi-kafka-plus", component);
+            ctx.start();
+            CpiKafkaPlusEndpoint endpoint = (CpiKafkaPlusEndpoint) ctx.getEndpoint(
+                    "cpi-kafka-plus:test-topic?bootstrapServers=localhost:9092&groupId=test-group");
+            CpiKafkaPlusConsumer consumer = new CpiKafkaPlusConsumer(endpoint, null);
+
+            Properties props = consumer.buildConsumerProperties();
+
+            Assert.assertEquals("fetch.min.bytes should default to the Kafka client default (1) "
+                    + "for backward compatibility",
+                    1, props.get(ConsumerConfig.FETCH_MIN_BYTES_CONFIG));
+            Assert.assertEquals("fetch.max.wait.ms should default to the Kafka client default (500) "
+                    + "for backward compatibility",
+                    500, props.get(ConsumerConfig.FETCH_MAX_WAIT_MS_CONFIG));
+            ctx.stop();
+        }
+    }
+
+    @Test
+    public void testBuildConsumerPropertiesAppliesConfiguredFetchMinBytesAndMaxWait() throws Exception {
+        CpiKafkaPlusComponent component = new CpiKafkaPlusComponent();
+        try (DefaultCamelContext ctx = new DefaultCamelContext()) {
+            ctx.addComponent("cpi-kafka-plus", component);
+            ctx.start();
+            CpiKafkaPlusEndpoint endpoint = (CpiKafkaPlusEndpoint) ctx.getEndpoint(
+                    "cpi-kafka-plus:test-topic?bootstrapServers=localhost:9092&groupId=test-group"
+                            + "&fetchMinBytes=65536&fetchMaxWaitMs=1000");
+            CpiKafkaPlusConsumer consumer = new CpiKafkaPlusConsumer(endpoint, null);
+
+            Properties props = consumer.buildConsumerProperties();
+
+            Assert.assertEquals(65536, props.get(ConsumerConfig.FETCH_MIN_BYTES_CONFIG));
+            Assert.assertEquals(1000, props.get(ConsumerConfig.FETCH_MAX_WAIT_MS_CONFIG));
+            ctx.stop();
+        }
+    }
+
+    @Test
     public void testBuildConsumerPropertiesContainsGroupMembershipSettings() throws Exception {
         CpiKafkaPlusComponent component = new CpiKafkaPlusComponent();
         try (DefaultCamelContext ctx = new DefaultCamelContext()) {
