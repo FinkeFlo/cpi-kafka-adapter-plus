@@ -49,9 +49,8 @@ For detailed security setup, see [Authentication](security/authentication.md).
 | `batchSize` | `100` | Maximum records per batch. |
 | `batchTimeout` | `5000` | Maximum wait time in milliseconds to fill a batch. |
 | `batchOutputFormat` | `JSON_ARRAY` | Batch output format: `JSON_ARRAY`, `XML_LIST`, `SPLIT_EXCHANGES`. |
-| `embedXmlValues` | `false` | In `XML_LIST` output, embed XML values as child elements instead of text. |
 
-In `XML_LIST` mode, each `<value>` element carries a `format` attribute (`"xml"` for directly embedded XML, `"text"` for text/CDATA content). See [Batch Processing](features/batch-processing.md) for details.
+In `XML_LIST` mode, each `<value>` element carries a `format` attribute (`"xml"` for directly embedded XML, `"text"` for text/CDATA content). Values that look like XML are always auto-detected and embedded; there is no configuration option for this. See [Batch Processing](features/batch-processing.md) for details.
 
 ## Producer
 

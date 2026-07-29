@@ -121,12 +121,6 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
             description = "Batch output format: JSON_ARRAY, XML_LIST, SPLIT_EXCHANGES")
     private String batchOutputFormat = "JSON_ARRAY";
 
-    @UriParam(label = "batch", defaultValue = "false",
-            description = "When enabled, XML values in XML_LIST batch output are embedded "
-            + "as child elements instead of text. Non-XML values use CDATA wrapping. "
-            + "Only applies when batchOutputFormat is XML_LIST.")
-    private boolean embedXmlValues = false;
-
     // --- Producer Settings ---
     @UriParam(label = "producer", defaultValue = "NONE",
             description = "Batch send mode: NONE (one message per exchange), "
@@ -421,9 +415,6 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
 
     public String getBatchOutputFormat() { return batchOutputFormat; }
     public void setBatchOutputFormat(String batchOutputFormat) { this.batchOutputFormat = batchOutputFormat; }
-
-    public boolean isEmbedXmlValues() { return embedXmlValues; }
-    public void setEmbedXmlValues(boolean embedXmlValues) { this.embedXmlValues = embedXmlValues; }
 
     public boolean isJsonSchemaValidation() { return jsonSchemaValidation; }
     public void setJsonSchemaValidation(boolean jsonSchemaValidation) { this.jsonSchemaValidation = jsonSchemaValidation; }
