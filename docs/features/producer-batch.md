@@ -100,7 +100,8 @@ Priority (high to low):
 |--------|-------------|
 | `SAP_Receiver` | Topic name (MPL monitoring) |
 | `CamelKafkaTopic` | Topic |
-| `CpiKafkaPlusTopic` | Topic (same value as `CamelKafkaTopic`/`SAP_Receiver`, aligned with the consumer's header name) |
+| `CpiKafkaPlusTopic` | Topic (adapter-native header, aligned with the consumer's header name) |
+| `CpiKafkaPlusStatus` | `OK` on success |
 | `CpiKafkaPlusRecordCount` | Number of records sent |
 | `CpiKafkaPlusBatchInputFormat` | Configured batch mode |
 | `CpiKafkaPlusFirstOffset` | Offset of the first record |
@@ -123,6 +124,22 @@ Priority (high to low):
 ```
 
 On error, the body is left unchanged (for debugging).
+
+## Single-message producer — response headers
+
+When `producerBatchMode=NONE` (the default), each iFlow exchange sends a single Kafka record. The adapter sets the following headers on the exchange after a successful send:
+
+| Header | Description |
+|--------|-------------|
+| `SAP_Receiver` | Topic name (MPL monitoring) |
+| `CpiKafkaPlusTopic` | Topic |
+| `CpiKafkaPlusPartition` | Partition the record was written to |
+| `CpiKafkaPlusOffset` | Offset of the record |
+| `CpiKafkaPlusTimestamp` | Broker-assigned timestamp (ms) |
+| `CpiKafkaPlusStatus` | `OK` on success |
+
+!!! warning "Breaking change since 1.1.0"
+    The single-message producer previously set `CamelKafkaTopic`, `CamelKafkaPartition`, `CamelKafkaOffset`, and `CamelKafkaTimestamp`. These have been replaced by the `CpiKafkaPlus*` headers listed above and are no longer set. Any iFlow that reads `CamelKafka*` headers after a single-message Kafka Adapter (Out) step must be updated to read the corresponding `CpiKafkaPlus*` headers instead.
 
 ## Error handling
 
