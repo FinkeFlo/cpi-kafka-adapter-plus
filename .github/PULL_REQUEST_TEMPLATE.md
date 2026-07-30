@@ -17,4 +17,8 @@
       `metadata-receiver-*.xml` file (both the `AttributeReference` and
       `AttributeMetadata` entries), getter/setter, and a
       `CpiKafkaPlusComponentTest` assertion were updated
+- [ ] Documentation updated for any change in observable behaviour:
+      `docs/configuration.md` (parameter rows, UI tab/group headings) and the
+      affected page(s) under `docs/features/` — see
+      [CONTRIBUTING.md → Updating the documentation](../CONTRIBUTING.md#updating-the-documentation)
 - [ ] No secrets, credentials, tenant names or other internal data included
