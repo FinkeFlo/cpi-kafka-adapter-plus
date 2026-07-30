@@ -97,11 +97,11 @@ public class StreamingConsumptionIT {
         Assert.assertTrue("STREAMING must configure greedy scheduling", consumer.isGreedy());
 
         try {
-            // Start the real scheduler (initialDelay=0). Give it a moment to create the Kafka
-            // consumer and join the group so 'latest'/'earliest' race conditions cannot swallow
-            // the probe records below.
+            // Start the real scheduler. It applies a 5s initial delay before the first poll, so
+            // wait past that until the Kafka consumer exists and has joined the group — otherwise
+            // autoOffsetReset=latest would swallow the probe records produced below.
             consumer.start();
-            Thread.sleep(3000);
+            Thread.sleep(9000);
 
             long produceStart = System.currentTimeMillis();
             for (int i = 0; i < 5; i++) {
@@ -155,7 +155,7 @@ public class StreamingConsumptionIT {
 
         try {
             consumer.start();
-            Thread.sleep(3000);
+            Thread.sleep(9000); // past the 5s initial delay + group join
 
             KafkaTestInfrastructure.produceStringMessages(topic,
                     Arrays.asList("k1", "k2", "k3"),

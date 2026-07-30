@@ -42,6 +42,12 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
     /** Fixed idle heartbeat delay (ms) for STREAMING mode when the topic has no records. */
     private static final long STREAMING_IDLE_DELAY_MS = 1000L;
 
+    /**
+     * Delay (ms) before the very first scheduled poll, giving the CPI node time to finish route
+     * startup and acquire the cluster lock. Identical for both consumption modes.
+     */
+    private static final long INITIAL_DELAY_MS = 5000L;
+
     // --- Connection ---
     @UriParam(label = "connection", description = "Kafka Bootstrap Servers (comma-separated)")
     private String bootstrapServers;
@@ -101,7 +107,8 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
             description = "Consumption mode. SCHEDULED (default): poll every 'pollingIntervalSeconds'. "
                     + "STREAMING: greedy scheduling — as long as a poll returns records the next poll "
                     + "fires immediately (no delay), so records are consumed continuously with minimal "
-                    + "latency; when the topic is idle the consumer falls back to a fixed 1s heartbeat. "
+                    + "latency; when the topic is idle the consumer only waits out the poll timeout "
+                    + "('batchTimeout') plus a fixed 1s heartbeat delay before retrying. "
                     + "In STREAMING mode 'pollingIntervalSeconds' and 'drainEnabled' are ignored (greedy "
                     + "replaces the drain/interval mechanism).")
     private String consumptionMode = "SCHEDULED";
@@ -363,18 +370,23 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
         if (isStreamingMode()) {
             // STREAMING: greedy scheduling. As long as a poll() returns records the scheduler
             // fires the next poll() IMMEDIATELY (no delay) -> continuous consumption with minimal
-            // latency. When idle it falls back to the 1s fixed delay (pure heartbeat).
+            // latency. When idle it falls back to the 1s fixed delay, so the idle cadence is
+            // "poll timeout (batchTimeout) + 1s" — a pure heartbeat, since a poll() that has data
+            // returns as soon as the records arrive.
             // pollingIntervalSeconds/drainEnabled have no effect here because every tick emits
             // and greedy replaces the drain purpose.
+            // The 5s initial delay is kept identical to SCHEDULED: it only shifts the very first
+            // poll (giving the CPI node time to finish route startup and acquire the cluster
+            // lock) and has no influence on steady-state streaming latency.
             consumer.setGreedy(true);
             consumer.setDelay(STREAMING_IDLE_DELAY_MS);
-            consumer.setInitialDelay(0);
+            consumer.setInitialDelay(INITIAL_DELAY_MS);
             consumer.setUseFixedDelay(true);
         } else {
             consumer.setGreedy(false);
             consumer.setDelay(
                     CpiKafkaPlusConsumer.computeSchedulerDelaySeconds(pollingIntervalSeconds) * 1000);
-            consumer.setInitialDelay(5000);
+            consumer.setInitialDelay(INITIAL_DELAY_MS);
             consumer.setUseFixedDelay(true);
         }
         return consumer;

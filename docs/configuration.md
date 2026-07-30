@@ -31,7 +31,7 @@ For detailed security setup, see [Authentication](security/authentication.md).
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `consumptionMode` | `SCHEDULED` | `SCHEDULED` polls every `pollingIntervalSeconds`. `STREAMING` uses greedy scheduling: while a poll returns records the next poll fires immediately (continuous, minimal latency), falling back to a fixed 1 s heartbeat when idle. In `STREAMING`, `pollingIntervalSeconds` and `drainEnabled` are ignored. |
+| `consumptionMode` | `SCHEDULED` | `SCHEDULED` polls every `pollingIntervalSeconds`. `STREAMING` uses greedy scheduling: while a poll returns records the next poll fires immediately (continuous, minimal latency), falling back to a heartbeat cadence of `batchTimeout` + 1 s when idle. In `STREAMING`, `pollingIntervalSeconds` and `drainEnabled` are ignored. |
 
 **Offsets & Commit**
 

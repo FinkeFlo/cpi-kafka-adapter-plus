@@ -98,7 +98,7 @@ The consumer fires on a fixed timer (`pollingIntervalSeconds`). After each poll-
 In `STREAMING` mode the consumer uses Camel greedy scheduling:
 
 - As long as `poll()` returns records, the next poll fires **immediately** with no delay.
-- When the topic is idle (empty poll), the consumer waits a fixed **1 second** heartbeat before retrying.
+- When the topic is idle, `poll()` blocks for up to the **Poll Timeout** (`batchTimeout`, default 5000 ms) and the scheduler then waits a fixed **1 second** before retrying — the idle cadence is therefore `batchTimeout` + 1 s. This costs no latency: `poll()` returns as soon as records arrive, so a record landing in an idle topic is picked up immediately.
 
 This mirrors the standard SAP Kafka adapter's continuous behaviour and eliminates the up-to-`pollingIntervalSeconds` latency of scheduled polling.
 

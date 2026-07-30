@@ -138,6 +138,16 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
         // Fail-fast: validate shared configuration (Schema Registry, JSON Schema, SASL)
         endpoint.validateConfiguration();
 
+        // Validate the consumption mode FIRST — the drain/polling-interval checks below are
+        // conditional on it.
+        String mode = endpoint.getConsumptionMode();
+        if (mode == null
+                || !("SCHEDULED".equalsIgnoreCase(mode) || "STREAMING".equalsIgnoreCase(mode))) {
+            throw new IllegalArgumentException(
+                    "consumptionMode must be SCHEDULED or STREAMING, got: " + mode);
+        }
+        boolean streaming = endpoint.isStreamingMode();
+
         // Consumer-specific validations
         if (endpoint.isDlqEnabled()) {
             String dlqTopic = endpoint.getDlqTopic();
@@ -146,20 +156,25 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
                         "DLQ is enabled but no DLQ topic is configured. Please set the 'dlqTopic' property.");
             }
         }
-        if (endpoint.isDrainEnabled() && "AUTO".equalsIgnoreCase(endpoint.getCommitStrategy())) {
-            throw new IllegalArgumentException(
-                    "Drain mode requires commitStrategy=BATCH_COMPLETE. "
-                    + "AUTO commit cannot guarantee at-least-once delivery during drain loops.");
-        }
-        if (endpoint.getMinBacklogToDrain() < 0) {
-            throw new IllegalArgumentException(
-                    "minBacklogToDrain must be >= 0, got: " + endpoint.getMinBacklogToDrain());
-        }
-        if (endpoint.getMinBacklogToDrain() > endpoint.getMaxPollRecords()) {
-            throw new IllegalArgumentException(
-                    "minBacklogToDrain (" + endpoint.getMinBacklogToDrain()
-                    + ") must be <= maxPollRecords (" + endpoint.getMaxPollRecords()
-                    + "). A higher value would disable drain after every poll.");
+        // Drain- and interval-related validations only apply to SCHEDULED. In STREAMING these
+        // fields are documented as ignored, so a stale value (e.g. drainEnabled=true left over
+        // from a SCHEDULED configuration) must not prevent the iFlow from starting.
+        if (!streaming) {
+            if (endpoint.isDrainEnabled() && "AUTO".equalsIgnoreCase(endpoint.getCommitStrategy())) {
+                throw new IllegalArgumentException(
+                        "Drain mode requires commitStrategy=BATCH_COMPLETE. "
+                        + "AUTO commit cannot guarantee at-least-once delivery during drain loops.");
+            }
+            if (endpoint.getMinBacklogToDrain() < 0) {
+                throw new IllegalArgumentException(
+                        "minBacklogToDrain must be >= 0, got: " + endpoint.getMinBacklogToDrain());
+            }
+            if (endpoint.getMinBacklogToDrain() > endpoint.getMaxPollRecords()) {
+                throw new IllegalArgumentException(
+                        "minBacklogToDrain (" + endpoint.getMinBacklogToDrain()
+                        + ") must be <= maxPollRecords (" + endpoint.getMaxPollRecords()
+                        + "). A higher value would disable drain after every poll.");
+            }
         }
         if (endpoint.getMaxPartitionFetchSizeKb() < 1 || endpoint.getMaxPartitionFetchSizeKb() > 51200) {
             throw new IllegalArgumentException(
@@ -170,13 +185,8 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
                     "retryDelaySeconds must be between 0 and 300, got: "
                     + endpoint.getRetryDelaySeconds());
         }
-        validatePollingIntervalSeconds(endpoint.getPollingIntervalSeconds());
-
-        String mode = endpoint.getConsumptionMode();
-        if (mode == null
-                || !("SCHEDULED".equalsIgnoreCase(mode) || "STREAMING".equalsIgnoreCase(mode))) {
-            throw new IllegalArgumentException(
-                    "consumptionMode must be SCHEDULED or STREAMING, got: " + mode);
+        if (!streaming) {
+            validatePollingIntervalSeconds(endpoint.getPollingIntervalSeconds());
         }
 
         super.doStart();
@@ -484,6 +494,17 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
     }
 
     /**
+     * Drain is only active in SCHEDULED mode. In STREAMING, greedy scheduling already re-polls
+     * immediately while records keep arriving, so the drain loop would only duplicate that
+     * behaviour. The stored {@code drainEnabled} value survives the greyed-out UI field when an
+     * existing iFlow switches to STREAMING, so it must be neutralised here — otherwise the
+     * documented "ignored in STREAMING" contract would be violated.
+     */
+    static boolean isDrainActive(CpiKafkaPlusEndpoint endpoint) {
+        return endpoint.isDrainEnabled() && !endpoint.isStreamingMode();
+    }
+
+    /**
      * Fuehrt einen Emit-Zyklus aus: pollt Kafka und verarbeitet die Records
      * (Drain-Schleife). Aus {@code poll()} extrahiert, damit {@code poll()}
      * zwischen Emit-Zyklus und Keep-Alive-Poll dispatchen kann.
@@ -499,7 +520,8 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
         if (isBatchComplete && recordProcessor != null) {
             recordProcessor.recommitPending(kafkaConsumer);
         }
-        boolean drainEnabled = endpoint.isDrainEnabled();
+        // Drain is inert in STREAMING mode — see isDrainActive().
+        boolean drainEnabled = isDrainActive(endpoint);
         int totalProcessed = 0;
         int totalRecordsFetched = 0;
         int drainCycle = 0;
@@ -958,7 +980,7 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
      * for any positive polling interval, so an explicit floor is no longer necessary.
      */
     static int computeMaxPollIntervalMs(long pollingIntervalSeconds) {
-        long pollingMs = pollingIntervalSeconds * 1000L;
+        long pollingMs = Math.max(0L, pollingIntervalSeconds) * 1000L;
         long maxPollIntervalMs = pollingMs + 600_000L;
         maxPollIntervalMs = Math.min(maxPollIntervalMs, 22_200_000L);
         return (int) maxPollIntervalMs;
@@ -1038,10 +1060,16 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
         // client (heartbeat thread, KIP-62) sends a LeaveGroup request between poll()
         // calls and the consumer drops from the group (symptom: State=EMPTY, 0 active
         // consumers, duplicate processing on rejoin). See issue #45.
-        int maxPollIntervalMs = computeMaxPollIntervalMs(endpoint.getPollingIntervalSeconds());
+        // In STREAMING the polling interval is ignored (and no longer validated), so it must not
+        // feed into max.poll.interval.ms either. A continuously greedy consumer only needs the
+        // 10-minute processing headroom that the SCHEDULED branch adds on top of its interval.
+        long maxPollBasisSeconds = endpoint.isStreamingMode() ? 0L : endpoint.getPollingIntervalSeconds();
+        int maxPollIntervalMs = computeMaxPollIntervalMs(maxPollBasisSeconds);
         String maxPollBranch;
         if (maxPollIntervalMs == 22_200_000) {
             maxPollBranch = "HARD_CAP_6H_10MIN";
+        } else if (endpoint.isStreamingMode()) {
+            maxPollBranch = "STREAMING_10MIN_HEADROOM";
         } else {
             maxPollBranch = "POLLING_PLUS_10MIN_BUFFER";
         }

@@ -117,7 +117,7 @@
                 </GuiLabels>
                 <AttributeReference>
                     <ReferenceName>consumptionMode</ReferenceName>
-                    <description>How records are consumed. 'Scheduled Polling' (default) polls every 'Polling Interval' seconds and — if 'Drain Backlog' is enabled — keeps polling until the topic is empty. 'Streaming (Continuous)' uses greedy scheduling: as long as a poll returns records, the next poll fires immediately with no delay, so records are consumed continuously with minimal latency; when the topic is idle the consumer falls back to a fixed 1 second heartbeat. In Streaming mode the 'Polling Interval' and 'Drain Backlog' settings are ignored because greedy scheduling replaces them.</description>
+                    <description>How records are consumed. 'Scheduled Polling' (default) polls every 'Polling Interval' seconds and — if 'Drain Backlog' is enabled — keeps polling until the topic is empty. 'Streaming (Continuous)' uses greedy scheduling: as long as a poll returns records, the next poll fires immediately with no delay, so records are consumed continuously with minimal latency; when the topic is idle the consumer only waits out the 'Poll Timeout' plus a fixed 1 second heartbeat delay before retrying. In Streaming mode the 'Polling Interval' and 'Drain Backlog' settings are ignored because greedy scheduling replaces them.</description>
                 </AttributeReference>
             </AttributeGroup>
             <AttributeGroup id="offsetsAndCommit">
