@@ -25,11 +25,12 @@ For detailed security setup, see [Authentication](security/authentication.md).
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `pollingIntervalSeconds` | `5` | Time in seconds between poll cycles. Range: 1 to 21600. |
+| `pollingIntervalSeconds` | `5` | Time in seconds between poll cycles. Range: 1 to 21600. Ignored when `consumptionMode=STREAMING`. |
+| `consumptionMode` | `SCHEDULED` | `SCHEDULED` polls every `pollingIntervalSeconds`. `STREAMING` uses greedy scheduling: while a poll returns records the next poll fires immediately (continuous, minimal latency), falling back to a fixed 1s heartbeat when idle. In `STREAMING`, `pollingIntervalSeconds` and `drainEnabled` are ignored. |
 | `autoOffsetReset` | `latest` | Auto offset reset: `earliest` or `latest`. |
 | `maxPollRecords` | `500` | Maximum records to poll per request. |
 | `commitStrategy` | `BATCH_COMPLETE` | Offset commit strategy: `AUTO`, `BATCH_COMPLETE`. |
-| `drainEnabled` | `false` | Poll repeatedly until the topic is empty. |
+| `drainEnabled` | `false` | Poll repeatedly until the topic is empty. Ignored when `consumptionMode=STREAMING`. |
 | `minBacklogToDrain` | `0` | Minimum records in an extra drain poll required to continue draining; `0` drains until empty. |
 | `jsonSchemaValidation` | `false` | Enable JSON Schema validation of incoming messages. |
 | `jsonSchema` | — | Inline JSON Schema for message validation. |

@@ -630,4 +630,39 @@ public class CpiKafkaPlusConsumerTest {
         }
         return new ConsumerRecords<>(map);
     }
+
+    @Test
+    public void testStreamingModeConfiguresGreedyScheduler() throws Exception {
+        CpiKafkaPlusComponent component = new CpiKafkaPlusComponent();
+        try (DefaultCamelContext ctx = new DefaultCamelContext()) {
+            ctx.addComponent("cpi-kafka-plus", component);
+            ctx.start();
+            CpiKafkaPlusEndpoint ep = (CpiKafkaPlusEndpoint) ctx.getEndpoint(
+                    "cpi-kafka-plus:t?bootstrapServers=localhost:9092&groupId=g1&consumptionMode=STREAMING");
+            Assert.assertTrue("STREAMING should be reported as streaming mode", ep.isStreamingMode());
+
+            CpiKafkaPlusConsumer consumer = (CpiKafkaPlusConsumer) ep.createConsumer(exchange -> { });
+            Assert.assertTrue("STREAMING must enable greedy scheduling", consumer.isGreedy());
+            Assert.assertEquals("STREAMING idle heartbeat delay must be 1000ms", 1000L, consumer.getDelay());
+            Assert.assertEquals("STREAMING must start without initial delay", 0L, consumer.getInitialDelay());
+            ctx.stop();
+        }
+    }
+
+    @Test
+    public void testScheduledModeDoesNotUseGreedyScheduler() throws Exception {
+        CpiKafkaPlusComponent component = new CpiKafkaPlusComponent();
+        try (DefaultCamelContext ctx = new DefaultCamelContext()) {
+            ctx.addComponent("cpi-kafka-plus", component);
+            ctx.start();
+            CpiKafkaPlusEndpoint ep = (CpiKafkaPlusEndpoint) ctx.getEndpoint(
+                    "cpi-kafka-plus:t?bootstrapServers=localhost:9092&groupId=g1");
+            Assert.assertFalse("Default mode must not be streaming", ep.isStreamingMode());
+
+            CpiKafkaPlusConsumer consumer = (CpiKafkaPlusConsumer) ep.createConsumer(exchange -> { });
+            Assert.assertFalse("SCHEDULED must not enable greedy scheduling", consumer.isGreedy());
+            Assert.assertEquals("SCHEDULED must keep the 5s initial delay", 5000L, consumer.getInitialDelay());
+            ctx.stop();
+        }
+    }
 }

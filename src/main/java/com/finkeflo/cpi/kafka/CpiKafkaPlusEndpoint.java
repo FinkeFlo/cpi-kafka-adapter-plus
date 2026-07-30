@@ -39,6 +39,9 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
     private final CpiKafkaPlusComponent component;
     private String topicFromUri;
 
+    /** Fixed idle heartbeat delay (ms) for STREAMING mode when the topic has no records. */
+    private static final long STREAMING_IDLE_DELAY_MS = 1000L;
+
     // --- Connection ---
     @UriParam(label = "connection", description = "Kafka Bootstrap Servers (comma-separated)")
     private String bootstrapServers;
@@ -93,6 +96,15 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
                     + "fetchMinBytes before returning whatever records are currently available. "
                     + "Default (500) matches the Kafka client default, preserving existing behavior.")
     private int fetchMaxWaitMs = 500;
+
+    @UriParam(label = "processing", defaultValue = "SCHEDULED",
+            description = "Consumption mode. SCHEDULED (default): poll every 'pollingIntervalSeconds'. "
+                    + "STREAMING: greedy scheduling — as long as a poll returns records the next poll "
+                    + "fires immediately (no delay), so records are consumed continuously with minimal "
+                    + "latency; when the topic is idle the consumer falls back to a fixed 1s heartbeat. "
+                    + "In STREAMING mode 'pollingIntervalSeconds' and 'drainEnabled' are ignored (greedy "
+                    + "replaces the drain/interval mechanism).")
+    private String consumptionMode = "SCHEDULED";
 
     @UriParam(label = "processing", defaultValue = "BATCH_COMPLETE",
             description = "Offset commit strategy: AUTO, BATCH_COMPLETE")
@@ -348,10 +360,23 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
         // Intervallen tickt poll() alle 60 s und treibt zwischen den Emit-Zyklen das
         // Kafka-Group-Protokoll (Keep-Alive-Poll). pollingIntervalSeconds bleibt das
         // Emit-Intervall — die Drain-/Batch-Logik laeuft weiterhin nur alle X s.
-        consumer.setDelay(
-                CpiKafkaPlusConsumer.computeSchedulerDelaySeconds(pollingIntervalSeconds) * 1000);
-        consumer.setInitialDelay(5000);
-        consumer.setUseFixedDelay(true);
+        if (isStreamingMode()) {
+            // STREAMING: greedy scheduling. As long as a poll() returns records the scheduler
+            // fires the next poll() IMMEDIATELY (no delay) -> continuous consumption with minimal
+            // latency. When idle it falls back to the 1s fixed delay (pure heartbeat).
+            // pollingIntervalSeconds/drainEnabled have no effect here because every tick emits
+            // and greedy replaces the drain purpose.
+            consumer.setGreedy(true);
+            consumer.setDelay(STREAMING_IDLE_DELAY_MS);
+            consumer.setInitialDelay(0);
+            consumer.setUseFixedDelay(true);
+        } else {
+            consumer.setGreedy(false);
+            consumer.setDelay(
+                    CpiKafkaPlusConsumer.computeSchedulerDelaySeconds(pollingIntervalSeconds) * 1000);
+            consumer.setInitialDelay(5000);
+            consumer.setUseFixedDelay(true);
+        }
         return consumer;
     }
 
@@ -413,6 +438,12 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
 
     public String getCommitStrategy() { return commitStrategy; }
     public void setCommitStrategy(String commitStrategy) { this.commitStrategy = commitStrategy; }
+
+    public String getConsumptionMode() { return consumptionMode; }
+    public void setConsumptionMode(String consumptionMode) { this.consumptionMode = consumptionMode; }
+
+    /** True when the consumer runs in greedy STREAMING mode instead of scheduled polling. */
+    public boolean isStreamingMode() { return "STREAMING".equalsIgnoreCase(consumptionMode); }
 
     public boolean isDrainEnabled() { return drainEnabled; }
     public void setDrainEnabled(boolean drainEnabled) { this.drainEnabled = drainEnabled; }
