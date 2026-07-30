@@ -120,6 +120,8 @@ public class CpiKafkaPlusComponentTest {
         Assert.assertEquals(5, endpoint.getAutoPauseErrorThreshold());
         Assert.assertEquals(60, endpoint.getAutoPauseCooldownSeconds());
         Assert.assertEquals(1024, endpoint.getMaxPartitionFetchSizeKb());
+        Assert.assertEquals(1, endpoint.getFetchMinBytes());
+        Assert.assertEquals(500, endpoint.getFetchMaxWaitMs());
     }
 
     @Test
