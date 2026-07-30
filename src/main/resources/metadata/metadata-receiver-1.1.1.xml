@@ -11,15 +11,15 @@
                    xmlns:bp="http://www.adk.gen/xmlns/blueprint">
 
     <!-- ============================================================ -->
-    <!-- SENDER VARIANT (Kafka Consumer -> CPI)                       -->
+    <!-- RECEIVER VARIANT (CPI -> Kafka Producer)                    -->
     <!-- ============================================================ -->
-    <Variant VariantName="Kafka_Adapter_Plus_Sender"
-             VariantId="ctype::AdapterVariant/cname::kafkaAdapterPlus/vendor::FlorianKube/tp::cpi-kafka-plus/mp::cpi-kafka-plus/direction::Sender/version::1.1.1"
+    <Variant VariantName="Kafka_Adapter_Plus_Receiver"
+             VariantId="ctype::AdapterVariant/cname::kafkaAdapterPlus/vendor::FlorianKube/tp::cpi-kafka-plus/mp::cpi-kafka-plus/direction::Receiver/version::1.1.1"
              MetadataVersion="2.0"
              gen:RuntimeComponentBaseUri="cpi-kafka-plus"
              AttachmentBehavior="Preserve"
-             supportsPolling="true"
-             useDefaultScheduler="false">
+             supportsPolling="false"
+             IsRequestResponse="true">
         <InputContent Cardinality="1" Scope="outsidepool" MessageCardinality="1" isStreaming="false">
             <Content>
                 <ContentType>Any</ContentType>
@@ -35,12 +35,12 @@
 
         <!-- ===== Tab: Connection ===== -->
         <Tab id="connection">
-            <GuiLabels guid="a1000001-0000-0000-0000-000000000001">
+            <GuiLabels guid="a2000001-0000-0000-0000-000000000001">
                 <Label language="EN">Connection</Label>
             </GuiLabels>
             <AttributeGroup id="kafkaConnection">
                 <Name xsi:type="xs:string" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">Kafka Connection</Name>
-                <GuiLabels guid="a1000001-0000-0000-0000-000000000010">
+                <GuiLabels guid="a2000001-0000-0000-0000-000000000010">
                     <Label language="EN">Kafka Connection</Label>
                 </GuiLabels>
                 <AttributeReference>
@@ -50,18 +50,13 @@
                 </AttributeReference>
                 <AttributeReference>
                     <ReferenceName>topic</ReferenceName>
-                    <description>Kafka topic(s) to consume from. For multiple topics use comma-separated names, e.g. orders,payments. All topics must exist on the Kafka cluster.</description>
-                    <ErrorMessage>Please enter at least one Kafka topic name</ErrorMessage>
-                </AttributeReference>
-                <AttributeReference>
-                    <ReferenceName>groupId</ReferenceName>
-                    <description>Consumer group ID, e.g. cpi-order-consumer. All adapter instances sharing the same group ID will split the partition load across them. Note: If multiple stages (e.g. DEV, QAS, PROD) connect to the same Kafka cluster, each stage must use a different consumer group ID (e.g. cpi-order-consumer-dev / -qas / -prod). Sharing one group ID across stages causes continuous rebalances and unstable consumption.</description>
-                    <ErrorMessage>Please enter a consumer group ID (e.g. cpi-order-consumer)</ErrorMessage>
+                    <description>Kafka topic to produce messages to, e.g. orders-outbound. The topic must exist on the Kafka cluster unless auto-creation is enabled on the broker.</description>
+                    <ErrorMessage>Please enter a Kafka topic name</ErrorMessage>
                 </AttributeReference>
             </AttributeGroup>
             <AttributeGroup id="kafkaSecurity">
                 <Name xsi:type="xs:string" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">Kafka Security</Name>
-                <GuiLabels guid="a1000002-0000-0000-0000-000000000010">
+                <GuiLabels guid="a2000002-0000-0000-0000-000000000010">
                     <Label language="EN">Kafka Security</Label>
                 </GuiLabels>
                 <AttributeReference>
@@ -105,109 +100,130 @@
             </AttributeGroup>
         </Tab>
 
-        <!-- ===== Tab: Consumption ===== -->
-        <Tab id="consumption">
-            <GuiLabels guid="a1000006-0000-0000-0000-000000000001">
-                <Label language="EN">Consumption</Label>
+        <!-- ===== Tab: Producer Settings ===== -->
+        <!-- ===== Tab: Producing ===== -->
+        <Tab id="producing">
+            <GuiLabels guid="a2000003-0000-0000-0000-000000000001">
+                <Label language="EN">Producing</Label>
             </GuiLabels>
-            <AttributeGroup id="offsetsAndCommit">
-                <Name xsi:type="xs:string" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">Offsets &amp; Commit</Name>
-                <GuiLabels guid="a1000006-0000-0000-0000-000000000010">
-                    <Label language="EN">Offsets &amp; Commit</Label>
+            <AttributeGroup id="producerSendMode">
+                <Name xsi:type="xs:string" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">Send Mode</Name>
+                <GuiLabels guid="a2000003-0000-0000-0000-000000000010">
+                    <Label language="EN">Send Mode</Label>
                 </GuiLabels>
                 <AttributeReference>
-                    <ReferenceName>autoOffsetReset</ReferenceName>
-                    <description>What to do when no committed offset exists for the consumer group. 'Latest' skips existing messages and only reads new ones. 'Earliest' reads all available messages from the beginning.</description>
-                </AttributeReference>
-                <AttributeReference>
-                    <ReferenceName>commitStrategy</ReferenceName>
-                    <description>When to commit offsets back to Kafka. 'After Successful Processing' ensures at-least-once delivery (recommended). 'Auto Commit' commits periodically regardless of processing success.</description>
+                    <ReferenceName>producerBatchMode</ReferenceName>
+                    <description>Select how a structured message body (JSON array or XML list) is split into individual Kafka records. NONE sends the entire message body as one record. JSON_ARRAY expects a JSON array of record objects. XML_LIST expects an XML document with root element kafkaRecords containing record elements.</description>
                 </AttributeReference>
             </AttributeGroup>
-            <AttributeGroup id="pollingConfig">
-                <Name xsi:type="xs:string" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">Polling</Name>
-                <GuiLabels guid="a1000006-0000-0000-0000-000000000020">
-                    <Label language="EN">Polling</Label>
+            <AttributeGroup id="producerDeliverySemantics">
+                <Name xsi:type="xs:string" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">Delivery Semantics</Name>
+                <GuiLabels guid="a2000003-0000-0000-0000-000000000030">
+                    <Label language="EN">Delivery Semantics</Label>
                 </GuiLabels>
                 <AttributeReference>
-                    <ReferenceName>pollingIntervalSeconds</ReferenceName>
-                    <description>Time in seconds between poll cycles. Each cycle fetches up to 'Max Poll Records' from Kafka. Range: 1 to 21600 (1 second to 6 hours). Default: 5 seconds. Whole-hour values align polls with predictable clock times: 3600=1h, 7200=2h, 10800=3h, 14400=4h, 18000=5h, 21600=6h. Values above 21600 are rejected at IFlow start because they would exceed the max.poll.interval.ms hard cap (6 h 10 min) and cause the Kafka consumer to leave its group between polls.</description>
-                    <Restriction>Constraint.isValidRegex(^([1-9][0-9]{0,3}|1[0-9]{4}|20[0-9]{3}|21[0-4][0-9]{2}|215[0-9]{2}|21600)$)</Restriction>
-                    <ErrorMessage>Please enter a number between 1 and 21600 (1 second to 6 hours)</ErrorMessage>
+                    <ReferenceName>acks</ReferenceName>
+                    <description>Producer acknowledgment level. 'All': waits for all in-sync replicas (strongest durability, recommended). 'Leader Only': waits for leader only. 'None': fire and forget, no durability guarantee.</description>
+                    <EditCondition>
+                        <AttributeName>enableIdempotence</AttributeName>
+                        <AttributeValue>false</AttributeValue>
+                    </EditCondition>
                 </AttributeReference>
                 <AttributeReference>
-                    <ReferenceName>maxPollRecords</ReferenceName>
-                    <description>Maximum number of records returned per Kafka poll() call. Higher values improve throughput but increase memory usage. Default: 500.</description>
-                    <ErrorMessage>Please enter a positive number (e.g. 500)</ErrorMessage>
+                    <ReferenceName>enableIdempotence</ReferenceName>
+                    <description>Enable idempotent producer to guarantee exactly-once delivery per partition. Prevents duplicate messages on retries. Recommended to keep enabled (default: true).</description>
                 </AttributeReference>
                 <AttributeReference>
-                    <ReferenceName>batchTimeout</ReferenceName>
-                    <description>Maximum time in milliseconds a single Kafka poll() call blocks waiting for records before returning (the consumer poll timeout). Default: 5000 (5 seconds). This is the per-poll wait time, not a batch-fill timer: it applies to every poll cycle regardless of batch mode.</description>
-                    <ErrorMessage>Please enter a positive number in milliseconds (e.g. 5000)</ErrorMessage>
+                    <ReferenceName>deliveryTimeoutSeconds</ReferenceName>
+                    <description>Maximum time in seconds for message delivery, including retries. Default: 120 seconds (2 minutes). If delivery fails within this time, the send is reported as failed.</description>
+                    <ErrorMessage>Please enter a positive number in seconds (e.g. 120 for 2 minutes)</ErrorMessage>
+                </AttributeReference>
+            </AttributeGroup>
+            <AttributeGroup id="producerHeaders">
+                <Name xsi:type="xs:string" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">Header Mapping</Name>
+                <GuiLabels guid="a2000003-0000-0000-0000-000000000020">
+                    <Label language="EN">Header Mapping</Label>
+                </GuiLabels>
+                <AttributeReference>
+                    <ReferenceName>allowedHeaders</ReferenceName>
+                    <description>Pipe-separated list of headers to send to Kafka (e.g. SAP_*|MyHeader|*). Use * for all. Note: Headers explicitly mapped in a batch payload (JSON/XML) bypass this filter and overwrite exchange headers of the same name.</description>
                 </AttributeReference>
             </AttributeGroup>
         </Tab>
 
         <!-- ===== Tab: Advanced ===== -->
         <Tab id="advanced">
-            <GuiLabels guid="a1000007-0000-0000-0000-000000000001">
+            <GuiLabels guid="a2000006-0000-0000-0000-000000000001">
                 <Label language="EN">Advanced</Label>
             </GuiLabels>
-            <AttributeGroup id="fetchTuning">
-                <Name xsi:type="xs:string" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">Fetch Tuning</Name>
-                <GuiLabels guid="a1000007-0000-0000-0000-000000000010">
-                    <Label language="EN">Fetch Tuning</Label>
+            <AttributeGroup id="producerTransactions">
+                <Name xsi:type="xs:string" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">Transactions</Name>
+                <GuiLabels guid="a2000006-0000-0000-0000-000000000010">
+                    <Label language="EN">Transactions</Label>
                 </GuiLabels>
                 <AttributeReference>
-                    <ReferenceName>maxPartitionFetchSizeKb</ReferenceName>
-                    <description>Maximum data the broker returns per partition per poll, in kilobytes. This controls how many records each poll() can fetch. Default: 1024 KB (1 MB) -- with 1 KB messages, that means ~1000 records per partition. Increase when 'Drain Backlog' is enabled and polls return far fewer records than 'Max Poll Records'. For example, set to 10240 (10 MB) to allow ~10,000 records of 1 KB per partition per poll. The actual number of records is limited by both this setting AND 'Max Poll Records' -- whichever is reached first wins. Note: This is a per-partition limit. The total fetch across all partitions is capped at 50 MB by Kafka's fetch.max.bytes default.</description>
-                    <ErrorMessage>Please enter a value between 1 and 51200 (KB)</ErrorMessage>
+                    <ReferenceName>enableTransactions</ReferenceName>
+                    <description>Enable transactional batching. Each batch is sent in an isolated Kafka transaction. Requires Transactional ID Prefix and idempotent producer.</description>
                 </AttributeReference>
                 <AttributeReference>
-                    <ReferenceName>fetchMinBytes</ReferenceName>
-                    <description>Minimum data in bytes the broker waits to accumulate before answering a fetch request (fetch.min.bytes). Higher values let the broker batch more records per poll under low load, at the cost of added latency (bounded by 'Fetch Max Wait'). Default: 1 (respond immediately, current behavior).</description>
-                    <ErrorMessage>Please enter a positive number (e.g. 1)</ErrorMessage>
-                </AttributeReference>
-                <AttributeReference>
-                    <ReferenceName>fetchMaxWaitMs</ReferenceName>
-                    <description>Maximum time in milliseconds the broker waits for 'Fetch Min Bytes' to accumulate before answering anyway (fetch.max.wait.ms). Only relevant when 'Fetch Min Bytes' is greater than 1. Default: 500.</description>
-                    <ErrorMessage>Please enter a positive number (e.g. 500)</ErrorMessage>
-                </AttributeReference>
-            </AttributeGroup>
-            <AttributeGroup id="backlogDrain">
-                <Name xsi:type="xs:string" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">Backlog Drain</Name>
-                <GuiLabels guid="a1000007-0000-0000-0000-000000000020">
-                    <Label language="EN">Backlog Drain</Label>
-                </GuiLabels>
-                <AttributeReference>
-                    <ReferenceName>drainEnabled</ReferenceName>
-                    <description>Enable drain mode: after each poll cycle, continue polling until the topic is empty or the drain limit is reached. Recommended for topics with peak loads (e.g. month-end processing).</description>
-                </AttributeReference>
-                <AttributeReference>
-                    <ReferenceName>minBacklogToDrain</ReferenceName>
-                    <description>Minimum number of records a drain poll must return to keep draining. The first poll of a scheduled run always processes its records. On extra drain cycles (cycle &gt; 1), if a poll returns fewer records than this threshold, those records are seeked back (un-polled) and the drain stops, avoiding tiny tail MPLs. Set to 0 to drain until the topic is completely empty (default).</description>
-                    <ErrorMessage>Please enter a non-negative number (e.g. 0, 100, 500)</ErrorMessage>
+                    <ReferenceName>transactionalIdPrefix</ReferenceName>
+                    <description>Prefix for transactional.id (for example my-app-txn). Required when transactional batching is enabled.</description>
+                    <ErrorMessage>Please enter a Transactional ID Prefix when transactions are enabled</ErrorMessage>
                     <EditCondition>
-                        <AttributeName>drainEnabled</AttributeName>
+                        <AttributeName>enableTransactions</AttributeName>
                         <AttributeValue>true</AttributeValue>
                     </EditCondition>
+                </AttributeReference>
+                <AttributeReference>
+                    <ReferenceName>maxConcurrentTransactions</ReferenceName>
+                    <description>Maximum number of concurrent transactional producers per worker node. Higher values increase parallelism but also resource usage.</description>
+                    <ErrorMessage>Please enter a positive number for Max Concurrent Transactions</ErrorMessage>
+                    <EditCondition>
+                        <AttributeName>enableTransactions</AttributeName>
+                        <AttributeValue>true</AttributeValue>
+                    </EditCondition>
+                </AttributeReference>
+            </AttributeGroup>
+            <AttributeGroup id="producerPerformance">
+                <Name xsi:type="xs:string" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">Performance Tuning</Name>
+                <GuiLabels guid="a2000006-0000-0000-0000-000000000020">
+                    <Label language="EN">Performance Tuning</Label>
+                </GuiLabels>
+                <AttributeReference>
+                    <ReferenceName>compressionType</ReferenceName>
+                    <description>Compression algorithm for message batches. Reduces network bandwidth and storage at the cost of CPU. ZSTD is recommended for JSON payloads (best ratio with good speed). LZ4 is the fastest with minimal CPU overhead. GZIP achieves the smallest output but is the slowest. None disables compression entirely.</description>
+                </AttributeReference>
+                <AttributeReference>
+                    <ReferenceName>maxRequestSizeKb</ReferenceName>
+                    <description>Maximum size of a single produce request in kilobytes. Default: 5120 KB (5 MB). Increase if your messages exceed 5 MB. Must also be allowed by the broker's message.max.bytes setting.</description>
+                    <ErrorMessage>Please enter a positive number in KB (e.g. 5120 for 5 MB)</ErrorMessage>
+                </AttributeReference>
+                <AttributeReference>
+                    <ReferenceName>producerBatchSizeKb</ReferenceName>
+                    <description>Maximum size of a producer batch in kilobytes. Default: 1024 KB (1 MB). The producer groups records into batches per partition for efficiency.</description>
+                    <ErrorMessage>Please enter a positive number in KB (e.g. 1024 for 1 MB)</ErrorMessage>
+                </AttributeReference>
+                <AttributeReference>
+                    <ReferenceName>bufferMemoryKb</ReferenceName>
+                    <description>Total memory in kilobytes available for buffering unsent records. Default: 32768 KB (32 MB). If the buffer is full, the producer blocks until space is available or delivery.timeout.ms is exceeded.</description>
+                    <ErrorMessage>Please enter a positive number in KB (e.g. 32768 for 32 MB)</ErrorMessage>
                 </AttributeReference>
             </AttributeGroup>
         </Tab>
 
         <!-- ===== Tab: Message Handling ===== -->
         <Tab id="messageHandling">
-            <GuiLabels guid="a1000008-0000-0000-0000-000000000001">
+            <GuiLabels guid="a2000005-0000-0000-0000-000000000001">
                 <Label language="EN">Message Handling</Label>
             </GuiLabels>
-            <AttributeGroup id="jsonSchemaConfig">
+            <AttributeGroup id="receiverJsonSchemaConfig">
                 <Name xsi:type="xs:string" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">JSON Schema Validation</Name>
-                <GuiLabels guid="a1000008-0000-0000-0000-000000000010">
+                <GuiLabels guid="a2000005-0000-0000-0000-000000000010">
                     <Label language="EN">JSON Schema Validation</Label>
                 </GuiLabels>
                 <AttributeReference>
                     <ReferenceName>jsonSchemaValidation</ReferenceName>
-                    <description>Enable validation of incoming Kafka messages against a JSON Schema before they are passed to the IFlow. Invalid messages are skipped or reported based on error settings.</description>
+                    <description>Enable JSON Schema validation of outbound messages before sending to Kafka. Invalid messages are rejected with an error instead of being published.</description>
                 </AttributeReference>
                 <AttributeReference>
                     <ReferenceName>jsonSchema</ReferenceName>
@@ -226,43 +242,16 @@
                     </EditCondition>
                 </AttributeReference>
             </AttributeGroup>
-            <AttributeGroup id="batchConfig">
-                <Name xsi:type="xs:string" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">Delivery to IFlow (Batching)</Name>
-                <GuiLabels guid="a1000008-0000-0000-0000-000000000020">
-                    <Label language="EN">Delivery to IFlow (Batching)</Label>
-                </GuiLabels>
-                <AttributeReference>
-                    <ReferenceName>batchMode</ReferenceName>
-                    <description>Enable batch mode to process multiple Kafka records in a single IFlow execution. Improves throughput for high-volume topics. Disable for single-message processing.</description>
-                </AttributeReference>
-                <AttributeReference>
-                    <ReferenceName>batchSize</ReferenceName>
-                    <description>Maximum number of Kafka records grouped into a single IFlow execution (one MPL per batch). The adapter collects up to this many records before triggering the IFlow. Default: 100.</description>
-                    <ErrorMessage>Please enter a positive number for batch size (e.g. 100)</ErrorMessage>
-                    <EditCondition>
-                        <AttributeName>batchMode</AttributeName>
-                        <AttributeValue>true</AttributeValue>
-                    </EditCondition>
-                </AttributeReference>
-                <AttributeReference>
-                    <ReferenceName>batchOutputFormat</ReferenceName>
-                    <description>Output format for batched records. JSON Array: [{"key":"...","value":"..."},...]. XML List: wraps records in XML elements. Individual Exchanges: sends each record as a separate IFlow execution (no actual batching).</description>
-                    <EditCondition>
-                        <AttributeName>batchMode</AttributeName>
-                        <AttributeValue>true</AttributeValue>
-                    </EditCondition>
-                </AttributeReference>
-            </AttributeGroup>
         </Tab>
 
         <!-- ===== Tab: Avro / Schema Registry ===== -->
         <Tab id="avro">
-            <GuiLabels guid="a1000004-0000-0000-0000-000000000001">
+            <GuiLabels guid="a2000004-0000-0000-0000-000000000001">
                 <Label language="EN">Avro / Schema Registry</Label>
             </GuiLabels>
             <AttributeGroup id="schemaRegistryConfig">
                 <Name xsi:type="xs:string" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">Schema Registry</Name>
-                <GuiLabels guid="a1000004-0000-0000-0000-000000000010">
+                <GuiLabels guid="a2000004-0000-0000-0000-000000000010">
                     <Label language="EN">Schema Registry</Label>
                 </GuiLabels>
                 <AttributeReference>
@@ -287,106 +276,26 @@
                     </EditCondition>
                 </AttributeReference>
                 <AttributeReference>
-                    <ReferenceName>avroOutputFormat</ReferenceName>
-                    <description>Format for deserialized Avro records delivered to the IFlow. JSON: Avro records converted to JSON. XML: Avro records converted to XML.</description>
+                    <ReferenceName>autoRegisterSchemas</ReferenceName>
+                    <description>Automatically register new schemas with Schema Registry on first use. Requires write access to the registry. Recommended only for development. Disable in production and register schemas explicitly.</description>
                     <EditCondition>
                         <AttributeName>schemaRegistryEnabled</AttributeName>
                         <AttributeValue>true</AttributeValue>
                     </EditCondition>
                 </AttributeReference>
                 <AttributeReference>
-                    <ReferenceName>avroValueDeserialization</ReferenceName>
-                    <description>Deserialize message values using Avro via Schema Registry. Enable when the Kafka producer sends Avro-encoded values.</description>
+                    <ReferenceName>subjectNameStrategy</ReferenceName>
+                    <description>Strategy for deriving the Schema Registry subject name. TopicNameStrategy (default): uses topic name. RecordNameStrategy: uses the Avro record's full name. TopicRecordNameStrategy: combines both.</description>
                     <EditCondition>
                         <AttributeName>schemaRegistryEnabled</AttributeName>
                         <AttributeValue>true</AttributeValue>
                     </EditCondition>
                 </AttributeReference>
-            </AttributeGroup>
-        </Tab>
-
-        <!-- ===== Tab: Error Handling ===== -->
-        <Tab id="errorHandling">
-            <GuiLabels guid="a1000005-0000-0000-0000-000000000001">
-                <Label language="EN">Error Handling</Label>
-            </GuiLabels>
-            <AttributeGroup id="dlqConfig">
-                <Name xsi:type="xs:string" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">Dead Letter Queue</Name>
-                <GuiLabels guid="a1000005-0000-0000-0000-000000000010">
-                    <Label language="EN">Dead Letter Queue</Label>
-                </GuiLabels>
                 <AttributeReference>
-                    <ReferenceName>dlqEnabled</ReferenceName>
-                    <description>Enable Dead Letter Queue (DLQ). Failed messages are routed to a separate Kafka topic instead of blocking the consumer. Recommended for production use.</description>
-                </AttributeReference>
-                <AttributeReference>
-                    <ReferenceName>dlqTopic</ReferenceName>
-                    <description>Kafka topic for failed messages, e.g. orders-dlq or my-topic.DLQ. This topic must exist on the Kafka cluster. Convention: use the source topic name with a -dlq or .DLQ suffix.</description>
-                    <ErrorMessage>Please enter the name of the Dead Letter Queue topic (e.g. my-topic-dlq)</ErrorMessage>
+                    <ReferenceName>avroValueSerialization</ReferenceName>
+                    <description>Serialize message values using Avro via Schema Registry. Enable when the Kafka consumer expects Avro-encoded values.</description>
                     <EditCondition>
-                        <AttributeName>dlqEnabled</AttributeName>
-                        <AttributeValue>true</AttributeValue>
-                    </EditCondition>
-                </AttributeReference>
-                <AttributeReference>
-                    <ReferenceName>dlqMaxRetries</ReferenceName>
-                    <description>Number of processing retries before a message is routed to the DLQ. Default: 3. Set to 0 to route failed messages immediately without retrying.</description>
-                    <ErrorMessage>Please enter a non-negative number (e.g. 3)</ErrorMessage>
-                    <EditCondition>
-                        <AttributeName>dlqEnabled</AttributeName>
-                        <AttributeValue>true</AttributeValue>
-                    </EditCondition>
-                </AttributeReference>
-                <AttributeReference>
-                    <ReferenceName>dlqCredentialAlias</ReferenceName>
-                    <description>User Credentials alias for the DLQ Kafka cluster. Leave empty to reuse the main SASL credentials from the Connection tab. Only needed if the DLQ topic is on a different cluster.</description>
-                    <EditCondition>
-                        <AttributeName>dlqEnabled</AttributeName>
-                        <AttributeValue>true</AttributeValue>
-                    </EditCondition>
-                </AttributeReference>
-                <AttributeReference>
-                    <ReferenceName>retryOnlyTransientErrors</ReferenceName>
-                    <description>Only retry transient errors (e.g. timeouts, connection failures). Permanent errors like mapping failures or NullPointerExceptions are sent directly to the DLQ without retries. This avoids unnecessary retry attempts and MPL entries for errors that will never succeed. Disable this to retry all errors regardless of type.</description>
-                    <EditCondition>
-                        <AttributeName>dlqEnabled</AttributeName>
-                        <AttributeValue>true</AttributeValue>
-                    </EditCondition>
-                </AttributeReference>
-                <AttributeReference>
-                    <ReferenceName>retryDelaySeconds</ReferenceName>
-                    <description>Initial delay between retries in seconds. The delay doubles after each retry attempt (exponential backoff), capped at 300 seconds. For example, with a delay of 2 seconds and 3 retries, the consumer waits 2s after the first failure, 4s after the second, and 8s after the third (14s total). This gives downstream systems time to recover from transient failures. Set to 0 to retry immediately without delay.</description>
-                    <ErrorMessage>Please enter a number of seconds between 0 and 300 (e.g. 2)</ErrorMessage>
-                    <EditCondition>
-                        <AttributeName>dlqEnabled</AttributeName>
-                        <AttributeValue>true</AttributeValue>
-                    </EditCondition>
-                </AttributeReference>
-            </AttributeGroup>
-            <AttributeGroup id="autoPauseConfig">
-                <Name xsi:type="xs:string" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">Auto-Pause on Errors</Name>
-                <GuiLabels guid="a1000005-0000-0000-0000-000000000020">
-                    <Label language="EN">Auto-Pause on Errors</Label>
-                </GuiLabels>
-                <AttributeReference>
-                    <ReferenceName>autoPauseEnabled</ReferenceName>
-                    <description>Enable automatic consumer pause after consecutive processing errors. Protects downstream systems from overload when a backend is unavailable. Recommended for production use.</description>
-                </AttributeReference>
-                <AttributeReference>
-                    <ReferenceName>autoPauseErrorThreshold</ReferenceName>
-                    <description>Number of consecutive processing errors before the consumer pauses. Default: 5.</description>
-                    <ErrorMessage>Please enter a positive number (e.g. 5)</ErrorMessage>
-                    <EditCondition>
-                        <AttributeName>autoPauseEnabled</AttributeName>
-                        <AttributeValue>true</AttributeValue>
-                    </EditCondition>
-                </AttributeReference>
-                <AttributeReference>
-                    <ReferenceName>autoPauseCooldownSeconds</ReferenceName>
-                    <description>Initial pause duration in seconds. The pause doubles after each subsequent failure (60s, 120s, 240s, max 900s / 15 min). Default: 60.</description>
-                    <ErrorMessage>Please enter a positive number in seconds (e.g. 60)</ErrorMessage>
-                    <EditCondition>
-                        <AttributeName>autoPauseEnabled</AttributeName>
+                        <AttributeName>schemaRegistryEnabled</AttributeName>
                         <AttributeValue>true</AttributeValue>
                     </EditCondition>
                 </AttributeReference>
@@ -394,7 +303,6 @@
         </Tab>
 
     </Variant>
-
 
     <!-- ============================================================ -->
     <!-- ATTRIBUTE METADATA DEFINITIONS                               -->
@@ -536,24 +444,6 @@
         <GuiLabels guid="b1000003-0000-0000-0000-000000000099"><Label language="EN">Max Fetch Size per Partition (KB)</Label></GuiLabels>
     </AttributeMetadata>
     <AttributeMetadata>
-        <Name>fetchMinBytes</Name>
-        <Usage>false</Usage>
-        <DataType>xsd:integer</DataType>
-        <Default>1</Default>
-        <Length/>
-        <isparameterized>true</isparameterized>
-        <GuiLabels guid="b1000003-0000-0000-0000-000000000103"><Label language="EN">Fetch Min Bytes</Label></GuiLabels>
-    </AttributeMetadata>
-    <AttributeMetadata>
-        <Name>fetchMaxWaitMs</Name>
-        <Usage>false</Usage>
-        <DataType>xsd:integer</DataType>
-        <Default>500</Default>
-        <Length/>
-        <isparameterized>true</isparameterized>
-        <GuiLabels guid="b1000003-0000-0000-0000-000000000104"><Label language="EN">Fetch Max Wait (ms)</Label></GuiLabels>
-    </AttributeMetadata>
-    <AttributeMetadata>
         <Name>commitStrategy</Name>
         <Usage>false</Usage>
         <DataType>xsd:string</DataType>
@@ -583,7 +473,7 @@
         <Default>100</Default>
         <Length/>
         <isparameterized>true</isparameterized>
-        <GuiLabels guid="b1000003-0000-0000-0000-000000000007"><Label language="EN">Max Records per IFlow Run (MPL)</Label></GuiLabels>
+        <GuiLabels guid="b1000003-0000-0000-0000-000000000007"><Label language="EN">Batch Size</Label></GuiLabels>
     </AttributeMetadata>
     <AttributeMetadata>
         <Name>batchTimeout</Name>
@@ -592,7 +482,7 @@
         <Default>5000</Default>
         <Length/>
         <isparameterized>true</isparameterized>
-        <GuiLabels guid="b1000003-0000-0000-0000-000000000008"><Label language="EN">Poll Timeout (ms)</Label></GuiLabels>
+        <GuiLabels guid="b1000003-0000-0000-0000-000000000008"><Label language="EN">Batch Timeout (ms)</Label></GuiLabels>
     </AttributeMetadata>
     <AttributeMetadata>
         <Name>batchOutputFormat</Name>
@@ -688,7 +578,7 @@
         <Name>maxRequestSizeKb</Name>
         <Usage>false</Usage>
         <DataType>xsd:integer</DataType>
-        <Default>1024</Default>
+        <Default>5120</Default>
         <Length/>
         <isparameterized>true</isparameterized>
         <GuiLabels guid="b1000004-0000-0000-0000-000000000003"><Label language="EN">Max Request Size (KB)</Label></GuiLabels>
@@ -697,10 +587,10 @@
         <Name>producerBatchSizeKb</Name>
         <Usage>false</Usage>
         <DataType>xsd:integer</DataType>
-        <Default>249</Default>
+        <Default>1024</Default>
         <Length/>
         <isparameterized>true</isparameterized>
-        <GuiLabels guid="b1000004-0000-0000-0000-000000000005"><Label language="EN">Batch Size (KB)</Label></GuiLabels>
+        <GuiLabels guid="b1000004-0000-0000-0000-000000000005"><Label language="EN">Producer Batch Size (KB)</Label></GuiLabels>
     </AttributeMetadata>
     <AttributeMetadata>
         <Name>bufferMemoryKb</Name>
@@ -720,6 +610,33 @@
         <isparameterized>true</isparameterized>
         <GuiLabels guid="b1000004-0000-0000-0000-000000000007"><Label language="EN">Enable Idempotent Producer</Label></GuiLabels>
     </AttributeMetadata>
+    <AttributeMetadata>
+        <Name>enableTransactions</Name>
+        <Usage>false</Usage>
+        <DataType>xsd:boolean</DataType>
+        <Default>false</Default>
+        <Length/>
+        <isparameterized>true</isparameterized>
+        <GuiLabels guid="b1000004-0000-0000-0000-000000000008"><Label language="EN">Enable Transactions</Label></GuiLabels>
+    </AttributeMetadata>
+    <AttributeMetadata>
+        <Name>transactionalIdPrefix</Name>
+        <Usage>false</Usage>
+        <DataType>xsd:string</DataType>
+        <Default/>
+        <Length>200</Length>
+        <isparameterized>true</isparameterized>
+        <GuiLabels guid="b1000004-0000-0000-0000-000000000014"><Label language="EN">Transactional ID Prefix</Label></GuiLabels>
+    </AttributeMetadata>
+    <AttributeMetadata>
+        <Name>maxConcurrentTransactions</Name>
+        <Usage>false</Usage>
+        <DataType>xsd:integer</DataType>
+        <Default>5</Default>
+        <Length/>
+        <isparameterized>true</isparameterized>
+        <GuiLabels guid="b1000004-0000-0000-0000-000000000015"><Label language="EN">Max Concurrent Transactions</Label></GuiLabels>
+    </AttributeMetadata>
     <!-- retries: removed from UI — Kafka uses Integer.MAX_VALUE with idempotence,
          deliveryTimeoutSeconds is the effective limit. Can be re-enabled if needed. -->
     <AttributeMetadata>
@@ -730,6 +647,15 @@
         <Length/>
         <isparameterized>true</isparameterized>
         <GuiLabels guid="b1000004-0000-0000-0000-000000000009"><Label language="EN">Delivery Timeout (Seconds)</Label></GuiLabels>
+    </AttributeMetadata>
+    <AttributeMetadata>
+        <Name>allowedHeaders</Name>
+        <Usage>false</Usage>
+        <DataType>xsd:string</DataType>
+        <Default>*</Default>
+        <Length>2000</Length>
+        <isparameterized>true</isparameterized>
+        <GuiLabels guid="b1000004-0000-0000-0000-000000000010"><Label language="EN">Allowed Headers</Label></GuiLabels>
     </AttributeMetadata>
     <!-- Avro / Schema Registry -->
     <AttributeMetadata>

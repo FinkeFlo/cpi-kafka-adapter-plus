@@ -12,6 +12,17 @@ iFlow compatibility.
 - Added a maintainer-only, manually triggered `Deploy to CPI (E2E tenant)` GitHub Actions workflow (`workflow_dispatch`, environment-protected, restricted to the maintainer) to build and deploy a chosen branch/tag directly to the CPI E2E test tenant via the Integration Content OData API (`IntegrationAdapterDesigntimeArtifacts` + `DeployIntegrationAdapterDesigntimeArtifact`), enabling pre-release E2E testing without needing a full release cycle first. No effect on the adapter runtime; CI-only tooling.
 - Chained the existing `e2e-consumer-tests.yml` / `e2e-producer-tests.yml` suites (now also callable as reusable workflows via `workflow_call`) as an automated post-deploy round-trip smoke test in `Deploy to CPI (E2E tenant)`, closing #15.
 
+## [1.1.1] - 2026-07-30
+### Changed
+- Reorganized the Sender (Consumer) adapter UI into a clearer, data-flow-oriented tab layout (Connection · Consumption · Advanced · Message Handling · Avro/Schema Registry · Error Handling). The new fetch-tuning fields (`fetchMinBytes`, `fetchMaxWaitMs`) now live under Advanced → Fetch Tuning next to `maxPartitionFetchSizeKb`. Pure re-layout: all `ReferenceName`s and defaults are unchanged, so existing iFlow channels keep working after "Update Version".
+- Reorganized the Receiver (Producer) adapter UI symmetrically (Connection · Producing · Advanced · Message Handling · Avro/Schema Registry), moving Header Mapping onto the Producing tab and Transactions + Performance Tuning onto Advanced. Delivered as the new `metadata-receiver-1.1.1.xml` variant; the frozen `metadata-receiver-1.0.0.xml` is untouched. No `ReferenceName`/default changes.
+- Relabeled the consumer `batchSize` field to **"Max Records per IFlow Run (MPL)"** to clarify that it groups Kafka records into a single IFlow execution (one MPL per batch).
+- Relabeled the consumer `batchTimeout` field to **"Poll Timeout (ms)"**, moved it to Consumption → Polling, and removed its `batchMode` edit condition. It is the per-poll `poll()` blocking timeout and applies to every poll cycle regardless of batch mode; the previous label/placement were misleading.
+- Relabeled the producer `producerBatchSizeKb` field to **"Producer Batch Size (KB)"** to distinguish it from the "Batch Send Mode" (`producerBatchMode`) option.
+
+### Added
+- Added default-value assertions for `fetchMinBytes` (1) and `fetchMaxWaitMs` (500) in `CpiKafkaPlusComponentTest`, closing the CONTRIBUTING gap for the endpoint options introduced in 1.1.0. Test-only; no runtime change.
+
 ## [1.1.0] - 2026-07-29
 ### Removed
 - Removed the dead legacy `metadata.xml` (superseded by the `metadata-sender-*.xml` / `metadata-receiver-*.xml` split; unreferenced by the build). No adapter behavior change.
