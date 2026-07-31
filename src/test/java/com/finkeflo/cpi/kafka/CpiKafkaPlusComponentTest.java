@@ -99,6 +99,8 @@ public class CpiKafkaPlusComponentTest {
         Assert.assertEquals("JSON_ARRAY", endpoint.getBatchOutputFormat());
         Assert.assertTrue(endpoint.isAvroValueDeserialization());
         Assert.assertEquals("BATCH_COMPLETE", endpoint.getCommitStrategy());
+        Assert.assertEquals("SCHEDULED", endpoint.getConsumptionMode());
+        Assert.assertFalse(endpoint.isStreamingMode());
         Assert.assertFalse(endpoint.isDrainEnabled());
         Assert.assertEquals(0, endpoint.getMinBacklogToDrain());
         Assert.assertEquals("SASL_SSL", endpoint.getSecurityProtocol());

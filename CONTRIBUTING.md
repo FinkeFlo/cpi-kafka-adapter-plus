@@ -103,6 +103,34 @@ Whether you edit the current variant file in place or must create a new
 [`VERSIONING.md`](VERSIONING.md) (micro bump = in-place edit, minor bump =
 new file, old file untouched).
 
+### Updating the documentation
+
+**Any change that affects observable adapter behaviour must be accompanied by a
+matching documentation update in the same PR.** This includes, but is not limited
+to:
+
+- **New or removed endpoint parameters** — add/remove the parameter row in
+  [`docs/configuration.md`](docs/configuration.md) (correct Sender or Receiver
+  section, matching the UI tab and group) and update any feature page that
+  references the parameter (e.g. `docs/features/batch-processing.md`).
+- **Changed parameter semantics or UI labels** — update the description and, if
+  the UI label shown in CPI changed, add a note like `(UI: "New Label")` next to
+  the parameter name.
+- **New UI tabs or group reorganisation** — the sections and headings in
+  `docs/configuration.md` follow the CPI adapter UI tab layout. If tabs or
+  groups are renamed or restructured, update the corresponding headings in the
+  docs.
+- **New features or behaviour changes** — add or update the relevant page under
+  `docs/features/`. If the feature spans both Sender and Receiver, document both
+  sides.
+- **Version bumps** — if a new metadata variant file is introduced (minor bump),
+  check whether the "Getting Started" page or any other doc references a specific
+  version number and update accordingly.
+
+The PR checklist in `.github/PULL_REQUEST_TEMPLATE.md` includes a reminder for
+this. A PR that changes code without updating the affected docs will be asked to
+add the missing documentation before merging.
+
 ---
 
 ## Versioning and Releases

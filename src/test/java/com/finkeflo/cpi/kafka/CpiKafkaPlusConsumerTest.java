@@ -630,4 +630,132 @@ public class CpiKafkaPlusConsumerTest {
         }
         return new ConsumerRecords<>(map);
     }
+
+    @Test
+    public void testDrainIsNeutralizedInStreamingMode() throws Exception {
+        CpiKafkaPlusComponent component = new CpiKafkaPlusComponent();
+        try (DefaultCamelContext ctx = new DefaultCamelContext()) {
+            ctx.addComponent("cpi-kafka-plus", component);
+            ctx.start();
+
+            CpiKafkaPlusEndpoint scheduled = (CpiKafkaPlusEndpoint) ctx.getEndpoint(
+                    "cpi-kafka-plus:t?bootstrapServers=localhost:9092&groupId=g1&drainEnabled=true");
+            Assert.assertTrue("drain must stay active in SCHEDULED",
+                    CpiKafkaPlusConsumer.isDrainActive(scheduled));
+
+            CpiKafkaPlusEndpoint streaming = (CpiKafkaPlusEndpoint) ctx.getEndpoint(
+                    "cpi-kafka-plus:t?bootstrapServers=localhost:9092&groupId=g2"
+                            + "&drainEnabled=true&consumptionMode=STREAMING");
+            Assert.assertTrue("stale drainEnabled value must survive on the endpoint",
+                    streaming.isDrainEnabled());
+            Assert.assertFalse("drain must be inert in STREAMING despite drainEnabled=true",
+                    CpiKafkaPlusConsumer.isDrainActive(streaming));
+            ctx.stop();
+        }
+    }
+
+    @Test
+    public void testInvalidConsumptionModeIsRejectedAtStart() throws Exception {
+        CpiKafkaPlusComponent component = new CpiKafkaPlusComponent();
+        try (DefaultCamelContext ctx = new DefaultCamelContext()) {
+            ctx.addComponent("cpi-kafka-plus", component);
+            ctx.start();
+            CpiKafkaPlusEndpoint ep = (CpiKafkaPlusEndpoint) ctx.getEndpoint(
+                    "cpi-kafka-plus:t?bootstrapServers=localhost:9092&groupId=g1"
+                            + "&securityProtocol=PLAINTEXT&consumptionMode=BOGUS");
+            CpiKafkaPlusConsumer consumer = (CpiKafkaPlusConsumer) ep.createConsumer(exchange -> { });
+            try {
+                consumer.start();
+                Assert.fail("An invalid consumptionMode must be rejected at start");
+            } catch (IllegalArgumentException expected) {
+                Assert.assertTrue("Message should name the allowed values, was: " + expected.getMessage(),
+                        expected.getMessage().contains("SCHEDULED")
+                                && expected.getMessage().contains("STREAMING"));
+            }
+            ctx.stop();
+        }
+    }
+
+    @Test
+    public void testScheduledModeStillRejectsDrainWithAutoCommit() throws Exception {
+        CpiKafkaPlusComponent component = new CpiKafkaPlusComponent();
+        try (DefaultCamelContext ctx = new DefaultCamelContext()) {
+            ctx.addComponent("cpi-kafka-plus", component);
+            ctx.start();
+            CpiKafkaPlusEndpoint ep = (CpiKafkaPlusEndpoint) ctx.getEndpoint(
+                    "cpi-kafka-plus:t?bootstrapServers=localhost:9092&groupId=g1"
+                            + "&securityProtocol=PLAINTEXT&drainEnabled=true&commitStrategy=AUTO");
+            CpiKafkaPlusConsumer consumer = (CpiKafkaPlusConsumer) ep.createConsumer(exchange -> { });
+            try {
+                consumer.start();
+                Assert.fail("drainEnabled + AUTO commit must be rejected in SCHEDULED mode");
+            } catch (IllegalArgumentException expected) {
+                Assert.assertTrue(expected.getMessage().contains("BATCH_COMPLETE"));
+            }
+            ctx.stop();
+        }
+    }
+
+    /**
+     * A stale {@code drainEnabled=true} / {@code commitStrategy=AUTO} / out-of-range
+     * {@code pollingIntervalSeconds} combination left over from a SCHEDULED configuration must not
+     * prevent a STREAMING iFlow from starting — those fields are documented as ignored.
+     */
+    @Test
+    public void testStreamingModeSkipsValidationOfIgnoredFields() throws Exception {
+        CpiKafkaPlusComponent component = new CpiKafkaPlusComponent();
+        try (DefaultCamelContext ctx = new DefaultCamelContext()) {
+            ctx.addComponent("cpi-kafka-plus", component);
+            ctx.start();
+            CpiKafkaPlusEndpoint ep = (CpiKafkaPlusEndpoint) ctx.getEndpoint(
+                    "cpi-kafka-plus:t?bootstrapServers=localhost:9092&groupId=g1"
+                            + "&securityProtocol=PLAINTEXT&consumptionMode=STREAMING"
+                            + "&drainEnabled=true&commitStrategy=AUTO"
+                            + "&pollingIntervalSeconds=999999&minBacklogToDrain=999999");
+            CpiKafkaPlusConsumer consumer = (CpiKafkaPlusConsumer) ep.createConsumer(exchange -> { });
+            consumer.start();
+            try {
+                Assert.assertTrue("consumer should be started", consumer.isStarted());
+            } finally {
+                consumer.stop();
+            }
+            ctx.stop();
+        }
+    }
+
+    @Test
+    public void testStreamingModeConfiguresGreedyScheduler() throws Exception {
+        CpiKafkaPlusComponent component = new CpiKafkaPlusComponent();
+        try (DefaultCamelContext ctx = new DefaultCamelContext()) {
+            ctx.addComponent("cpi-kafka-plus", component);
+            ctx.start();
+            CpiKafkaPlusEndpoint ep = (CpiKafkaPlusEndpoint) ctx.getEndpoint(
+                    "cpi-kafka-plus:t?bootstrapServers=localhost:9092&groupId=g1&consumptionMode=STREAMING");
+            Assert.assertTrue("STREAMING should be reported as streaming mode", ep.isStreamingMode());
+
+            CpiKafkaPlusConsumer consumer = (CpiKafkaPlusConsumer) ep.createConsumer(exchange -> { });
+            Assert.assertTrue("STREAMING must enable greedy scheduling", consumer.isGreedy());
+            Assert.assertEquals("STREAMING idle heartbeat delay must be 1000ms", 1000L, consumer.getDelay());
+            Assert.assertEquals("STREAMING must keep the same 5s initial delay as SCHEDULED",
+                    5000L, consumer.getInitialDelay());
+            ctx.stop();
+        }
+    }
+
+    @Test
+    public void testScheduledModeDoesNotUseGreedyScheduler() throws Exception {
+        CpiKafkaPlusComponent component = new CpiKafkaPlusComponent();
+        try (DefaultCamelContext ctx = new DefaultCamelContext()) {
+            ctx.addComponent("cpi-kafka-plus", component);
+            ctx.start();
+            CpiKafkaPlusEndpoint ep = (CpiKafkaPlusEndpoint) ctx.getEndpoint(
+                    "cpi-kafka-plus:t?bootstrapServers=localhost:9092&groupId=g1");
+            Assert.assertFalse("Default mode must not be streaming", ep.isStreamingMode());
+
+            CpiKafkaPlusConsumer consumer = (CpiKafkaPlusConsumer) ep.createConsumer(exchange -> { });
+            Assert.assertFalse("SCHEDULED must not enable greedy scheduling", consumer.isGreedy());
+            Assert.assertEquals("SCHEDULED must keep the 5s initial delay", 5000L, consumer.getInitialDelay());
+            ctx.stop();
+        }
+    }
 }

@@ -2,7 +2,10 @@
 
 ## How the consumer works
 
-The Kafka adapter polls Kafka at regular intervals (`pollingIntervalSeconds`) and processes records as batches through the CPI iFlow.
+The Kafka adapter polls Kafka at regular intervals (`pollingIntervalSeconds`) and processes records as batches through the CPI iFlow. The diagram and calculations below apply to the default `consumptionMode=SCHEDULED`.
+
+!!! note "STREAMING mode"
+    When `consumptionMode=STREAMING`, the polling interval and Drain Backlog are not used. The consumer polls continuously (greedy scheduling) with no timer delay between polls as long as records keep arriving. See [Consumption Mode](#consumption-mode) below.
 
 ```mermaid
 flowchart TD
@@ -33,10 +36,10 @@ flowchart TD
 | Parameter | Default | Description |
 |---|---|---|
 | **Batch Mode** | true | Multiple records per iFlow execution |
-| **Batch Size** | 100 | Maximum records per batch (= per iFlow execution) |
-| **Batch Timeout (ms)** | 5000 | Maximum wait time for records when the topic is empty |
+| **Max Records per IFlow Run (MPL)** | 100 | Maximum records per batch (= per iFlow execution) |
 | **Batch Output Format** | JSON_ARRAY | Format: `JSON_ARRAY`, `XML_LIST`, or `SPLIT_EXCHANGES` |
-| **Embed XML Values** | false | For `XML_LIST`, embed XML values as parsed child elements only when set to `true` |
+
+> **Poll Timeout (ms)** (default 5000) controls how long `kafkaConsumer.poll()` blocks when the topic is empty. It is located in the **Consumption → Polling** tab, not in the Batch/Message Handling group. See [Poll Timeout — how poll() blocking works](#poll-timeout--how-poll-blocking-works) below.
 
 ## How the parameters interact
 
@@ -46,7 +49,7 @@ flowchart TD
 |---|---|
 | Polling Interval | 5s |
 | Max Poll Records | 500 |
-| Batch Size | 100 |
+| Max Records per IFlow Run (MPL) | 100 |
 
 Per poll cycle:
 - `kafkaConsumer.poll()` fetches up to 500 records
@@ -60,7 +63,7 @@ Throughput: 500 records / 5s = 100 msg/s
 |---|---|
 | Polling Interval | 1s |
 | Max Poll Records | 2000 |
-| Batch Size | 500 |
+| Max Records per IFlow Run (MPL) | 500 |
 
 Per poll cycle: 2000 records, 4 iFlow executions
 
@@ -72,7 +75,7 @@ Throughput: 2000 / 1s = 2000 msg/s
 |---|---|
 | Polling Interval | 3600s (1 hour) |
 | Max Poll Records | 500 |
-| Batch Size | 500 |
+| Max Records per IFlow Run (MPL) | 500 |
 | Drain Backlog | OFF |
 
 !!! warning
@@ -82,7 +85,35 @@ Throughput: 2000 / 1s = 2000 msg/s
 
 ---
 
+## Consumption Mode
+
+The `consumptionMode` parameter switches between two scheduling strategies.
+
+### SCHEDULED (default)
+
+The consumer fires on a fixed timer (`pollingIntervalSeconds`). After each poll-and-process cycle the adapter waits the configured interval before polling again. This is the classic behaviour described in the rest of this page.
+
+### STREAMING
+
+In `STREAMING` mode the consumer uses Camel greedy scheduling:
+
+- As long as `poll()` returns records, the next poll fires **immediately** with no delay.
+- When the topic is idle, `poll()` blocks for up to the **Poll Timeout** (`batchTimeout`, default 5000 ms) and the scheduler then waits a fixed **1 second** before retrying — the idle cadence is therefore `batchTimeout` + 1 s. This costs no latency: `poll()` returns as soon as records arrive, so a record landing in an idle topic is picked up immediately.
+
+This mirrors the standard SAP Kafka adapter's continuous behaviour and eliminates the up-to-`pollingIntervalSeconds` latency of scheduled polling.
+
+**Configuration notes for STREAMING:**
+- `pollingIntervalSeconds` — ignored (greedy scheduling replaces the interval)
+- `drainEnabled` — ignored (continuous polling already drains the backlog naturally)
+- Both fields are greyed out in the CPI adapter UI when `STREAMING` is selected.
+- Freely combinable with batch mode (`batchMode`, `batchSize`, `batchOutputFormat`).
+
+---
+
 ## Drain Backlog
+
+!!! note "STREAMING mode"
+    Drain Backlog has no effect when `consumptionMode=STREAMING`. The greedy scheduler already fetches records as fast as they arrive; there is no polling interval to bridge.
 
 ### The problem: backlog during traffic spikes
 
@@ -213,7 +244,7 @@ Drain Backlog is not compatible with `Offset Commit Strategy = Auto Commit`. The
 |---|---|
 | Polling Interval | 30s |
 | Max Poll Records | 500 |
-| Batch Size | 100 |
+| Max Records per IFlow Run (MPL) | 100 |
 | Drain Backlog | OFF |
 
 | Metric | Value |
@@ -233,7 +264,7 @@ Drain Backlog is not compatible with `Offset Commit Strategy = Auto Commit`. The
 |---|---|
 | Polling Interval | 30s |
 | Max Poll Records | 500 |
-| Batch Size | 500 |
+| Max Records per IFlow Run (MPL) | 500 |
 | Drain Backlog | ON |
 
 **Without drain:**
@@ -262,7 +293,7 @@ Drain Backlog is not compatible with `Offset Commit Strategy = Auto Commit`. The
 |---|---|
 | Polling Interval | 28800s (8 hours) |
 | Max Poll Records | 500 |
-| Batch Size | 500 |
+| Max Records per IFlow Run (MPL) | 500 |
 | Drain Backlog | ON |
 
 | Metric | Value |
@@ -281,7 +312,7 @@ Drain Backlog is not compatible with `Offset Commit Strategy = Auto Commit`. The
 |---|---|
 | Polling Interval | 60s |
 | Max Poll Records | 20 |
-| Batch Size | 5 |
+| Max Records per IFlow Run (MPL) | 5 |
 | Drain Backlog | ON |
 
 100 records in the topic:
@@ -412,12 +443,12 @@ Each record is processed individually as its own iFlow exchange. There is no bat
 
 ---
 
-## Batch Timeout - common misunderstanding
+## Poll Timeout — how poll() blocking works
 
-`Batch Timeout (ms)` is not the time the adapter waits to collect records. It is the maximum time `kafkaConsumer.poll()` waits for the Kafka broker:
+`Poll Timeout (ms)` is not the time the adapter waits to collect records. It is the maximum time `kafkaConsumer.poll()` blocks waiting for the Kafka broker:
 
 - Topic has records: `poll()` returns immediately (milliseconds)
-- Topic is empty: `poll()` waits up to Batch Timeout ms, then returns 0 records
+- Topic is empty: `poll()` waits up to Poll Timeout ms, then returns 0 records
 
 The parameter only affects idle detection for an empty topic.
 
