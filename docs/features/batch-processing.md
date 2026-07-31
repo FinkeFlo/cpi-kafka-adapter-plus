@@ -37,7 +37,7 @@ flowchart TD
 |---|---|---|
 | **Batch Mode** | true | Multiple records per iFlow execution |
 | **Max Records per IFlow Run (MPL)** | 100 | Maximum records per batch (= per iFlow execution) |
-| **Batch Output Format** | JSON_ARRAY | Format: `JSON_ARRAY`, `XML_LIST`, or `SPLIT_EXCHANGES` |
+| **Batch Output Format** | JSON_ARRAY | Format: `JSON_ARRAY` or `XML_LIST`. |
 
 > **Poll Timeout (ms)** (default 5000) controls how long `kafkaConsumer.poll()` blocks when the topic is empty. It is located in the **Consumption → Polling** tab, not in the Batch/Message Handling group. See [Poll Timeout — how poll() blocking works](#poll-timeout--how-poll-blocking-works) below.
 
@@ -436,10 +436,6 @@ Alternative filter: `/kafkaRecords/record[value/@format='xml']` to process only 
 
 !!! warning "XML well-formedness"
     XML values that look like XML must be well-formed. The adapter only uses a lightweight check before embedding; malformed XML content can make the batch XML invalid.
-
-### SPLIT_EXCHANGES
-
-Each record is processed individually as its own iFlow exchange. There is no batching wrapper, but polling remains efficient because `maxPollRecords` are fetched at once.
 
 ---
 
