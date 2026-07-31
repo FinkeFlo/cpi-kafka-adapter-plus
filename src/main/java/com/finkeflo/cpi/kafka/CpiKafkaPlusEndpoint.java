@@ -150,7 +150,9 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
     private long batchTimeout = 5000;
 
     @UriParam(label = "batch", defaultValue = "JSON_ARRAY",
-            description = "Batch output format: JSON_ARRAY, XML_LIST, SPLIT_EXCHANGES")
+            description = "Batch output format: JSON_ARRAY, XML_LIST. "
+                    + "SPLIT_EXCHANGES is accepted at runtime for backward compatibility with "
+                    + "existing channel configs but is no longer shown in the UI as of 1.2.0.")
     private String batchOutputFormat = "JSON_ARRAY";
 
     // --- Producer Settings ---

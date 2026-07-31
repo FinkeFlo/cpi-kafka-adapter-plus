@@ -81,7 +81,7 @@ For detailed security setup, see [Authentication](security/authentication.md).
 |-----------|---------|-------------|
 | `batchMode` | `true` | Enable batch mode: multiple records per iFlow execution (one MPL entry per batch). |
 | `batchSize` | `100` | Maximum records per batch (UI label: "Max Records per IFlow Run (MPL)"). |
-| `batchOutputFormat` | `JSON_ARRAY` | Batch output format: `JSON_ARRAY`, `XML_LIST`, `SPLIT_EXCHANGES`. |
+| `batchOutputFormat` | `JSON_ARRAY` | Batch output format: `JSON_ARRAY`, `XML_LIST`. (`SPLIT_EXCHANGES` accepted at runtime for backward compatibility but removed from the UI as of 1.2.0.) |
 
 In `XML_LIST` mode, each `<value>` element carries a `format` attribute (`"xml"` for directly embedded XML, `"text"` for text/CDATA content). Values that look like XML are always auto-detected and embedded; there is no configuration option for this. See [Batch Processing](features/batch-processing.md) for details.
 

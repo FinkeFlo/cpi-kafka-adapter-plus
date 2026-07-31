@@ -637,7 +637,6 @@
         <FixedValues>
             <FixedValue><Value>JSON_ARRAY</Value><GuiLabels guid="b1000003-0000-0000-0000-000000000091"><Label language="EN">JSON Array</Label></GuiLabels></FixedValue>
             <FixedValue><Value>XML_LIST</Value><GuiLabels guid="b1000003-0000-0000-0000-000000000092"><Label language="EN">XML List</Label></GuiLabels></FixedValue>
-            <FixedValue><Value>SPLIT_EXCHANGES</Value><GuiLabels guid="b1000003-0000-0000-0000-000000000093"><Label language="EN">Individual Exchanges (No Batching)</Label></GuiLabels></FixedValue>
         </FixedValues>
     </AttributeMetadata>
 
