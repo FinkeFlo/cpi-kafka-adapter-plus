@@ -51,11 +51,11 @@ jobs:
   changes:
     runs-on: ubuntu-latest
     outputs:
-      relevant: ${{ github.event_name != 'pull_request' || (github.actor != 'dependabot[bot]' && steps.filter.outputs.relevant == 'true') }}
+      relevant: ${{ github.event_name != 'pull_request' || (github.event.pull_request.user.login != 'dependabot[bot]' && steps.filter.outputs.relevant == 'true') }}
     steps:
       - uses: actions/checkout@v7
       - uses: dorny/paths-filter@v4
-        if: github.event_name == 'pull_request' && github.actor != 'dependabot[bot]'
+        if: github.event_name == 'pull_request' && github.event.pull_request.user.login != 'dependabot[bot]'
         id: filter
         with:
           filters: |

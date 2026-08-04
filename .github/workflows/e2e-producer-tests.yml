@@ -40,11 +40,11 @@ jobs:
       # only PRs get the path-filtered skip-if-irrelevant treatment.
       # Dependabot PRs never have access to repository secrets, so E2E tests
       # would always fail for them - skip E2E entirely for dependabot[bot].
-      relevant: ${{ github.event_name != 'pull_request' || (github.actor != 'dependabot[bot]' && steps.filter.outputs.relevant == 'true') }}
+      relevant: ${{ github.event_name != 'pull_request' || (github.event.pull_request.user.login != 'dependabot[bot]' && steps.filter.outputs.relevant == 'true') }}
     steps:
       - uses: actions/checkout@v7
       - uses: dorny/paths-filter@v4
-        if: github.event_name == 'pull_request' && github.actor != 'dependabot[bot]'
+        if: github.event_name == 'pull_request' && github.event.pull_request.user.login != 'dependabot[bot]'
         id: filter
         with:
           filters: |
