@@ -563,6 +563,12 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
                     drainCycle, recordCount, totalRecordsFetched, endpoint.getEffectiveTopic(), endpoint.getGroupId());
 
             try {
+                // TODO [tech-debt] SPLIT_EXCHANGES is kept here for backward compatibility with existing
+                //   iFlow channel configs that stored this value before the 1.2.0 metadata removed it
+                //   from the UI dropdown. Once we are confident no production iFlows still carry the old
+                //   value (e.g. after a major version bump or a migration guide has been shipped), this
+                //   condition can be simplified: batchMode + batchOutputFormat != SPLIT_EXCHANGES
+                //   becomes just batchMode (and SPLIT_EXCHANGES becomes unreachable dead code).
                 if (endpoint.isBatchMode() && !"SPLIT_EXCHANGES".equalsIgnoreCase(endpoint.getBatchOutputFormat())) {
                     totalProcessed += recordProcessor.processBatchRecords(kafkaConsumer, records, isBatchComplete);
                 } else {

@@ -133,6 +133,35 @@ add the missing documentation before merging.
 
 ---
 
+## Marking Technical Debt
+
+When a piece of code is kept intentionally for **backward compatibility** (or as a known shortcut
+to revisit later), mark it with a `// TODO [tech-debt]` comment directly above the relevant line
+or block. This tag is grep-able across the whole repository:
+
+```bash
+git grep -n "TODO \[tech-debt\]"
+```
+
+Every `// TODO [tech-debt]` comment must answer three questions:
+
+1. **Why is this kept?** — describe the backward-compat reason or the shortcut taken.
+2. **What triggers it?** — name the stored value, config option, or condition that still uses this path.
+3. **When can it be removed?** — state the concrete condition (e.g. major version bump, migration guide shipped, a specific deprecation period).
+
+Example (from `CpiKafkaPlusConsumer.java`):
+
+```java
+// TODO [tech-debt] SPLIT_EXCHANGES is kept here for backward compatibility with existing
+//   iFlow channel configs that stored this value before the 1.2.0 metadata removed it from
+//   the UI dropdown. Once we are confident no production iFlows still carry the old value
+//   (e.g. after a major version bump or a migration guide has been shipped), this condition
+//   can be simplified: batchMode + batchOutputFormat != SPLIT_EXCHANGES becomes just batchMode
+//   (and SPLIT_EXCHANGES becomes unreachable dead code).
+```
+
+---
+
 ## Versioning and Releases
 
 We follow standard [Semantic Versioning (SemVer)](https://semver.org/) driven by our Conventional Commits.
