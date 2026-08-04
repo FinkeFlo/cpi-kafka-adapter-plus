@@ -38,11 +38,13 @@ jobs:
     outputs:
       # Non-PR events (workflow_dispatch, tag push) always run the full suite;
       # only PRs get the path-filtered skip-if-irrelevant treatment.
-      relevant: ${{ github.event_name != 'pull_request' || steps.filter.outputs.relevant }}
+      # Dependabot PRs never have access to repository secrets, so E2E tests
+      # would always fail for them - skip E2E entirely for dependabot[bot].
+      relevant: ${{ github.event_name != 'pull_request' || (github.actor != 'dependabot[bot]' && steps.filter.outputs.relevant == 'true') }}
     steps:
       - uses: actions/checkout@v7
       - uses: dorny/paths-filter@v4
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' && github.actor != 'dependabot[bot]'
         id: filter
         with:
           filters: |
