@@ -22,6 +22,7 @@ package com.finkeflo.cpi.kafka;
 
 import java.util.Set;
 
+import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.networknt.schema.JsonSchema;
@@ -48,10 +49,19 @@ public final class JsonSchemaValidator {
         }
         this.objectMapper = new ObjectMapper();
         JsonSchemaFactory factory = JsonSchemaFactory.getInstance(SpecVersion.VersionFlag.V7);
-        try {
-            JsonNode schemaNode = objectMapper.readTree(jsonSchemaString);
+        try (JsonParser parser = objectMapper.getFactory().createParser(jsonSchemaString)) {
+            JsonNode schemaNode = objectMapper.readTree(parser);
+            if (parser.nextToken() != null) {
+                throw new IllegalArgumentException(
+                    "Invalid JSON Schema: found content after the first JSON value. "
+                    + "Only a single JSON Schema document is supported - combine multiple "
+                    + "schemas using 'oneOf', 'anyOf', or 'allOf' instead of concatenating "
+                    + "them with a comma.");
+            }
             this.schema = factory.getSchema(schemaNode);
             LOG.debug("[CPI-KAFKA-PLUS-DIAG] JSON Schema validator compiled successfully");
+        } catch (IllegalArgumentException e) {
+            throw e;
         } catch (Exception e) {
             throw new IllegalArgumentException("Invalid JSON Schema: " + e.getMessage(), e);
         }

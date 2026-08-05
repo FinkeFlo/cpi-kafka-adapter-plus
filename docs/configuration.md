@@ -75,6 +75,8 @@ For detailed security setup, see [Authentication](security/authentication.md).
 | `jsonSchema` | — | Inline JSON Schema for message validation. |
 | `jsonSchemaReportError` | `false` | Report JSON Schema validation failures as errors in CPI monitoring; otherwise invalid messages are dropped. |
 
+For more details, see [JSON Schema Validation](features/json-schema-validation.md).
+
 **Delivery to IFlow (Batching)**
 
 | Parameter | Default | Description |
@@ -192,6 +194,8 @@ For detailed security setup, see [Authentication](security/authentication.md).
 | `jsonSchemaValidation` | `false` | Enable JSON Schema validation of outgoing messages. |
 | `jsonSchema` | — | Inline JSON Schema for message validation. |
 | `jsonSchemaReportError` | `false` | Report JSON Schema validation failures as errors in CPI monitoring; otherwise invalid messages are dropped. |
+
+For more details, see [JSON Schema Validation](features/json-schema-validation.md).
 
 ### Avro / Schema Registry
 
