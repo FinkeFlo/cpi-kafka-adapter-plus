@@ -260,6 +260,25 @@ public class CpiKafkaPlusComponentTest {
     }
 
     @Test(expected = IllegalArgumentException.class)
+    public void testJsonSchemaValidatorRejectsTrailingContent() {
+        String schema = "{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"string\"}}},"
+            + "{\"type\":\"object\",\"properties\":{\"amount\":{\"type\":\"number\"}}}";
+        new JsonSchemaValidator(schema);
+    }
+
+    @Test
+    public void testJsonSchemaValidatorOneOfComposition() {
+        String schema = "{\"oneOf\":["
+            + "{\"type\":\"object\",\"required\":[\"orderId\"],\"properties\":{\"orderId\":{\"type\":\"string\"}}},"
+            + "{\"type\":\"object\",\"required\":[\"invoiceId\"],\"properties\":{\"invoiceId\":{\"type\":\"string\"}}}"
+            + "]}";
+        JsonSchemaValidator validator = new JsonSchemaValidator(schema);
+        Assert.assertNull("Payload matching first branch should pass", validator.validate("{\"orderId\":\"A-1\"}"));
+        Assert.assertNull("Payload matching second branch should pass", validator.validate("{\"invoiceId\":\"INV-1\"}"));
+        Assert.assertNotNull("Payload matching neither branch should fail", validator.validate("{\"foo\":\"bar\"}"));
+    }
+
+    @Test(expected = IllegalArgumentException.class)
     public void testJsonSchemaValidationEmptySchemaThrows() {
         CpiKafkaPlusEndpoint endpoint = new CpiKafkaPlusEndpoint();
         endpoint.setJsonSchemaValidation(true);

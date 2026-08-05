@@ -57,6 +57,7 @@ nav:
       - Batch Processing: features/batch-processing.md
       - Avro / Schema Registry: features/avro-schema-registry.md
       - Producer Batch Send: features/producer-batch.md
+      - JSON Schema Validation: features/json-schema-validation.md
   - Security:
       - Authentication: security/authentication.md
   - Architecture Decisions:
