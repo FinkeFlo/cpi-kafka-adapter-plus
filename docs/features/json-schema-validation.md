@@ -18,9 +18,7 @@ When enabled, every message is checked against the configured schema before it i
 
 The `jsonSchema` field must contain exactly one JSON Schema document (draft-07), up to 50,000 characters (the field's UI length limit). To validate against more than one possible message shape, combine them into a single document using `oneOf`, `anyOf`, or `allOf`:
 
-- `oneOf` - the message must match **exactly one** of the listed schemas.
-- `anyOf` - the message must match **at least one** of the listed schemas.
-- `allOf` - the message must match **all** of the listed schemas (useful for combining independent constraints into one document).
+### `oneOf` - exactly one of the listed schemas must match
 
 ```json
 {
@@ -44,3 +42,55 @@ The `jsonSchema` field must contain exactly one JSON Schema document (draft-07),
   ]
 }
 ```
+
+A message that matches both branches (or neither) fails validation.
+
+### `anyOf` - at least one of the listed schemas must match
+
+```json
+{
+  "anyOf": [
+    {
+      "type": "object",
+      "required": ["email"],
+      "properties": {
+        "email": { "type": "string", "format": "email" }
+      }
+    },
+    {
+      "type": "object",
+      "required": ["phone"],
+      "properties": {
+        "phone": { "type": "string" }
+      }
+    }
+  ]
+}
+```
+
+A message with `email`, `phone`, or both passes; a message with neither fails.
+
+### `allOf` - all of the listed schemas must match
+
+```json
+{
+  "allOf": [
+    {
+      "type": "object",
+      "required": ["id"],
+      "properties": {
+        "id": { "type": "string" }
+      }
+    },
+    {
+      "type": "object",
+      "required": ["amount"],
+      "properties": {
+        "amount": { "type": "number", "minimum": 0 }
+      }
+    }
+  ]
+}
+```
+
+Useful for combining independent constraint fragments into one document - here, every message must have both an `id` and a non-negative `amount`.
