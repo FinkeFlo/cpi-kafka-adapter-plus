@@ -109,6 +109,19 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
             if (exchange.getException() != null) {
                 throw exchange.getException();
             }
+            // SAP CPI may consume the exception internally (e.g. via an Error End event
+            // in a called sub-iFlow) so that exchange.getException() is null but the
+            // exchange is still marked as failed. Without this check the adapter would
+            // treat the failed exchange as a success and commit the Kafka offset.
+            if (exchange.isFailed()) {
+                Exception syntheticEx = new RuntimeException(
+                        "Exchange failed without exception (isFailed=true). "
+                        + "Check the sub-iFlow for a swallowed error.");
+                LOG.warn("[CPI-KAFKA-PLUS-DIAG] processExchange: exchange.isFailed()=true "
+                        + "but getException()==null — treating as error to prevent offset commit. "
+                        + "Exchange properties: {}", exchange.getProperties());
+                throw syntheticEx;
+            }
         }
 
         @Override
