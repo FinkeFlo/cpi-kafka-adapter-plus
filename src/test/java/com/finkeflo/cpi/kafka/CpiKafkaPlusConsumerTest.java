@@ -29,7 +29,12 @@ import java.util.Properties;
 
 import javax.net.ssl.SSLHandshakeException;
 
+import org.apache.camel.CamelExchangeException;
+import org.apache.camel.Exchange;
+import org.apache.camel.ProducerTemplate;
+import org.apache.camel.builder.RouteBuilder;
 import org.apache.camel.impl.DefaultCamelContext;
+import org.apache.camel.support.DefaultExchange;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
@@ -755,6 +760,122 @@ public class CpiKafkaPlusConsumerTest {
             CpiKafkaPlusConsumer consumer = (CpiKafkaPlusConsumer) ep.createConsumer(exchange -> { });
             Assert.assertFalse("SCHEDULED must not enable greedy scheduling", consumer.isGreedy());
             Assert.assertEquals("SCHEDULED must keep the 5s initial delay", 5000L, consumer.getInitialDelay());
+            ctx.stop();
+        }
+    }
+
+    // --- Silent (handled) route failures must not commit the offset — issue #110 ---
+
+    @Test
+    public void testHandledFailureIsDetectedWhenExceptionWasCleared() throws Exception {
+        try (DefaultCamelContext ctx = new DefaultCamelContext()) {
+            Exchange exchange = new DefaultExchange(ctx);
+            // What Camel leaves behind after onException(...).handled(true) (or a CPI
+            // exception subprocess / Error End event in a called sub-iFlow): the exception
+            // is cleared, but the failure is flagged as handled.
+            exchange.setProperty(Exchange.EXCEPTION_CAUGHT, new IllegalStateException("swallowed"));
+            exchange.setProperty(Exchange.FAILURE_HANDLED, Boolean.TRUE);
+
+            Assert.assertNull("precondition: exception must be cleared", exchange.getException());
+            Assert.assertFalse("precondition: isFailed() cannot detect this", exchange.isFailed());
+            Assert.assertTrue("a handled failure must be detected",
+                    CpiKafkaPlusConsumer.isHandledFailure(exchange));
+        }
+    }
+
+    @Test
+    public void testSuccessfulExchangeIsNotAHandledFailure() throws Exception {
+        try (DefaultCamelContext ctx = new DefaultCamelContext()) {
+            Exchange exchange = new DefaultExchange(ctx);
+            Assert.assertFalse("a clean exchange must not be flagged",
+                    CpiKafkaPlusConsumer.isHandledFailure(exchange));
+        }
+    }
+
+    @Test
+    public void testContinuedExchangeIsNotAHandledFailure() throws Exception {
+        try (DefaultCamelContext ctx = new DefaultCamelContext()) {
+            Exchange exchange = new DefaultExchange(ctx);
+            // onException(...).continued(true) also clears the exception and sets
+            // EXCEPTION_CAUGHT, but the route resumed and ran to completion — the record WAS
+            // processed, so its offset must still be committed. Keying the detection on
+            // EXCEPTION_CAUGHT alone would wrongly redeliver these.
+            exchange.setProperty(Exchange.EXCEPTION_CAUGHT, new IllegalArgumentException("ignored"));
+
+            Assert.assertFalse("a continued (recovered) exchange must not be flagged",
+                    CpiKafkaPlusConsumer.isHandledFailure(exchange));
+        }
+    }
+
+    @Test
+    public void testHandledAndContinuedRoutesAreDistinguishedEndToEnd() throws Exception {
+        try (DefaultCamelContext ctx = new DefaultCamelContext()) {
+            ctx.addRoutes(new RouteBuilder() {
+                @Override
+                public void configure() {
+                    onException(IllegalStateException.class).handled(true)
+                            .setBody(constant("handled-response"));
+                    onException(IllegalArgumentException.class).continued(true);
+                    from("direct:handled")
+                            .process(e -> { throw new IllegalStateException("swallowed"); });
+                    from("direct:continued")
+                            .process(e -> { throw new IllegalArgumentException("ignored"); })
+                            .setBody(constant("route-continued"));
+                }
+            });
+            ctx.start();
+            ProducerTemplate template = ctx.createProducerTemplate();
+
+            Exchange handled = template.send("direct:handled", e -> e.getIn().setBody("in"));
+            Assert.assertTrue("handled(true) swallows the error -> must block the offset commit",
+                    CpiKafkaPlusConsumer.isHandledFailure(handled));
+
+            Exchange continued = template.send("direct:continued", e -> e.getIn().setBody("in"));
+            Assert.assertEquals("precondition: continued route ran to completion",
+                    "route-continued", continued.getMessage().getBody(String.class));
+            Assert.assertFalse("continued(true) completed the route -> offset must be committed",
+                    CpiKafkaPlusConsumer.isHandledFailure(continued));
+
+            ctx.stop();
+        }
+    }
+
+    @Test
+    public void testCallbackThrowsWhenRouteSwallowsTheErrorSoOffsetIsNotCommitted() throws Exception {
+        CpiKafkaPlusComponent component = new CpiKafkaPlusComponent();
+        try (DefaultCamelContext ctx = new DefaultCamelContext()) {
+            ctx.addComponent("cpi-kafka-plus", component);
+            ctx.addRoutes(new RouteBuilder() {
+                @Override
+                public void configure() {
+                    onException(IllegalStateException.class).handled(true)
+                            .setBody(constant("swallowed-by-error-handler"));
+                    from("direct:sub-iflow")
+                            .process(e -> { throw new IllegalStateException("sub-iFlow blew up"); });
+                }
+            });
+            ctx.start();
+            ProducerTemplate template = ctx.createProducerTemplate();
+            CpiKafkaPlusEndpoint ep = (CpiKafkaPlusEndpoint) ctx.getEndpoint(
+                    "cpi-kafka-plus:t?bootstrapServers=localhost:9092&groupId=g1");
+
+            // Stand in for the deployed iFlow: the route swallows the error internally, so the
+            // exchange handed back to the adapter carries no exception at all.
+            CpiKafkaPlusConsumer consumer = (CpiKafkaPlusConsumer) ep.createConsumer(
+                    exchange -> template.send("direct:sub-iflow", exchange));
+
+            Exchange exchange = ep.createExchange();
+            try {
+                consumer.getConsumerCallback().processExchange(exchange);
+                Assert.fail("processExchange must throw so RecordProcessor skips the offset commit");
+            } catch (CamelExchangeException expected) {
+                Assert.assertNotNull("the swallowed root cause must be chained for DLQ/MPL",
+                        expected.getCause());
+                Assert.assertEquals("sub-iFlow blew up", expected.getCause().getMessage());
+            }
+
+            Assert.assertNull("precondition: the route really did clear the exception",
+                    exchange.getException());
             ctx.stop();
         }
     }
