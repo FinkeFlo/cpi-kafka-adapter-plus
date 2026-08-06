@@ -11,7 +11,7 @@ Lists of 116 third-party dependencies.
      (The Apache Software License, Version 2.0) docker-java-api (com.github.docker-java:docker-java-api:3.4.2 - https://github.com/docker-java/docker-java)
      (The Apache Software License, Version 2.0) docker-java-transport (com.github.docker-java:docker-java-transport:3.4.2 - https://github.com/docker-java/docker-java)
      (The Apache Software License, Version 2.0) docker-java-transport-zerodep (com.github.docker-java:docker-java-transport-zerodep:3.4.2 - https://github.com/docker-java/docker-java)
-     (BSD 2-Clause License) zstd-jni (com.github.luben:zstd-jni:1.5.6-4 - https://github.com/luben/zstd-jni)
+     (BSD 2-Clause License) zstd-jni (com.github.luben:zstd-jni:1.5.7-12 - https://github.com/luben/zstd-jni)
      (The Apache Software License, Version 2.0) FindBugs-jsr305 (com.google.code.findbugs:jsr305:3.0.2 - http://findbugs.sourceforge.net/)
      (Apache 2.0) error-prone annotations (com.google.errorprone:error_prone_annotations:2.18.0 - https://errorprone.info/error_prone_annotations)
      (The Apache Software License, Version 2.0) Guava InternalFutureFailureAccess and InternalFutures (com.google.guava:failureaccess:1.0.1 - https://github.com/google/guava/failureaccess)

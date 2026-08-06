@@ -16,3 +16,4 @@
 # Temp files
 .tmp
 .tmp/
+.claude/worktrees/
