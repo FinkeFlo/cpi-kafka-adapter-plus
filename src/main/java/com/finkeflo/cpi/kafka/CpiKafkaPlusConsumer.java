@@ -29,6 +29,7 @@ import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
 
+import org.apache.camel.CamelExchangeException;
 import org.apache.camel.Exchange;
 import org.apache.camel.Processor;
 import org.apache.camel.support.ScheduledPollConsumer;
@@ -109,18 +110,23 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
             if (exchange.getException() != null) {
                 throw exchange.getException();
             }
-            // SAP CPI may consume the exception internally (e.g. via an Error End event
-            // in a called sub-iFlow) so that exchange.getException() is null but the
-            // exchange is still marked as failed. Without this check the adapter would
-            // treat the failed exchange as a success and commit the Kafka offset.
-            if (exchange.isFailed()) {
-                Exception syntheticEx = new RuntimeException(
-                        "Exchange failed without exception (isFailed=true). "
-                        + "Check the sub-iFlow for a swallowed error.");
-                LOG.warn("[CPI-KAFKA-PLUS-DIAG] processExchange: exchange.isFailed()=true "
-                        + "but getException()==null — treating as error to prevent offset commit. "
-                        + "Exchange properties: {}", exchange.getProperties());
-                throw syntheticEx;
+            // A route whose exception was consumed by an error handler looks completely
+            // successful here — see isHandledFailure(). Treat it as an error so the offset is
+            // not committed and the record is redelivered instead of silently dropped.
+            if (isHandledFailure(exchange)) {
+                Exception handledFailure = buildHandledFailureException(exchange);
+                LOG.error("[CPI-KAFKA-PLUS-DIAG] processExchange: route failure was handled "
+                                + "internally (getException()==null, FAILURE_HANDLED=true) — refusing to "
+                                + "commit the offset. failureRouteId={} failureEndpoint={} causeClass={} "
+                                + "causeMsg='{}' topStack={}",
+                        exchange.getProperty(Exchange.FAILURE_ROUTE_ID),
+                        exchange.getProperty(Exchange.FAILURE_ENDPOINT),
+                        handledFailure.getCause() != null
+                                ? handledFailure.getCause().getClass().getName() : "null",
+                        handledFailure.getCause() != null
+                                ? handledFailure.getCause().getMessage() : "null",
+                        describeTopStack(handledFailure.getCause(), 6));
+                throw handledFailure;
             }
         }
 
@@ -138,6 +144,15 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
     public CpiKafkaPlusConsumer(CpiKafkaPlusEndpoint endpoint, Processor processor) {
         super(endpoint, processor);
         this.endpoint = endpoint;
+    }
+
+    /**
+     * The bridge between {@link RecordProcessor} and the Camel route. Package-private so unit
+     * tests can drive it against a real route without needing a Kafka broker (the
+     * {@link RecordProcessor} that normally holds it is only built in {@link #ensureInitialized()}).
+     */
+    RecordProcessor.ConsumerCallback getConsumerCallback() {
+        return consumerCallback;
     }
 
     @Override
@@ -796,6 +811,55 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
             }
             throw new RuntimeException("Non-Exception Throwable from poll: " + t.getClass().getName(), t);
         }
+    }
+
+    /**
+     * Returns {@code true} when the route failed but its exception was consumed by an error
+     * handler, leaving {@link Exchange#getException()} at {@code null}.
+     *
+     * <p>This is the state CPI leaves behind when an exception subprocess — or an Error End
+     * event in a called sub-iFlow — swallows the error: the record was never delivered, yet
+     * nothing on the exchange looks failed, so the adapter committed the offset and dropped the
+     * message silently (issue #110).
+     *
+     * <p>Note that {@link Exchange#isFailed()} cannot detect this: in Camel it is defined as
+     * {@code getException() != null} and reads the very same field, so it is always {@code false}
+     * once the exception has been cleared (it does not even cover {@code setRollbackOnly(true)}).
+     *
+     * <p>Keyed on {@code FAILURE_HANDLED} and deliberately NOT on {@code EXCEPTION_CAUGHT} alone:
+     * {@code onException(...).continued(true)} also clears the exception and sets
+     * {@code EXCEPTION_CAUGHT}, but it resumes the original route so the record IS processed to
+     * completion. Those offsets must still be committed, otherwise every deliberately-ignored
+     * error would turn into an endless redelivery.
+     *
+     * <p>Package-private and static for direct unit tests.
+     */
+    static boolean isHandledFailure(Exchange exchange) {
+        return Boolean.TRUE.equals(exchange.getProperty(Exchange.FAILURE_HANDLED, Boolean.class));
+    }
+
+    /**
+     * Builds the exception that blocks the offset commit for a silently handled route failure.
+     * The original cause from {@code EXCEPTION_CAUGHT} is chained when Camel preserved it, so the
+     * DLQ record and the MPL entry still show the real root cause instead of a synthetic message.
+     *
+     * <p>Deliberately not a transient exception type: a swallowed sub-iFlow error is
+     * deterministic and would fail identically on retry, so {@link RecordProcessor#isRetryable}
+     * classifies it as permanent and (with the default {@code retryOnlyTransientErrors=true}) it
+     * goes straight to the DLQ instead of burning {@code dlqMaxRetries} attempts.
+     *
+     * <p>Package-private and static for direct unit tests.
+     */
+    static Exception buildHandledFailureException(Exchange exchange) {
+        Throwable cause = exchange.getProperty(Exchange.EXCEPTION_CAUGHT, Throwable.class);
+        String message = "Route reported success but its failure was handled internally "
+                + "(Exchange.FAILURE_HANDLED=true, exception cleared) — most likely an exception "
+                + "subprocess or an Error End event in a called sub-iFlow swallowed the error. "
+                + "Refusing to commit the Kafka offset so the record is redelivered or routed to "
+                + "the DLQ instead of being silently dropped.";
+        return cause != null
+                ? new CamelExchangeException(message, exchange, cause)
+                : new CamelExchangeException(message, exchange);
     }
 
     /**

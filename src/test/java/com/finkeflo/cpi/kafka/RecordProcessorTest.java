@@ -457,8 +457,13 @@ public class RecordProcessorTest {
                 new RecordProcessor.ConsumerCallback() {
                     @Override
                     public void processExchange(Exchange exchange) throws Exception {
+                        // Mirrors CpiKafkaPlusConsumer's real callback, delegating to the same
+                        // production helpers so this double cannot drift away from it.
                         if (exchange.getException() != null) {
                             throw exchange.getException();
+                        }
+                        if (CpiKafkaPlusConsumer.isHandledFailure(exchange)) {
+                            throw CpiKafkaPlusConsumer.buildHandledFailureException(exchange);
                         }
                     }
 
