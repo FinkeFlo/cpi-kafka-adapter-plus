@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@700;800;900&display=swap');
+        html, body {
+            font-family: 'Inter', sans-serif;
+            margin: 0;
+            width: 1280px;
+            height: 640px;
+            background: linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%);
+        }
+        .wrap { width: 1280px; height: 640px; display: flex; align-items: center; justify-content: center; }
+    </style>
+</head>
+<body>
+
+    <!-- GitHub social preview image (1280x640) -->
+    <div class="wrap">
+        <div class="flex items-center space-x-10 bg-white px-16 py-14 rounded-[2.5rem] shadow-2xl">
+            <div class="relative w-40 h-40 bg-blue-600 rounded-[2rem] flex items-center justify-center shadow-lg overflow-hidden border-b-[8px] border-blue-800">
+                <div class="absolute top-0 left-0 w-full h-2 bg-blue-400 opacity-50"></div>
+                <span class="text-white text-8xl font-black tracking-tighter leading-none pr-1">K+</span>
+            </div>
+            <div class="flex flex-col">
+                <div class="flex items-baseline space-x-4">
+                    <span class="text-6xl font-black text-slate-800 tracking-tight uppercase">Kafka Adapter</span>
+                    <span class="text-6xl font-black text-orange-500 italic transform -skew-x-6">plus</span>
+                </div>
+                <div class="flex items-center mt-4">
+                    <div class="h-[4px] w-16 bg-blue-600 mr-5 rounded-full"></div>
+                    <span class="text-2xl font-bold text-slate-500 tracking-[0.15em] uppercase">for Sap Cloud integration</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+</body>
+</html>
