@@ -66,8 +66,8 @@ public class AvroSerializerHelperTest {
             } catch (RuntimeException e) {
                 Assert.assertTrue("Expected clear missing-subject message but got: " + describeCauseChain(e),
                         e.getMessage().contains("Schema subject 'orders-value' not found in Schema Registry"));
-                Assert.assertTrue("Expected RestClientException in cause chain but got: " + describeCauseChain(e),
-                        hasCauseNamed(e, "RestClientException"));
+                Assert.assertTrue("Expected SchemaRegistryException in cause chain but got: " + describeCauseChain(e),
+                        hasCauseNamed(e, "SchemaRegistryException"));
             }
         }
 

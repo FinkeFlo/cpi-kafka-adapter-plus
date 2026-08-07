@@ -482,4 +482,85 @@ public class RecordProcessorTest {
     private static ConsumerRecord<byte[], byte[]> rec(String topic, int partition, long offset) {
         return new ConsumerRecord<>(topic, partition, offset, null, "value".getBytes());
     }
+
+    // --- DLQ-Fallback payload format tests ---
+
+    @Test
+    public void testBatchFallbackUsesBatchFormat() throws Exception {
+        CpiKafkaPlusEndpoint endpoint = endpoint("BATCH_COMPLETE");
+        List<Exchange> captured = new ArrayList<>();
+        RecordProcessor processor = createProcessorWithCapture(endpoint, captured);
+
+        ConsumerRecord<byte[], byte[]> record = new ConsumerRecord<>(
+                "test-topic", 0, 42L, "key".getBytes(StandardCharsets.UTF_8),
+                "{\"msg\":\"hello\"}".getBytes(StandardCharsets.UTF_8));
+
+        processor.processRecordsIndividually(null, Arrays.asList(record), false);
+
+        Assert.assertEquals(1, captured.size());
+        Message msg = captured.get(0).getIn();
+
+        String body = msg.getBody(String.class);
+        Assert.assertTrue("body must be JSON array format, got: " + body,
+                body != null && body.contains("kafkaRecords"));
+
+        Assert.assertEquals("RecordCount must be 1", 1, msg.getHeader("CpiKafkaPlusRecordCount"));
+        Assert.assertEquals("FirstOffset must equal record offset", 42L,
+                msg.getHeader("CpiKafkaPlusFirstOffset"));
+        Assert.assertEquals("LastOffset must equal record offset", 42L,
+                msg.getHeader("CpiKafkaPlusLastOffset"));
+        Assert.assertEquals("FallbackMode must be true", true,
+                msg.getHeader("CpiKafkaPlusFallbackMode"));
+        Assert.assertNull("CpiKafkaPlusOffset must NOT be set in batch fallback",
+                msg.getHeader("CpiKafkaPlusOffset"));
+    }
+
+    @Test
+    public void testSingleRecordModeKeepsOldFormat() throws Exception {
+        CpiKafkaPlusEndpoint endpoint = endpoint("BATCH_COMPLETE");
+        List<Exchange> captured = new ArrayList<>();
+        RecordProcessor processor = createProcessorWithCapture(endpoint, captured);
+
+        org.apache.kafka.clients.consumer.ConsumerRecords<byte[], byte[]> records =
+                new org.apache.kafka.clients.consumer.ConsumerRecords<>(
+                        java.util.Collections.singletonMap(
+                                new TopicPartition("test-topic", 0),
+                                Arrays.asList(new ConsumerRecord<>(
+                                        "test-topic", 0, 7L, null,
+                                        "hello".getBytes(StandardCharsets.UTF_8)))));
+
+        processor.processSingleRecords(null, records, false);
+
+        Assert.assertEquals(1, captured.size());
+        Message msg = captured.get(0).getIn();
+
+        Assert.assertEquals("hello", msg.getBody(String.class));
+        Assert.assertEquals("Offset must be set in single mode", 7L,
+                msg.getHeader("CpiKafkaPlusOffset"));
+        Assert.assertNull("FallbackMode must not be set in single mode",
+                msg.getHeader("CpiKafkaPlusFallbackMode"));
+        Assert.assertNull("RecordCount must not be set in single mode",
+                msg.getHeader("CpiKafkaPlusRecordCount"));
+    }
+
+    private RecordProcessor createProcessorWithCapture(CpiKafkaPlusEndpoint endpoint,
+                                                        List<Exchange> captured) {
+        AdapterTracingHelper tracingHelper = new AdapterTracingHelper(endpoint);
+        return new RecordProcessor(endpoint, tracingHelper, null, null, null,
+                new RecordProcessor.ConsumerCallback() {
+                    @Override
+                    public void processExchange(Exchange exchange) {
+                        captured.add(exchange);
+                    }
+
+                    @Override
+                    public void handleException(String message, Exchange exchange, Exception e) {
+                    }
+
+                    @Override
+                    public Exchange createExchange() {
+                        return endpoint.createExchange();
+                    }
+                }, new OffsetCommitTracker());
+    }
 }

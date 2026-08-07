@@ -224,7 +224,7 @@ final class RecordProcessor {
                              boolean commitAfterSuccess) throws Exception {
         int processedCount = 0;
         for (ConsumerRecord<byte[], byte[]> record : records) {
-            processedCount += processRecordWithRetry(kafkaConsumer, record, commitAfterSuccess);
+            processedCount += processRecordWithRetry(kafkaConsumer, record, commitAfterSuccess, false);
         }
         return processedCount;
     }
@@ -334,7 +334,8 @@ final class RecordProcessor {
 
     private int processRecordWithRetry(KafkaConsumer<byte[], byte[]> kafkaConsumer,
                                        ConsumerRecord<byte[], byte[]> record,
-                                       boolean commitAfterSuccess) {
+                                       boolean commitAfterSuccess,
+                                       boolean batchFallback) {
         String value;
         String key;
         try {
@@ -353,14 +354,36 @@ final class RecordProcessor {
         int actualRetries = 0;
         boolean permanentError = false;
 
+        String body = null;
+        if (batchFallback) {
+            List<ConsumerRecord<byte[], byte[]>> singletonBatch = java.util.Collections.singletonList(record);
+            try {
+                body = formatBatch(singletonBatch, null);
+            } catch (Exception formatErr) {
+                LOG.warn("[CPI-KAFKA-PLUS-DIAG] processRecordWithRetry: formatBatch failed in fallback mode, "
+                        + "falling back to raw value for offset={} partition={}: {}",
+                        record.offset(), record.partition(), formatErr.getMessage());
+                body = value;
+            }
+        }
+        final String resolvedBody = batchFallback ? body : value;
+
         for (int attempt = 0; attempt <= maxRetries; attempt++) {
             Exchange exchange = callback.createExchange();
 
-            tracingHelper.traceInbound(exchange, value);
+            tracingHelper.traceInbound(exchange, resolvedBody);
 
-            exchange.getIn().setBody(value);
-            setSingleRecordHeaders(exchange.getIn(), record, key,
-                    value != null ? value.getBytes(StandardCharsets.UTF_8).length : 0);
+            exchange.getIn().setBody(resolvedBody);
+            if (batchFallback) {
+                List<ConsumerRecord<byte[], byte[]>> singletonBatch = java.util.Collections.singletonList(record);
+                setBatchHeaders(exchange.getIn(), singletonBatch, 0, 0,
+                        resolvedBody != null ? resolvedBody.getBytes(StandardCharsets.UTF_8).length : 0);
+                exchange.getIn().setHeader("CpiKafkaPlusFallbackMode", true);
+                exchange.getIn().setHeader("CpiKafkaPlusKey", key);
+            } else {
+                setSingleRecordHeaders(exchange.getIn(), record, key,
+                        value != null ? value.getBytes(StandardCharsets.UTF_8).length : 0);
+            }
 
             try {
                 callback.processExchange(exchange);
@@ -494,12 +517,12 @@ final class RecordProcessor {
         return 0;
     }
 
-    private int processRecordsIndividually(KafkaConsumer<byte[], byte[]> kafkaConsumer,
-                                           List<ConsumerRecord<byte[], byte[]>> batch,
-                                           boolean commitAfterSuccess) {
+    int processRecordsIndividually(KafkaConsumer<byte[], byte[]> kafkaConsumer,
+                                   List<ConsumerRecord<byte[], byte[]>> batch,
+                                   boolean commitAfterSuccess) {
         int processed = 0;
         for (ConsumerRecord<byte[], byte[]> record : batch) {
-            processed += processRecordWithRetry(kafkaConsumer, record, commitAfterSuccess);
+            processed += processRecordWithRetry(kafkaConsumer, record, commitAfterSuccess, true);
         }
         return processed;
     }

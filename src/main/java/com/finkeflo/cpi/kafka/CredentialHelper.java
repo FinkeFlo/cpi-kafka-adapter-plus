@@ -21,7 +21,6 @@
 package com.finkeflo.cpi.kafka;
 
 import java.util.Arrays;
-import java.util.Map;
 
 import javax.net.ssl.KeyManager;
 import javax.net.ssl.SSLContext;
@@ -103,26 +102,6 @@ public final class CredentialHelper {
      */
     public static void setSslContextResolver(SslContextResolver resolver) {
         sslContextResolver = (resolver != null) ? resolver : DEFAULT_SSL_CONTEXT_RESOLVER;
-    }
-
-    /**
-     * Configure Schema Registry basic-auth credentials on the given config map.
-     * If the alias is null/empty or credential resolution fails, the config is left unchanged.
-     */
-    public static void configureSchemaRegistryAuth(Map<String, Object> config, String credentialAlias) {
-        if (credentialAlias == null || credentialAlias.isEmpty()) {
-            return;
-        }
-        try {
-            UserCredentials cred = getUserCredential(credentialAlias);
-            if (cred != null) {
-                config.put("basic.auth.credentials.source", "USER_INFO");
-                config.put("basic.auth.user.info", cred.username() + ":" + cred.password());
-            }
-        } catch (Exception e) {
-            LOG.warn("Could not resolve Schema Registry credentials from alias '{}': {}",
-                    credentialAlias, e.getMessage());
-        }
     }
 
     /**
