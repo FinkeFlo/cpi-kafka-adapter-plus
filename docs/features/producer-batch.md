@@ -7,7 +7,7 @@ and send each one as its own Kafka message. Internally it uses async send + flus
 for maximum throughput.
 
 **Core principle:** Mirrors the consumer batching. Whatever the consumer outputs as
-`JSON_ARRAY` or `XML_LIST` can be used directly as producer input.
+**JSON Array** (`JSON_ARRAY`) or **XML List** (`XML_LIST`) can be used directly as producer input.
 
 ## Configuration
 
@@ -17,7 +17,7 @@ for maximum throughput.
 
 ## Input formats
 
-### JSON_ARRAY
+### JSON Array (`JSON_ARRAY`)
 
 ```json
 {
@@ -31,7 +31,7 @@ for maximum throughput.
 }
 ```
 
-This is exactly the shape the consumer produces in `JSON_ARRAY` mode — the extra
+This is exactly the shape the consumer produces in **JSON Array** (`JSON_ARRAY`) mode — the extra
 `record` level exists because the CPI standard JSON→XML converter rejects root
 objects whose only member is a multi-element array, so a plain `[...]` root
 doesn't round-trip cleanly through CPI's own converters.
@@ -50,7 +50,7 @@ doesn't round-trip cleanly through CPI's own converters.
 - `{"kafkaRecords": [...]}` — wrapped array without the `record` level
 - `[...]` — a bare JSON array as root
 
-### XML_LIST
+### XML List (`XML_LIST`)
 
 ```xml
 <kafkaRecords>
@@ -149,7 +149,7 @@ When `producerBatchMode=NONE` (the default), each iFlow exchange sends a single 
 
 ## Limitations (v1)
 
-- JSON Schema validation is skipped in batch mode (logged as a warning)
+- **JSON Schema Validation** (`jsonSchemaValidation`) is skipped in batch mode (logged as a warning)
 - `kafka.PARTITION_KEY` and `kafka.OVERRIDE_TIMESTAMP` apply to all records in the batch
 - Exchange headers are copied to all Kafka records (unless overridden by per-record `headers` inside the payload)
 - Avro serialization is not supported in batch mode (v1)
@@ -160,7 +160,7 @@ When `producerBatchMode=NONE` (the default), each iFlow exchange sends a single 
 
 ### JSON batch via SAP CPI XML-to-JSON Converter
 
-When building a `JSON_ARRAY` batch payload using the standard SAP CPI **XML To JSON Converter**, you must ensure that repeating elements are correctly transformed into JSON arrays. Otherwise, duplicate keys will overwrite each other, causing silent data loss (e.g., losing all but the last `<header>`).
+When building a **JSON Array** (`JSON_ARRAY`) batch payload using the standard SAP CPI **XML To JSON Converter**, you must ensure that repeating elements are correctly transformed into JSON arrays. Otherwise, duplicate keys will overwrite each other, causing silent data loss (e.g., losing all but the last `<header>`).
 
 If you enable **Streaming** in the converter, configure it as follows:
 

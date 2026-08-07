@@ -24,8 +24,8 @@ When working with Avro-encoded Kafka topics, the adapter can automatically deser
 To consume Avro-encoded messages:
 
 1. Enable Schema Registry integration
-2. Keep `avroValueDeserialization` enabled
-3. Configure `schemaRegistryUrl` with your Schema Registry endpoint
+2. Keep **Avro Value Deserialization** (`avroValueDeserialization`) enabled
+3. Configure **Schema Registry URL** (`schemaRegistryUrl`) with your Schema Registry endpoint
 4. Set `schemaRegistryCredentialAlias` if authentication is required
 5. Choose `avroOutputFormat` (`JSON` or `XML`) for the deserialized output
 
@@ -45,7 +45,7 @@ To produce Avro-encoded messages:
 
 1. Enable Schema Registry integration
 2. Keep `avroValueSerialization` enabled
-3. Configure `schemaRegistryUrl`
+3. Configure **Schema Registry URL** (`schemaRegistryUrl`)
 4. Set `schemaRegistryCredentialAlias` if authentication is required
 5. Optionally enable `autoRegisterSchemas`
 
