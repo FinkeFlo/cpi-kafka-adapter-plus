@@ -4,7 +4,7 @@ The adapter can validate Kafka message payloads against an inline JSON Schema (d
 
 ## Overview
 
-When enabled, every message is checked against the configured schema before it is delivered. On the Consumer (Sender), this applies to incoming messages; on the Producer (Receiver), to outgoing messages. Messages that fail validation are either dropped or reported as errors in CPI monitoring, depending on `jsonSchemaReportError`.
+When **JSON Schema Validation** (`jsonSchemaValidation`) is enabled, every message is checked against the configured schema before it is delivered. On the Consumer (Sender), this applies to incoming messages; on the Producer (Receiver), to outgoing messages. Messages that fail validation are either dropped or reported as errors in CPI monitoring, depending on `jsonSchemaReportError`.
 
 ## Configuration
 

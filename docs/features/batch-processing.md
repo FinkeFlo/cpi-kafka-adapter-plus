@@ -2,10 +2,10 @@
 
 ## How the consumer works
 
-The Kafka adapter polls Kafka at regular intervals (`pollingIntervalSeconds`) and processes records as batches through the CPI iFlow. The diagram and calculations below apply to the default `consumptionMode=SCHEDULED`.
+The Kafka adapter polls Kafka at regular intervals defined by **Polling Interval (Seconds)** (`pollingIntervalSeconds`) and processes records as batches through the CPI iFlow. The diagram and calculations below apply when **Consumption Mode** (`consumptionMode`) is set to `SCHEDULED`.
 
 !!! note "STREAMING mode"
-    When `consumptionMode=STREAMING`, the polling interval and Drain Backlog are not used. The consumer polls continuously (greedy scheduling) with no timer delay between polls as long as records keep arriving. See [Consumption Mode](#consumption-mode) below.
+    When **Consumption Mode** (`consumptionMode`) is set to `STREAMING`, **Polling Interval (Seconds)** and **Drain Backlog** are not used. The consumer polls continuously (greedy scheduling) with no timer delay between polls as long as records keep arriving. See [Consumption Mode](#consumption-mode) below.
 
 ```mermaid
 flowchart TD
@@ -87,11 +87,11 @@ Throughput: 2000 / 1s = 2000 msg/s
 
 ## Consumption Mode
 
-The `consumptionMode` parameter switches between two scheduling strategies.
+The **Consumption Mode** (`consumptionMode`) parameter switches between two scheduling strategies.
 
 ### SCHEDULED (default)
 
-The consumer fires on a fixed timer (`pollingIntervalSeconds`). After each poll-and-process cycle the adapter waits the configured interval before polling again. This is the classic behaviour described in the rest of this page.
+The consumer fires on a fixed timer defined by **Polling Interval (Seconds)** (`pollingIntervalSeconds`). After each poll-and-process cycle the adapter waits the configured interval before polling again. This is the classic behaviour described in the rest of this page.
 
 ### STREAMING
 
@@ -100,24 +100,24 @@ In `STREAMING` mode the consumer uses Camel greedy scheduling:
 - As long as `poll()` returns records, the next poll fires **immediately** with no delay.
 - When the topic is idle, `poll()` blocks for up to the **Poll Timeout** (`batchTimeout`, default 5000 ms) and the scheduler then waits a fixed **1 second** before retrying — the idle cadence is therefore `batchTimeout` + 1 s. This costs no latency: `poll()` returns as soon as records arrive, so a record landing in an idle topic is picked up immediately.
 
-This mirrors the standard SAP Kafka adapter's continuous behaviour and eliminates the up-to-`pollingIntervalSeconds` latency of scheduled polling.
+This mirrors the standard SAP Kafka adapter's continuous behaviour and eliminates the latency of scheduled polling that can be as high as **Polling Interval (Seconds)** (`pollingIntervalSeconds`).
 
 **Configuration notes for STREAMING:**
-- `pollingIntervalSeconds` — ignored (greedy scheduling replaces the interval)
-- `drainEnabled` — ignored (continuous polling already drains the backlog naturally)
+- **Polling Interval (Seconds)** (`pollingIntervalSeconds`) — ignored (greedy scheduling replaces the interval)
+- **Drain Backlog** (`drainEnabled`) — ignored (continuous polling already drains the backlog naturally)
 - Both fields are greyed out in the CPI adapter UI when `STREAMING` is selected.
-- Freely combinable with batch mode (`batchMode`, `batchSize`, `batchOutputFormat`).
+- Freely combinable with batch mode (`batchMode`, **Max Records per IFlow Run (MPL)** / `batchSize`, **Batch Output Format** / `batchOutputFormat`).
 
 ---
 
 ## Drain Backlog
 
 !!! note "STREAMING mode"
-    Drain Backlog has no effect when `consumptionMode=STREAMING`. The greedy scheduler already fetches records as fast as they arrive; there is no polling interval to bridge.
+    **Drain Backlog** has no effect when **Consumption Mode** (`consumptionMode`) is set to `STREAMING`. The greedy scheduler already fetches records as fast as they arrive; there is no **Polling Interval (Seconds)** delay to bridge.
 
 ### The problem: backlog during traffic spikes
 
-Without drain mode, each poll cycle fetches at most `maxPollRecords` records. If more messages arrive than can be processed per cycle, a backlog grows:
+Without drain mode, each poll cycle fetches at most the configured **Max Poll Records** (`maxPollRecords`). If more messages arrive than can be processed per cycle, a backlog grows:
 
 | Metric | Value |
 |---|---|
@@ -128,7 +128,7 @@ Without drain mode, each poll cycle fetches at most `maxPollRecords` records. If
 
 ### The solution: enable Drain Backlog
 
-With `Drain Backlog = ON`, the consumer fetches all available records in a single timer fire, not just `maxPollRecords`:
+With `Drain Backlog = ON`, the consumer fetches all available records in a single timer fire, not just the configured **Max Poll Records** (`maxPollRecords`):
 
 ```mermaid
 flowchart TD
@@ -139,7 +139,7 @@ flowchart TD
     D --> A
 ```
 
-Example with `maxPollRecords = 500` and `minBacklogToDrain = 100`: iteration 1 returns 500 records (continue), iteration 2 returns 500 records (continue), iteration 3 returns 220 records (continue), iteration 4 returns 30 records (`30 < 100` → stop).
+Example with **Max Poll Records** = 500 and **Min Backlog to Drain** = 100: iteration 1 returns 500 records (continue), iteration 2 returns 500 records (continue), iteration 3 returns 220 records (continue), iteration 4 returns 30 records (`30 < 100` → stop).
 
 Drain continues until the topic is almost empty. Stop conditions:
 
@@ -224,13 +224,13 @@ Without a threshold (default 0), drain would continue in iteration 4 and also fe
     | **Lag** | **~0** |
     | Check | 30 < 100 → **STOP** |
 
-    Drain stops. The topic is almost empty; any further trickle of new messages is picked up on the next regular poll cycle (`pollingIntervalSeconds` later).
+    Drain stops. The topic is almost empty; any further trickle of new messages is picked up on the next regular poll cycle after **Polling Interval (Seconds)** (`pollingIntervalSeconds`).
 
 ### Reduced max.poll.interval.ms risk
 
-Kafka removes a consumer from the group if it does not call `poll()` within `max.poll.interval.ms`. The adapter significantly reduces this risk by polling regularly (including keep-alive polls between emit cycles) and by deriving `max.poll.interval.ms` from `pollingIntervalSeconds` with an additional processing buffer (capped at 6 h 10 min).
+Kafka removes a consumer from the group if it does not call `poll()` within `max.poll.interval.ms`. The adapter significantly reduces this risk by polling regularly (including keep-alive polls between emit cycles) and by deriving `max.poll.interval.ms` from **Polling Interval (Seconds)** (`pollingIntervalSeconds`) with an additional processing buffer (capped at 6 h 10 min).
 
-### Limitation: Drain + AUTO commit
+### Limitation: Drain + Auto Commit (Periodic)
 
 Drain Backlog is not compatible with `Offset Commit Strategy = Auto Commit`. The adapter rejects this combination during startup because auto commit could commit offsets before records are processed, which can cause data loss.
 
@@ -250,7 +250,7 @@ Drain Backlog is not compatible with `Offset Commit Strategy = Auto Commit`. The
 | Metric | Value |
 |---|---|
 | Arrive per 30s | 5 msg/s x 30s = 150 records |
-| Fetched per poll | 150 (< 500 maxPollRecords) |
+| Fetched per poll | 150 (< 500 Max Poll Records) |
 | iFlow executions | 150 / 100 = 2 (batches with 100 and 50 records) |
 | MPL entries/minute | ~4 |
 | Backlog | 0 (consumption rate > production rate) |
@@ -339,27 +339,27 @@ numbers.
 
 ### Rule of thumb
 
-**Drain OFF:** when the production rate is low enough that `maxPollRecords` per cycle is sufficient:
-`production rate x pollingInterval < maxPollRecords`
+**Drain OFF:** when the production rate is low enough that **Max Poll Records** (`maxPollRecords`) per cycle is sufficient:
+`production rate x Polling Interval (Seconds) < Max Poll Records`
 
-**Drain ON:** when traffic spikes are possible or the polling interval is long (> 60s). Drain is harmless at low volume because it stops after the first iteration when records < maxPollRecords.
+**Drain ON:** when traffic spikes are possible or the polling interval is long (> 60s). Drain is harmless at low volume because it stops after the first iteration when records are below **Max Poll Records** (`maxPollRecords`).
 
-**Min Backlog to Drain:** set to > 0 when a constant message stream exists and drain should not run endlessly. A typical value is equal to or smaller than maxPollRecords, for example 100 with maxPollRecords=500.
+**Min Backlog to Drain:** set to > 0 when a constant message stream exists and drain should not run endlessly. A typical value is equal to or smaller than **Max Poll Records** (`maxPollRecords`), for example 100 with **Max Poll Records** = 500.
 
 ### Throughput formula
 
 | Mode | Throughput |
 |---|---|
-| Without drain | `maxPollRecords / pollingIntervalSeconds` msg/s |
+| Without drain | `Max Poll Records / Polling Interval (Seconds)` msg/s |
 | With drain | Unbounded (limited by iFlow processing time + network) |
 
 ---
 
 ## Batch Output Formats
 
-### JSON_ARRAY (default)
+### JSON Array (`JSON_ARRAY`) (default)
 
-`JSON_ARRAY` produces a nested JSON object, not a raw array. The extra `record` level keeps the root compatible with CPI JSON-to-XML conversion.
+**JSON Array** (`JSON_ARRAY`) produces a nested JSON object, not a raw array. The extra `record` level keeps the root compatible with CPI JSON-to-XML conversion.
 
 ```json
 {
@@ -386,9 +386,9 @@ numbers.
 }
 ```
 
-### XML_LIST
+### XML List (`XML_LIST`)
 
-`XML_LIST` wraps records in `<kafkaRecords count="N"><record>...</record>...</kafkaRecords>`. Each record contains `key`, `value`, `topic`, `partition`, `offset`, and `timestamp`.
+**XML List** (`XML_LIST`) wraps records in `<kafkaRecords count="N"><record>...</record>...</kafkaRecords>`. Each record contains `key`, `value`, `topic`, `partition`, `offset`, and `timestamp`.
 
 Values that look like XML are automatically detected and embedded as parsed child elements, marked with `format="xml"`. Non-XML, null, or empty values use text/CDATA content with `format="text"`. This detection is always on and is not configurable.
 
@@ -452,6 +452,6 @@ The parameter only affects idle detection for an empty topic.
 
 ## Offset Commit
 
-With `commitStrategy = BATCH_COMPLETE` (recommended), offsets are committed only after each batch has been processed successfully. If an error occurs, records from the failed batch are delivered again on the next poll (at-least-once semantics).
+With **Offset Commit Strategy** (`commitStrategy`) set to **After Successful Processing (At-Least-Once)** (`BATCH_COMPLETE`) (recommended), offsets are committed only after each batch has been processed successfully. If an error occurs, records from the failed batch are delivered again on the next poll (at-least-once semantics).
 
-With `commitStrategy = AUTO`, Kafka commits periodically in the background, independently of whether processing succeeded. This is not recommended for production-critical scenarios.
+With **Offset Commit Strategy** (`commitStrategy`) set to **Auto Commit (Periodic)** (`AUTO`), Kafka commits periodically in the background, independently of whether processing succeeded. This is not recommended for production-critical scenarios.
