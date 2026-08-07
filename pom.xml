@@ -18,6 +18,7 @@
         <adk.version>2.3.0</adk.version>
         <kafka.version>4.3.1</kafka.version>
         <avro.version>1.12.1</avro.version>
+        <confluent.version>7.9.8</confluent.version>
         <jackson.version>2.22.1</jackson.version>
         <!-- CI toggle: when true, Surefire (unit tests) is skipped so the integration-test
              CI job can run *IT tests only, without re-running the unit tests. Default false. -->
@@ -35,9 +36,6 @@
     </properties>
 
     <repositories>
-        <!-- Required for Confluent test-scope dependencies (kafka-schema-registry-client,
-             kafka-avro-serializer). These are used by IT test helpers only and are NOT
-             embedded in the final ESA. -->
         <repository>
             <id>confluent</id>
             <url>https://packages.confluent.io/maven/</url>
@@ -144,6 +142,24 @@
             <version>${avro.version}</version>
         </dependency>
 
+        <!-- Confluent Schema Registry (kafka-avro-serializer includes KafkaAvroDeserializer) -->
+        <dependency>
+            <groupId>io.confluent</groupId>
+            <artifactId>kafka-avro-serializer</artifactId>
+            <version>${confluent.version}</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.apache.kafka</groupId>
+                    <artifactId>kafka-clients</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>io.confluent</groupId>
+            <artifactId>kafka-schema-registry-client</artifactId>
+            <version>${confluent.version}</version>
+        </dependency>
+
         <!-- Jackson for JSON serialization -->
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
@@ -178,26 +194,6 @@
             <artifactId>junit</artifactId>
             <version>4.13.2</version>
             <scope>test</scope>
-        </dependency>
-        <!-- Confluent client: test scope only — used by IT helpers (SchemaEvolutionIT) to
-             set up test data / verify Schema Registry state. NOT embedded in the ESA. -->
-        <dependency>
-            <groupId>io.confluent</groupId>
-            <artifactId>kafka-schema-registry-client</artifactId>
-            <version>7.9.8</version>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>io.confluent</groupId>
-            <artifactId>kafka-avro-serializer</artifactId>
-            <version>7.9.8</version>
-            <scope>test</scope>
-            <exclusions>
-                <exclusion>
-                    <groupId>org.apache.kafka</groupId>
-                    <artifactId>kafka-clients</artifactId>
-                </exclusion>
-            </exclusions>
         </dependency>
         <dependency>
             <groupId>com.squareup.okhttp3</groupId>
@@ -374,8 +370,16 @@
                             com.ethlo.time.*;resolution:=optional,
                             org.jruby.*;resolution:=optional,
                             com.github.luben.*;resolution:=optional,
+                            com.google.common.*;resolution:=optional,
+                            com.google.errorprone.*;resolution:=optional,
                             com.ibm.security.*;resolution:=optional,
+                            io.confluent.kafka.serializers.subject;resolution:=optional,
                             io.grpc.*;resolution:=optional,
+                            io.swagger.*;resolution:=optional,
+                            kafka.*;resolution:=optional,
+                            net.jpountz.*;resolution:=optional,
+                            org.apache.commons.compress.*;resolution:=optional,
+                            org.jose4j.*;resolution:=optional,
                             sun.misc;resolution:=optional,
                             sun.security.*;resolution:=optional,
                             !com.sun.jdmk.*,
@@ -385,20 +389,30 @@
                         </Import-Package>
                         <DynamicImport-Package>*</DynamicImport-Package>
                         <Export-Package>com.finkeflo.cpi.kafka</Export-Package>
-                        <!-- kafka-clients is unpacked into target/classes by maven-dependency-plugin;
-                             listed here as Private-Package so bnd includes it without re-exporting. -->
-                        <Private-Package>org.apache.kafka.*</Private-Package>
                         <Embed-Dependency>
+                            kafka-clients;scope=compile,
                             avro;scope=compile,
+                            kafka-avro-serializer;scope=compile,
+                            kafka-schema-serializer;scope=compile,
+                            kafka-schema-registry-client;scope=compile,
+                            common-utils;scope=compile,
                             jackson-databind;scope=compile,
                             jackson-core;scope=compile,
                             jackson-annotations;scope=compile,
+                            jackson-dataformat-csv;scope=compile,
                             jackson-dataformat-yaml;scope=compile,
                             jackson-datatype-jdk8;scope=compile,
                             json-schema-validator;scope=compile,
                             itu;scope=compile,
+                            guava;scope=compile,
+                            failureaccess;scope=compile,
                             commons-compress;scope=compile,
                             commons-codec;scope=compile,
+                            snakeyaml;scope=compile,
+                            logredactor;scope=compile,
+                            logredactor-metrics;scope=compile,
+                            re2j;scope=compile,
+                            minimal-json;scope=compile,
                             lz4-java;scope=runtime,
                             zstd-jni;scope=runtime,
                             snappy-java;scope=runtime
@@ -512,28 +526,6 @@
                 <artifactId>maven-dependency-plugin</artifactId>
                 <version>3.11.0</version>
                 <executions>
-                    <!-- Unpack kafka-clients classes directly into target/classes so bnd picks them
-                         up via Private-Package instead of embedding as a nested JAR. This improves
-                         ZIP compression (~2-3 MB savings) while preserving all functionality. -->
-                    <execution>
-                        <id>unpack-kafka-clients</id>
-                        <phase>process-resources</phase>
-                        <goals>
-                            <goal>unpack</goal>
-                        </goals>
-                        <configuration>
-                            <artifactItems>
-                                <artifactItem>
-                                    <groupId>org.apache.kafka</groupId>
-                                    <artifactId>kafka-clients</artifactId>
-                                    <version>${kafka.version}</version>
-                                    <outputDirectory>${project.build.outputDirectory}</outputDirectory>
-                                </artifactItem>
-                            </artifactItems>
-                            <!-- Exclude signatures and module-info that cause OSGi issues -->
-                            <excludes>META-INF/*.SF,META-INF/*.DSA,META-INF/*.RSA,META-INF/versions/*/module-info.class</excludes>
-                        </configuration>
-                    </execution>
                     <execution>
                         <id>copy-dependencies</id>
                         <phase>package</phase>
