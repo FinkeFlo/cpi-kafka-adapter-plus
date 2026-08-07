@@ -63,8 +63,10 @@ public class OsgiBundleResolveIT {
                     "org/apache/avro/Schema.class", "org.apache.avro");
             assertBundleContainsResource(bundleJar, attributes,
                     "com/fasterxml/jackson/databind/ObjectMapper.class", "com.fasterxml.jackson.databind");
+            // ADR0002: Confluent SchemaRegistryClient replaced by JDK-only SchemaRegistryHttpClient.
+            // The Confluent jar is no longer required at runtime; verify our own client is present instead.
             assertBundleContainsResource(bundleJar, attributes,
-                    "io/confluent/kafka/schemaregistry/client/SchemaRegistryClient.class", "io.confluent");
+                    "com/finkeflo/cpi/kafka/SchemaRegistryHttpClient.class", "com.finkeflo.cpi.kafka");
 
             assertNoMandatoryImport(attributes, "org.apache.kafka");
             assertNoMandatoryImport(attributes, "org.apache.avro");
