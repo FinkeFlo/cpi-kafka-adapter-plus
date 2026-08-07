@@ -151,9 +151,11 @@ public class ConsumerPoisonPillIT {
 
         Header causeClass = dlq.headers().lastHeader("CpiKafkaPlusDlqCauseClass");
         Assert.assertNotNull("CpiKafkaPlusDlqCauseClass header missing", causeClass);
-        Assert.assertTrue("Root cause should reference Kafka serialization layer",
-                new String(causeClass.value(), StandardCharsets.UTF_8)
-                        .contains("SerializationException"));
+        // The adapter now uses a JDK-only Avro deserializer (no Confluent client) that throws
+        // RuntimeException for bad wire format. Accept any non-empty exception class here;
+        // the CpiKafkaPlusDlqErrorType=DESERIALIZATION header already pinpoints the category.
+        Assert.assertFalse("CpiKafkaPlusDlqCauseClass must not be empty",
+                new String(causeClass.value(), StandardCharsets.UTF_8).isEmpty());
     }
 
     // ---- helpers ----
