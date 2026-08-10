@@ -20,6 +20,18 @@ jobs:
       - name: Unit tests (Surefire)
         run: mvn -B test
 
+      # license-maven-plugin regenerates THIRD-PARTY.txt during generate-resources, so the build
+      # above has already rewritten it. Dependency bumps change the resolved versions but do not
+      # regenerate the file, which is how it drifted twice (zstd-jni, then the Confluent client).
+      - name: THIRD-PARTY.txt is up to date
+        run: |
+          if ! git diff --exit-code --quiet THIRD-PARTY.txt; then
+            echo "::error::THIRD-PARTY.txt is out of date. Run 'mvn test' and commit the regenerated file."
+            git --no-pager diff THIRD-PARTY.txt
+            exit 1
+          fi
+          echo "THIRD-PARTY.txt matches the resolved dependencies."
+
       - name: Verify JaCoCo report output
         run: |
           test -f target/jacoco.exec

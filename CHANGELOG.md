@@ -11,6 +11,8 @@ iFlow compatibility.
 ### Changed
 - CI now fails a pull request that leaves `CHANGELOG.md` untouched, enforcing a rule that was documented but unchecked. Add the `no-changelog` label to a pull request that genuinely needs no entry. `CONTRIBUTING.md` states the rule per pull request instead of per commit, since merges are squashed into a single commit on `main`.
 - Regenerated `THIRD-PARTY.txt`: the Confluent test dependencies are pinned to 7.9.9 in `pom.xml`, but the generated license list still named 7.9.8. No dependency change.
+- CI now fails when `THIRD-PARTY.txt` no longer matches the resolved dependencies. Dependency bumps change the versions without regenerating the file, which is how it drifted twice.
+- Corrected the documented bytecode target from Java 8 to Java 11 in `CONTRIBUTING.md`, `README.md` and the PR template. `maven.compiler.source`/`target` have been `11` since the initial release, so the "Java 8 bytecode" claim was never accurate — class-file version 55 cannot load on a Java 8 JVM at all. The API constraint is retained and restated: `source`/`target` link against the JDK 17 class library, so a Java 12+ API compiles but fails at runtime.
 
 ## [1.2.1] - 2026-08-10
 ### Added

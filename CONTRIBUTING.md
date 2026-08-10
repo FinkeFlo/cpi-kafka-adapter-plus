@@ -8,7 +8,7 @@ If you are changing the docs or fixing a bug, feel free to fork and open a PR. I
 
 ## Prerequisites
 
-- **JDK 17** (the project builds with JDK 17 but targets **Java 8 bytecode** — see the constraint below)
+- **JDK 17** (the project builds with JDK 17 but targets **Java 11 bytecode** — see the constraint below)
 - **Maven 3.8+**
 - **Docker** (only needed for integration tests / `*IT.java`)
 
@@ -78,8 +78,14 @@ When writing documentation, creating test cases, or providing placeholder data, 
 
 1. **English Only**
    To ensure the codebase is accessible to international developers, **all code, variables, inline comments, JavaDocs, and commit messages must be strictly in English**.
-2. **Java 8 bytecode target.** 
-   Even though we compile with JDK 17, the CPI runtime requires Java 8 compatibility. **Do not use Java 9+ APIs** (`List.of`, `Map.of`, `var`, records, `String.isBlank`, etc.). The compiler will *not* warn you.
+2. **Java 11 bytecode target.**
+   `maven.compiler.source`/`target` are `11` (`pom.xml`), so the bytecode carries class-file
+   version 55 and the CPI runtime must be Java 11 or newer — which it is, since the adapter
+   loads there. Do not raise the target without checking the runtime first.
+   Beyond that, **keep to Java 11 APIs and language level**: `source`/`target` are used rather
+   than `--release`, so the compiler links against the **JDK 17** class library and will happily
+   accept a Java 17-only API (`String.formatted`, records, sealed types, …) that then fails at
+   runtime with `NoSuchMethodError`. The compiler will *not* warn you.
 3. 4-space indentation, UTF-8, LF line endings (see `.editorconfig`).
 4. No wildcard imports — explicit imports, Java stdlib first, then third-party.
 5. Utility/helper classes are `final` with a `private` constructor.

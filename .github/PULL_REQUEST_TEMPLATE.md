@@ -12,7 +12,7 @@
 
 - [ ] `mvn verify` passes locally
 - [ ] Tests added/updated (JUnit 4) and pass without a running broker
-- [ ] No Java 9+ APIs (Java 8 bytecode target)
+- [ ] No Java 12+ APIs (Java 11 bytecode target; the compiler links against JDK 17 and will not warn)
 - [ ] If an endpoint option was added: the matching `metadata-sender-*.xml` /
       `metadata-receiver-*.xml` file (both the `AttributeReference` and
       `AttributeMetadata` entries), getter/setter, and a
