@@ -313,9 +313,13 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
             if (kafkaProducer == null) {
                 String msg = "Kafka producer not initialized — init failed, will retry on next exchange";
                 if (lastInitException != null) {
-                    msg += ". Cause: " + KafkaErrorHelper.describeChain(lastInitException);
+                    msg += ". Root cause: " + KafkaErrorHelper.describeChain(lastInitException);
                 }
-                throw new IllegalStateException(msg, lastInitException);
+                // Do not pass lastInitException as the cause: CPI's HTTP adapter surfaces
+                // getCause().getMessage() rather than this exception's own message, which would
+                // swallow the descriptive chain we just built. The full stack trace is already
+                // logged by logInitFailure(); we only need a readable message here.
+                throw new IllegalStateException(msg);
             }
         }
 
