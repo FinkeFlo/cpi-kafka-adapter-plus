@@ -251,12 +251,51 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
             kafkaProducer = BundleBackedClassLoader.withBundleClassLoader(getClass(),
                     () -> new KafkaProducer<>(props,
                             new ByteArraySerializer(), new ByteArraySerializer()));
+            installSslMismatchDetector();
             return true;
         } catch (Throwable e) {
             logInitFailure("KafkaProducer", e);
             closeProducerQuietly();
             lastInitException = e;
             return false;
+        }
+    }
+
+    /**
+     * If a non-TLS security protocol is configured, find Kafka's producer network
+     * thread and attach an UncaughtExceptionHandler. When the broker speaks TLS but
+     * the client uses plaintext, Kafka's NetworkClient misreads the SSL handshake as
+     * a ~352 MB Kafka frame and throws OutOfMemoryError in that thread.
+     * We catch the OOM here, convert it to a readable IllegalStateException, and mark
+     * the producer as failed so the next exchange gets a clear error instead of a
+     * CPI node crash.
+     */
+    private void installSslMismatchDetector() {
+        String protocol = endpoint.getSecurityProtocol();
+        if (protocol != null && protocol.toUpperCase().contains("SSL")) {
+            return; // TLS is configured — no mismatch possible
+        }
+        ThreadGroup group = Thread.currentThread().getThreadGroup();
+        Thread[] threads = new Thread[(int) (group.activeCount() * 2)];
+        int count = group.enumerate(threads);
+        for (int i = 0; i < count; i++) {
+            if (threads[i] != null && threads[i].getName().contains("kafka-producer-network-thread")) {
+                threads[i].setUncaughtExceptionHandler((t, e) -> {
+                    String hint = (e instanceof OutOfMemoryError)
+                            ? "Possible SSL/plaintext mismatch: the broker may require TLS. "
+                              + "Use SASL_SSL (or SSL) instead of " + protocol + "."
+                            : "";
+                    String msg = "Kafka producer network thread '" + t.getName()
+                            + "' crashed — " + hint + e;
+                    LOG.error("[CPI-KAFKA-PLUS-DIAG] {}", msg, e);
+                    lastInitException = new IllegalStateException(msg, e);
+                    initialized = false;
+                    kafkaProducer = null;
+                });
+                LOG.debug("[CPI-KAFKA-PLUS-DIAG] SSL-mismatch detector installed on thread '{}'",
+                        threads[i].getName());
+                break;
+            }
         }
     }
 

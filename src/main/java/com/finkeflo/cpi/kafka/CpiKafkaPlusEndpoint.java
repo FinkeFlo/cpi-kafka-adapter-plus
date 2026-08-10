@@ -347,23 +347,6 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
                     "Security protocol " + securityProtocol
                     + " requires SASL authentication but no credentialAlias is configured.");
         }
-        if ("SASL_PLAINTEXT".equalsIgnoreCase(securityProtocol) && bootstrapServers != null) {
-            for (String server : bootstrapServers.split(",")) {
-                String trimmed = server.trim();
-                int lastColon = trimmed.lastIndexOf(':');
-                if (lastColon >= 0) {
-                    String port = trimmed.substring(lastColon + 1).trim();
-                    // Port 443 is TLS-only — SASL_PLAINTEXT would cause an SSL/plaintext
-                    // protocol mismatch that makes Kafka's network thread allocate a ~352 MB
-                    // frame (the SSL handshake bytes misread as a frame-length), crashing the JVM.
-                    if ("443".equals(port)) {
-                        throw new IllegalArgumentException(
-                                "SASL_PLAINTEXT cannot be used with port 443 (" + trimmed + "). "
-                                + "Port 443 is TLS-only — use SASL_SSL instead.");
-                    }
-                }
-            }
-        }
     }
 
     @Override
