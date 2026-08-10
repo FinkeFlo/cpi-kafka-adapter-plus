@@ -7,7 +7,7 @@ and the project follows [Semantic Versioning](https://semver.org/). See
 [VERSIONING.md](https://github.com/finkeflo/cpi-kafka-adapter-plus/blob/main/VERSIONING.md) for how the adapter version maps to SAP CPI
 iFlow compatibility.
 
-## [Unreleased]
+## [1.2.1] - 2026-08-10
 ### Added
 - Added a maintainer-only, manually triggered `Deploy to CPI (E2E tenant)` GitHub Actions workflow (`workflow_dispatch`, environment-protected, restricted to the maintainer) to build and deploy a chosen branch/tag directly to the CPI E2E test tenant via the Integration Content OData API (`IntegrationAdapterDesigntimeArtifacts` + `DeployIntegrationAdapterDesigntimeArtifact`), enabling pre-release E2E testing without needing a full release cycle first. No effect on the adapter runtime; CI-only tooling.
 - Chained the existing `e2e-consumer-tests.yml` / `e2e-producer-tests.yml` suites (now also callable as reusable workflows via `workflow_call`) as an automated post-deploy round-trip smoke test in `Deploy to CPI (E2E tenant)`, closing #15.
@@ -23,6 +23,8 @@ iFlow compatibility.
 - **SSL Keystore Alias** help text now leads with the common case: empty is correct for brokers with a publicly trusted certificate (e.g. Confluent Cloud) and TLS stays fully active — the alias is only for a private CA, a self-signed certificate, or mTLS.
 - Both ship as micro bumps edited in place per SAP's versioning rules (`metadata-receiver-1.1.1.xml` → `1.1.2`, `metadata-sender-1.2.0.xml` → `1.2.1`), so existing channels in **both** directions pick them up automatically with all settings preserved.
 - Docs: the security protocols now have a "when to use" column, plus a troubleshooting section for the `Topic ... not present in metadata` symptom in [Authentication](docs/security/authentication.md).
+- `VERSIONING.md` now records the ADK rule that a micro bump must edit its variant file in place — a second file for the same direction is rejected with *"All Receivers should have different significant version (X.X. Micro version ignored)"*.
+- `.gitignore` now covers local AI coding agent state; shared instruction files stay tracked.
 
 ## [1.2.0] - 2026-07-30
 ### Added

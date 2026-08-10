@@ -16,4 +16,23 @@
 # Temp files
 .tmp
 .tmp/
-.claude/worktrees/
+
+# AI coding agents — local session state, caches and machine-specific settings.
+# Shared instruction files (AGENTS.md, CLAUDE.md, .github/copilot-instructions.md) are
+# deliberately NOT ignored: those belong to the repository. Only their *.local.* variants
+# and the agents' own working directories do. If a shared .claude/ config is added later
+# (e.g. .claude/skills/), un-ignore it explicitly with a !-rule.
+.claude/
+.cursor/
+.windsurf/
+.continue/
+.gemini/
+.roo/
+.cline/
+.opencode/
+.serena/
+.specstory/
+.aider*
+.codeium/
+*.local.md
+**/settings.local.json
