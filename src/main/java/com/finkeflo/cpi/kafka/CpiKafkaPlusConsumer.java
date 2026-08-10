@@ -803,6 +803,13 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
             if (isNonRetryablePollFailure(t)) {
                 handleNonRetryablePollFailure(t);
             } else {
+                // A client without TLS against a TLS-only listener never gets far enough to see a
+                // handshake error — the broker just drops it, so the poll only ever times out. Name
+                // the most likely cause instead of leaving the operator with a bare timeout.
+                String hint = KafkaErrorHelper.tlsMismatchHint(endpoint.getSecurityProtocol());
+                if (hint != null) {
+                    LOG.warn("[CPI-KAFKA-PLUS-DIAG] poll: {}", hint);
+                }
                 reportConnectionError(t);
                 maybeReconnectAfterPollFailure();
             }
@@ -967,46 +974,11 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
     }
 
     /**
-     * Returns a compact one-line string representation of the top N stack frames of a throwable
-     * plus its cause chain. Used because the CPI trace-log appender drops the exception object's
-     * stack trace; we therefore encode it into the log message itself.
+     * Delegates to the shared implementation. Kept as a local shorthand because it is called from
+     * every diagnostic log statement in this class.
      */
     static String describeTopStack(Throwable t, int maxFrames) {
-        if (t == null) {
-            return "null";
-        }
-        StringBuilder sb = new StringBuilder();
-        Throwable cur = t;
-        int depth = 0;
-        while (cur != null && depth < 4) {
-            if (depth > 0) {
-                sb.append(" CAUSED_BY ");
-            }
-            sb.append(cur.getClass().getSimpleName());
-            String msg = cur.getMessage();
-            if (msg != null) {
-                String trimmed = msg.length() > 200 ? msg.substring(0, 200) + "…" : msg;
-                sb.append("('").append(trimmed.replace('\n', ' ')).append("')");
-            }
-            StackTraceElement[] frames = cur.getStackTrace();
-            sb.append("[");
-            int shown = Math.min(maxFrames, frames.length);
-            for (int i = 0; i < shown; i++) {
-                if (i > 0) {
-                    sb.append(" <- ");
-                }
-                StackTraceElement f = frames[i];
-                sb.append(f.getClassName()).append('.').append(f.getMethodName())
-                        .append(':').append(f.getLineNumber());
-            }
-            if (frames.length > shown) {
-                sb.append(" <- …(" ).append(frames.length - shown).append(" more)");
-            }
-            sb.append("]");
-            cur = cur.getCause();
-            depth++;
-        }
-        return sb.toString();
+        return KafkaErrorHelper.describeTopStack(t, maxFrames);
     }
 
     /**

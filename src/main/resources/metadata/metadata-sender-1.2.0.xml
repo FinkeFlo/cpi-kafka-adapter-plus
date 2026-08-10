@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<ComponentMetadata ComponentId="ctype::Adapter/cname::kafkaAdapterPlus/vendor::FlorianKube/version::1.2.0"
+<ComponentMetadata ComponentId="ctype::Adapter/cname::kafkaAdapterPlus/vendor::FlorianKube/version::1.2.1"
                    ComponentName="kafkaAdapterPlus"
                    UIElementType="Adapter"
                    IsExtension="false"
@@ -14,7 +14,7 @@
     <!-- SENDER VARIANT (Kafka Consumer -> CPI)                       -->
     <!-- ============================================================ -->
     <Variant VariantName="Kafka_Adapter_Plus_Sender"
-             VariantId="ctype::AdapterVariant/cname::kafkaAdapterPlus/vendor::FlorianKube/tp::cpi-kafka-plus/mp::cpi-kafka-plus/direction::Sender/version::1.2.0"
+             VariantId="ctype::AdapterVariant/cname::kafkaAdapterPlus/vendor::FlorianKube/tp::cpi-kafka-plus/mp::cpi-kafka-plus/direction::Sender/version::1.2.1"
              MetadataVersion="2.0"
              gen:RuntimeComponentBaseUri="cpi-kafka-plus"
              AttachmentBehavior="Preserve"
@@ -90,7 +90,7 @@
                 </AttributeReference>
                 <AttributeReference>
                     <ReferenceName>sslKeystoreAlias</ReferenceName>
-                    <description>Optional CPI Keystore alias for custom broker CAs and/or client certificates (mTLS). Leave empty for publicly trusted brokers that work with the JVM default truststore.</description>
+                    <description>Leave empty for brokers with a publicly trusted certificate (e.g. Confluent Cloud) — the JVM default truststore is used and TLS is still active. Set a CPI Keystore alias only for a private/company CA, a self-signed broker certificate, or client-certificate authentication (mTLS).</description>
                     <OrCondition>
                         <EditCondition>
                             <AttributeName>securityProtocol</AttributeName>
@@ -465,10 +465,10 @@
             <Label language="EN">Security Protocol</Label>
         </GuiLabels>
         <FixedValues>
-            <FixedValue><Value>SASL_SSL</Value><GuiLabels guid="b1000002-0000-0000-0000-000000000011"><Label language="EN">SASL_SSL</Label></GuiLabels></FixedValue>
-            <FixedValue><Value>SASL_PLAINTEXT</Value><GuiLabels guid="b1000002-0000-0000-0000-000000000012"><Label language="EN">SASL_PLAINTEXT</Label></GuiLabels></FixedValue>
-            <FixedValue><Value>SSL</Value><GuiLabels guid="b1000002-0000-0000-0000-000000000013"><Label language="EN">SSL</Label></GuiLabels></FixedValue>
-            <FixedValue><Value>PLAINTEXT</Value><GuiLabels guid="b1000002-0000-0000-0000-000000000014"><Label language="EN">PLAINTEXT</Label></GuiLabels></FixedValue>
+            <FixedValue><Value>SASL_SSL</Value><GuiLabels guid="b1000002-0000-0000-0000-000000000011"><Label language="EN">SASL_SSL (SASL over TLS)</Label></GuiLabels></FixedValue>
+            <FixedValue><Value>SASL_PLAINTEXT</Value><GuiLabels guid="b1000002-0000-0000-0000-000000000012"><Label language="EN">SASL_PLAINTEXT (no TLS)</Label></GuiLabels></FixedValue>
+            <FixedValue><Value>SSL</Value><GuiLabels guid="b1000002-0000-0000-0000-000000000013"><Label language="EN">SSL (TLS, certificate authentication)</Label></GuiLabels></FixedValue>
+            <FixedValue><Value>PLAINTEXT</Value><GuiLabels guid="b1000002-0000-0000-0000-000000000014"><Label language="EN">PLAINTEXT (no TLS, no authentication)</Label></GuiLabels></FixedValue>
         </FixedValues>
     </AttributeMetadata>
     <AttributeMetadata>

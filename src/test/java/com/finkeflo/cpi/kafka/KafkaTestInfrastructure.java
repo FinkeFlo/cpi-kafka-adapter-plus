@@ -160,6 +160,9 @@ public final class KafkaTestInfrastructure {
                 + schemaRegistryContainer.getMappedPort(8081);
     }
 
+    /** Upper bound for waiting until a freshly created topic is served in broker metadata. */
+    private static final long TOPIC_VISIBLE_TIMEOUT_MS = 10_000L;
+
     /**
      * Create a topic with the given number of partitions.
      */
@@ -171,6 +174,7 @@ public final class KafkaTestInfrastructure {
         try (AdminClient admin = AdminClient.create(props)) {
             NewTopic newTopic = new NewTopic(topic, partitions, (short) 1);
             admin.createTopics(Collections.singletonList(newTopic)).all().get();
+            awaitTopicVisible(admin, topic);
         }
     }
 
@@ -185,7 +189,36 @@ public final class KafkaTestInfrastructure {
         try (AdminClient admin = AdminClient.create(props)) {
             NewTopic newTopic = new NewTopic(topic, partitions, (short) 1);
             admin.createTopics(Collections.singletonList(newTopic)).all().get();
+            awaitTopicVisible(admin, topic);
         }
+    }
+
+    /**
+     * Blocks until the broker actually serves {@code topic} in its metadata.
+     *
+     * <p>{@code createTopics().all().get()} only guarantees that the controller accepted the
+     * request — a describe issued immediately afterwards can still report the topic as unknown. Any
+     * test that creates a topic and produces to it right away would otherwise race against metadata
+     * propagation, which is exactly what made {@code CompressionMatrixIT} fail on a loaded CI runner.
+     *
+     * <p>Polls rather than sleeping a fixed amount, so it costs a few milliseconds in the normal
+     * case instead of a guessed delay on every topic.
+     */
+    private static void awaitTopicVisible(AdminClient admin, String topic) throws InterruptedException {
+        long deadline = System.currentTimeMillis() + TOPIC_VISIBLE_TIMEOUT_MS;
+        ExecutionException lastFailure = null;
+        while (System.currentTimeMillis() < deadline) {
+            try {
+                admin.describeTopics(Collections.singletonList(topic))
+                        .topicNameValues().get(topic).get();
+                return;
+            } catch (ExecutionException e) {
+                lastFailure = e;
+                Thread.sleep(50L);
+            }
+        }
+        throw new IllegalStateException("Topic '" + topic + "' was created but did not appear in "
+                + "broker metadata within " + TOPIC_VISIBLE_TIMEOUT_MS + " ms", lastFailure);
     }
 
     /**
