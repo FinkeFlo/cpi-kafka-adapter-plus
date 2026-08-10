@@ -67,6 +67,15 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
      * could grow without limit on a long-running tenant.
      */
     private static final int VERIFIED_TOPICS_CACHE_LIMIT = 256;
+    /**
+     * How often a reported-missing topic is re-checked before the send is failed, and how long to
+     * wait between attempts. {@code createTopics} returns as soon as the controller has accepted the
+     * request, so a topic can legitimately be absent from broker metadata for a moment afterwards —
+     * without this, "create the topic, then send" would race against metadata propagation. Only ever
+     * paid when the topic really does look missing.
+     */
+    private static final int TOPIC_RECHECK_ATTEMPTS = 2;
+    private static final long TOPIC_RECHECK_DELAY_MS = 500L;
 
     private final CpiKafkaPlusEndpoint endpoint;
     /**
@@ -763,12 +772,26 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
      * broker hiccup must not turn into a message failure when the send itself may still succeed
      * within {@code max.block.ms}. Its cause is remembered in {@link #lastProbeFailure} instead and
      * folded into the send error if the send does go on to fail.
+     *
+     * <p>A single {@code MISSING} answer is likewise not treated as proof: {@code createTopics}
+     * returns once the controller has accepted the request, and the topic can be absent from broker
+     * metadata for a moment afterwards. Failing on the first answer would break the entirely normal
+     * "create the topic, then send" sequence, so the probe is repeated briefly before giving up.
      */
     private void assertTopicExists(String topic) {
         if (topic == null || topic.isEmpty() || verifiedTopics.contains(topic)) {
             return;
         }
         TopicCheckResult result = checkTopicExists(topic);
+        for (int attempt = 0; result.state == TopicCheck.MISSING
+                && attempt < TOPIC_RECHECK_ATTEMPTS; attempt++) {
+            if (!sleepQuietly(TOPIC_RECHECK_DELAY_MS)) {
+                break;
+            }
+            LOG.debug("[CPI-KAFKA-PLUS-DIAG] Topic '{}' reported as missing, re-checking ({}/{})",
+                    topic, attempt + 1, TOPIC_RECHECK_ATTEMPTS);
+            result = checkTopicExists(topic);
+        }
         if (result.state == TopicCheck.MISSING) {
             throw new IllegalArgumentException(
                     "Kafka topic '" + topic + "' does not exist on the broker. "
@@ -926,6 +949,20 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
             LOG.warn("[CPI-KAFKA-PLUS-DIAG] AdminClient creation failed while checking topic '{}' "
                     + "existence ({}). Skipping the check.", topic, KafkaErrorHelper.describeChain(e));
             return TopicCheckResult.inconclusive(e);
+        }
+    }
+
+    /**
+     * Sleeps without throwing. Returns {@code false} if the thread was interrupted, so the caller can
+     * stop retrying instead of swallowing the interrupt.
+     */
+    private static boolean sleepQuietly(long millis) {
+        try {
+            Thread.sleep(millis);
+            return true;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
         }
     }
 

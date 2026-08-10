@@ -123,6 +123,12 @@ the topic name produces exactly this. A topic created afterwards is picked up on
 message — no redeployment needed. The same check runs at deployment time and writes a warning to
 the deployment log, so a wrong topic name is visible before the first message flows.
 
+!!! warning "The adapter does not rely on broker-side auto-create"
+    A send to a topic that does not exist is rejected, even on a cluster where
+    `auto.create.topics.enable` is switched on. Create topics explicitly. A topic that was only
+    just created is not affected — a missing topic is re-checked briefly before the send fails, so
+    creating a topic and sending to it right away keeps working.
+
 **Authentication was rejected or the TLS handshake failed**
 
 ```
