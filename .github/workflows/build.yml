@@ -20,6 +20,18 @@ jobs:
       - name: Unit tests (Surefire)
         run: mvn -B test
 
+      # license-maven-plugin regenerates THIRD-PARTY.txt during generate-resources, so the build
+      # above has already rewritten it. Dependency bumps change the resolved versions but do not
+      # regenerate the file, which is how it drifted twice (zstd-jni, then the Confluent client).
+      - name: THIRD-PARTY.txt is up to date
+        run: |
+          if ! git diff --exit-code --quiet THIRD-PARTY.txt; then
+            echo "::error::THIRD-PARTY.txt is out of date. Run 'mvn test' and commit the regenerated file."
+            git --no-pager diff THIRD-PARTY.txt
+            exit 1
+          fi
+          echo "THIRD-PARTY.txt matches the resolved dependencies."
+
       - name: Verify JaCoCo report output
         run: |
           test -f target/jacoco.exec
@@ -129,16 +141,47 @@ jobs:
   # Aggregating gate: keeps the required status check named "build" stable, so branch
   # protection needs no change. Always runs and fails if any test job did not succeed
   # (a skipped/failed dependency is treated as a failure).
+  # Enforces the changelog rule from CONTRIBUTING.md. Runs on pull requests only — merges are
+  # squashed, so the PR, not the individual commit, is the unit that reaches main. Skipped when the
+  # PR carries the 'no-changelog' label, for changes that genuinely need no entry.
+  changelog:
+    if: >
+      github.event_name == 'pull_request' &&
+      !contains(github.event.pull_request.labels.*.name, 'no-changelog')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: CHANGELOG.md updated
+        env:
+          # Passed via env rather than interpolated into the script directly, per the workflow
+          # injection guidance. It is a commit SHA, but the pattern should hold everywhere.
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if git diff --name-only "$BASE_SHA" HEAD | grep -qx CHANGELOG.md; then
+            echo "CHANGELOG.md was updated."
+          else
+            echo "::error::CHANGELOG.md was not updated. Add a short entry under '## [Unreleased]', or label the PR 'no-changelog' if it genuinely needs none."
+            exit 1
+          fi
+
   build:
-    needs: [unit-tests, integration-tests, osgi-resolution]
+    needs: [unit-tests, integration-tests, osgi-resolution, changelog]
     if: always()
     runs-on: ubuntu-latest
     steps:
       - name: Require all test jobs to pass
         run: |
-          echo "unit-tests=${{ needs.unit-tests.result }} integration-tests=${{ needs.integration-tests.result }} osgi-resolution=${{ needs.osgi-resolution.result }}"
+          echo "unit-tests=${{ needs.unit-tests.result }} integration-tests=${{ needs.integration-tests.result }} osgi-resolution=${{ needs.osgi-resolution.result }} changelog=${{ needs.changelog.result }}"
           if [ "${{ needs.unit-tests.result }}" != "success" ] || [ "${{ needs.integration-tests.result }}" != "success" ] || [ "${{ needs.osgi-resolution.result }}" != "success" ]; then
             echo "::error::One or more test jobs did not succeed"
+            exit 1
+          fi
+          # 'skipped' is expected on pushes to main and on PRs labelled 'no-changelog'.
+          if [ "${{ needs.changelog.result }}" != "success" ] && [ "${{ needs.changelog.result }}" != "skipped" ]; then
+            echo "::error::CHANGELOG.md was not updated"
             exit 1
           fi
           echo "All test jobs passed."

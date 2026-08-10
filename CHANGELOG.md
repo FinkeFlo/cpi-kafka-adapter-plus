@@ -7,6 +7,13 @@ and the project follows [Semantic Versioning](https://semver.org/). See
 [VERSIONING.md](https://github.com/finkeflo/cpi-kafka-adapter-plus/blob/main/VERSIONING.md) for how the adapter version maps to SAP CPI
 iFlow compatibility.
 
+## [Unreleased]
+### Changed
+- CI now fails a pull request that leaves `CHANGELOG.md` untouched, enforcing a rule that was documented but unchecked. Add the `no-changelog` label to a pull request that genuinely needs no entry. `CONTRIBUTING.md` states the rule per pull request instead of per commit, since merges are squashed into a single commit on `main`.
+- Regenerated `THIRD-PARTY.txt`: the Confluent test dependencies are pinned to 7.9.9 in `pom.xml`, but the generated license list still named 7.9.8. No dependency change.
+- CI now fails when `THIRD-PARTY.txt` no longer matches the resolved dependencies. Dependency bumps change the versions without regenerating the file, which is how it drifted twice.
+- Corrected the documented bytecode target from Java 8 to Java 11 in `CONTRIBUTING.md`, `README.md` and the PR template. `maven.compiler.source`/`target` have been `11` since the initial release, so the "Java 8 bytecode" claim was never accurate — class-file version 55 cannot load on a Java 8 JVM at all. The API constraint is retained and restated: `source`/`target` link against the JDK 17 class library, so a Java 12+ API compiles but fails at runtime.
+
 ## [1.2.1] - 2026-08-10
 ### Added
 - Added a maintainer-only, manually triggered `Deploy to CPI (E2E tenant)` GitHub Actions workflow (`workflow_dispatch`, environment-protected, restricted to the maintainer) to build and deploy a chosen branch/tag directly to the CPI E2E test tenant via the Integration Content OData API (`IntegrationAdapterDesigntimeArtifacts` + `DeployIntegrationAdapterDesigntimeArtifact`), enabling pre-release E2E testing without needing a full release cycle first. No effect on the adapter runtime; CI-only tooling.

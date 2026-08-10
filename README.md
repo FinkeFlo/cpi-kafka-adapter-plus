@@ -21,7 +21,7 @@ Custom Apache Kafka adapter for SAP Cloud Integration (CPI) built with the SAP A
 
 ### Prerequisites
 
-- Java 17+ (compiles to Java 8 bytecode for CPI runtime compatibility)
+- Java 17+ (compiles to Java 11 bytecode for CPI runtime compatibility)
 - Maven 3.8+
 - SAP ADK artifacts in local Maven repository
 
