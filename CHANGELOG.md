@@ -26,6 +26,7 @@ iFlow compatibility.
 - Docs: the security protocols now have a "when to use" column, plus a troubleshooting section for the `Topic ... not present in metadata` symptom in [Authentication](docs/security/authentication.md).
 - `VERSIONING.md` now records the ADK rule that a micro bump must edit its variant file in place — a second file for the same direction is rejected with *"All Receivers should have different significant version (X.X. Micro version ignored)"*.
 - `.gitignore` now covers local AI coding agent state; shared instruction files stay tracked.
+- Test infrastructure: `KafkaTestInfrastructure.createTopic`/`createSaslTopic` now poll until the broker serves the new topic in metadata, instead of returning as soon as the controller accepted the request.
 
 ## [1.2.0] - 2026-07-30
 ### Added
