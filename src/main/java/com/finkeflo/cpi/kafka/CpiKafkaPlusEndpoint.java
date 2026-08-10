@@ -72,8 +72,10 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
     private String credentialAlias;
 
     @UriParam(label = "security",
-            description = "Optional CPI Keystore alias for custom broker CAs and/or client certificates (mTLS). "
-                    + "Leave empty to use the JVM default truststore only.")
+            description = "Leave empty for brokers with a publicly trusted certificate (e.g. Confluent Cloud) — "
+                    + "the JVM default truststore is used and TLS is still active. Set a CPI Keystore alias "
+                    + "only for a private/company CA, a self-signed broker certificate, or client-certificate "
+                    + "authentication (mTLS).")
     private String sslKeystoreAlias;
 
     // --- Processing ---

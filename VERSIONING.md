@@ -39,15 +39,16 @@ released version avoids that trap entirely.
 ## Iron rules
 
 1. **Bugfixes = MICRO.** Never put a fix into a new minor — existing iFlows would **not** receive it.
-2. **Never edit or delete a released metadata file.** A new version = a **new** file (one variant per file); old files stay frozen in the bundle → backward compatibility.
+2. **Never edit or delete a released metadata file of a *superseded* line.** A new **significant** version (`MAJOR.MINOR`) = a **new** file (one variant per file); old files stay frozen in the bundle → backward compatibility. A **micro** bump is the exception and *must* edit its file in place — see below.
 3. **Transport order:** per tenant deploy the **adapter first**, then the iFlows. Otherwise "Route has no inputs" / "Not supported yet".
 4. **Transporting the adapter via CTS+? Upload it through the Integration Suite UI (update-in-place), not the API.** UI path (keeps the workspace `reg_id` stable): package → adapter → *Actions* → *View metadata* → *Edit* → upload the new ESA → *Save* → *Deploy*. The API import path (delete + import) regenerates the `reg_id` on every deploy, which then makes CTS+ transports fail on the target with `UniquenessViolationException` (see SAP KBA 3003834). If the `reg_id`s are already out of sync, a one-time fix is to delete the adapter on the **target** design-time (runtime untouched) and let the transport re-import it.
 
 ## How to version
 
-- **Micro:** bump `version::` in the **same** variant file + set `config.adk`.
+- **Micro:** bump `version::` in the **same** variant file — at **both** the `ComponentId` (line 2) and the `VariantId` (inside `<Variant>`) — + set `config.adk`. Never create a second file for a micro: the ADK check rejects it with *"All Receivers should have different significant version (X.X. Micro version ignored)"*, because the micro is not part of a variant's identity. That is also why editing in place is safe — deployed iFlows are pinned to the significant version, so they pick the change up without an "Update Version" click. This matches SAP's own rule ("micro version updates are intended for small changes such as label or tooltip updates … the existing metadata variant must be updated").
+  - If the direction's line lags behind `config.adk` (e.g. receiver on `1.1.1` while the adapter is `1.2.0`, because the last minor was sender-only), the frozen-file guard will flag the in-place edit. Re-record that file's SHA-256 in `src/test/resources/released-metadata-checksums.txt` — the significant version is unchanged, so nothing breaks.
 - **Minor:** copy the variant file → `metadata-<sender|receiver>-<new>.xml` (one variant), set its `version::`, leave the old file **untouched**, set `config.adk`.
-- Then run `mvn test` — the build's consistency guard verifies the version is aligned across `config.adk`, `pom.xml`, and the metadata files.
+- Then run `mvn test` — the build's consistency guard verifies the version is aligned across `config.adk`, `pom.xml`, and the metadata files. `mvn verify` additionally runs the ADK's own `check` goal, which is what catches duplicate variants.
 
 ## How to release (GitHub Actions)
 

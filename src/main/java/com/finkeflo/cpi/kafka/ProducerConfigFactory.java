@@ -68,6 +68,15 @@ public final class ProducerConfigFactory {
         int requestTimeoutMs = Math.min(30000, deliveryMs);
         props.put(ProducerConfig.REQUEST_TIMEOUT_MS_CONFIG, requestTimeoutMs);
 
+        // max.block.ms caps how long send()/flush()/initTransactions() will block waiting for
+        // broker metadata or buffer space. The Kafka client default is 60 s, which is already a
+        // hard bound — but it is a long time to wait for an answer that will not change, e.g. for
+        // a topic that does not exist. We deliberately keep it at or below request.timeout.ms
+        // (never at delivery.timeout.ms, which would *raise* it to 120 s by default and double the
+        // time such a send needs to fail). This is the fallback bound for the cases where the
+        // AdminClient topic probe in CpiKafkaPlusProducer cannot give a definitive answer.
+        props.put(ProducerConfig.MAX_BLOCK_MS_CONFIG, (long) Math.min(30000, deliveryMs));
+
         // client.id — auto-generated from adapter instance ID
         String adapterInstanceId = endpoint.getCamelContext() != null
                 ? endpoint.getCamelContext().getGlobalOption("adapterInstanceID") : null;
