@@ -233,23 +233,29 @@ def run_batch(args, api, xml):
     entries = []
     parsed_batches = []
     found_ids = set()
+    expected_ids = set(test_ids)
     while True:
         entries = api.mpl_query(filt, orderby="LogEnd asc")
         parsed_batches = [parse_batch_keys(api.persist_step_payload(e["MessageGuid"]), xml) for e in entries]
         found_ids = {k for batch in parsed_batches for k in batch}
-        if found_ids == set(test_ids) or time.monotonic() >= deadline:
+        if expected_ids.issubset(found_ids) or time.monotonic() >= deadline:
             break
         time.sleep(args.poll_interval)
 
-    if found_ids != set(test_ids):
-        missing = set(test_ids) - found_ids
+    if not expected_ids.issubset(found_ids):
+        missing = expected_ids - found_ids
         raise AssertionError(f"missing {len(missing)} testId(s) after {args.timeout}s timeout: {missing}")
+
+    # A previous run's MPL entries can still fall inside the LogEnd window, and the consumer can
+    # replay records this run did not produce. Both add foreign testIds, which must not fail the
+    # run - only the records this run produced are in scope for the batching assertions below.
+    parsed_batches = [batch for batch in parsed_batches if expected_ids.intersection(batch)]
 
     batch_sizes = [len(b) for b in parsed_batches]
     if any(size > batch_size for size in batch_sizes):
         raise AssertionError(f"a batch exceeded configured batchSize={batch_size}: sizes={batch_sizes}")
 
-    flat_order = [k for batch in parsed_batches for k in batch]
+    flat_order = [k for batch in parsed_batches for k in batch if k in expected_ids]
     if flat_order != test_ids:
         raise AssertionError("record order across batches does not match send order")
 
