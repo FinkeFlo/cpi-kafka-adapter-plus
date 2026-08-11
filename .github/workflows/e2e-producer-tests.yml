@@ -151,15 +151,36 @@ jobs:
             --data @"${{ steps.render.outputs.rendered_file }}")
           echo "http_code=$http_code" >> "$GITHUB_OUTPUT"
           echo "--- Response ($http_code) ---"
-          cat response.txt
+          # This repository is public and Actions logs are world-readable. The negative TLS
+          # scenario answers with the broker endpoint plus a full stacktrace, so its response
+          # is never echoed verbatim - the next step asserts on it without printing it.
+          if [ "${{ matrix.response-format }}" = "tls-mismatch" ]; then
+            echo "(response withheld: contains broker endpoint details; assertions run in the next step)"
+          else
+            cat response.txt
+          fi
 
       - name: Validate response
         run: |
           python3 - <<'PY'
           import json
           import os
+          import re
           import sys
           import xml.etree.ElementTree as ET
+
+          def redact(text):
+              """Strip broker endpoints before anything reaches a public Actions log.
+
+              The TLS-mismatch error names the broker it refused to talk to, and this
+              repository is public. Java package names in the stacktrace look similar but
+              never carry a port, so requiring ':<port>' keeps them readable.
+              """
+              return re.sub(
+                  r"\b(?:[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\.)+[A-Za-z]{2,}:\d+",
+                  "<broker>:<port>",
+                  text,
+              )
 
           http_code = "${{ steps.send.outputs.http_code }}"
           response_format = "${{ matrix.response-format }}"
@@ -227,17 +248,25 @@ jobs:
                   summary.write(f"- HTTP status: {http_code}\n")
                   if expected_topic:
                       summary.write(f"- Expected topic: `{expected_topic}`\n")
-                  # Error responses carry a full stacktrace; keep the summary readable.
-                  excerpt = body if len(body) <= 2000 else body[:2000] + "\n... (truncated)"
-                  summary.write("```\n" + excerpt + "\n```\n")
+                  if response_format == "tls-mismatch":
+                      # Never render this response: it carries the broker endpoint and a
+                      # full stacktrace, and job summaries are public on this repository.
+                      summary.write(
+                          "- Response withheld (broker endpoint details); "
+                          "asserted on the TLS-mismatch error markers only\n"
+                      )
+                  else:
+                      # Error responses carry a full stacktrace; keep the summary readable.
+                      excerpt = body if len(body) <= 2000 else body[:2000] + "\n... (truncated)"
+                      summary.write("```\n" + redact(excerpt) + "\n```\n")
                   if errors:
                       summary.write("\nErrors:\n")
                       for e in errors:
-                          summary.write(f"- {e}\n")
+                          summary.write(f"- {redact(e)}\n")
 
           if errors:
               for e in errors:
-                  print(f"::error::{e}")
+                  print(f"::error::{redact(e)}")
               sys.exit(1)
           print(f"Producer E2E test '${{ matrix.name }}' passed.")
           PY

@@ -136,7 +136,11 @@ jobs:
             echo "### Consumer E2E test: \`${{ matrix.name }}\` - ${{ job.status == 'success' && 'PASSED' || 'FAILED' }}"
             echo
             echo '```'
-            cat result.txt 2>/dev/null || echo "(no output captured)"
+            # This repository is public. A broker connection error puts the bootstrap
+            # endpoint into the captured output, so mask host:port before publishing it.
+            cat result.txt 2>/dev/null \
+              | sed -E 's/([A-Za-z0-9][A-Za-z0-9-]*\.)+[A-Za-z]{2,}:[0-9]+/<broker>:<port>/g' \
+              || echo "(no output captured)"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
