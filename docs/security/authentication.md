@@ -49,12 +49,27 @@ For Kafka clusters using SCRAM authentication:
 
 Supported SCRAM mechanisms: `SCRAM-SHA-256` and `SCRAM-SHA-512`.
 
+### SASL/OAUTHBEARER (OAuth2 Client Credentials)
+
+For Kafka clusters that require OAuth2 tokens:
+
+| Parameter | Value |
+|---|---|
+| `securityProtocol` | `SASL_SSL` |
+| `saslMechanism` | `OAUTHBEARER` |
+| `credentialAlias` | CPI User Credentials alias (`username=client_id`, `password=client_secret`) |
+| `oauthTokenEndpointUrl` | OAuth2 token endpoint URL |
+| `oauthScope` | Optional OAuth2 scope |
+
+The adapter relies on CPI credential resolution and Kafka's OAuth login callback handling.
+No adapter-local token refresh logic is implemented.
+
 !!! note "Kerberos / GSSAPI is not supported"
-    Only `PLAIN`, `SCRAM-SHA-256` and `SCRAM-SHA-512` are supported. SASL/GSSAPI
+    `PLAIN`, `SCRAM-SHA-256`, `SCRAM-SHA-512`, and `OAUTHBEARER` are supported. SASL/GSSAPI
     (Kerberos) is intentionally **not** available: CPI's OSGi runtime does not export
     the `org.ietf.jgss` package, so the adapter ships empty stubs for it purely to let
     the Kafka client resolve and start. These stubs are never invoked at runtime — a
-    GSSAPI login would fail. Use `PLAIN`, `SCRAM`, or mTLS instead.
+    GSSAPI login would fail. Use `PLAIN`, `SCRAM`, `OAUTHBEARER`, or mTLS instead.
 
 ## SSL/TLS and mTLS
 

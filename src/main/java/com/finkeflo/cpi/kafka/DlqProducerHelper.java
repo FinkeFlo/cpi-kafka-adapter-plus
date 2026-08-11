@@ -243,6 +243,9 @@ public final class DlqProducerHelper implements Closeable {
         // Use DLQ-specific credentials if configured, otherwise reuse consumer credentials
         SecurityConfigHelper.configureSecurityProperties(props, endpoint);
         String dlqAlias = endpoint.getDlqCredentialAlias();
+        if ("OAUTHBEARER".equalsIgnoreCase(endpoint.getSaslMechanism())) {
+            return props;
+        }
         if (dlqAlias != null && !dlqAlias.trim().isEmpty()) {
             SecurityConfigHelper.overrideSaslCredentials(props, endpoint.getSaslMechanism(), dlqAlias);
         }

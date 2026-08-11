@@ -564,6 +564,26 @@ public class CpiKafkaPlusComponentTest {
         ep.validateConfiguration(); // should not throw
     }
 
+    @Test(expected = IllegalArgumentException.class)
+    public void testValidateConfigurationFailsOauthWithoutTokenEndpoint() {
+        CpiKafkaPlusEndpoint ep = new CpiKafkaPlusEndpoint();
+        ep.setSecurityProtocol("SASL_SSL");
+        ep.setSaslMechanism("OAUTHBEARER");
+        ep.setCredentialAlias("oauth-client-credentials");
+        ep.setOauthTokenEndpointUrl(" ");
+        ep.validateConfiguration();
+    }
+
+    @Test
+    public void testValidateConfigurationPassesOauthWithTokenEndpoint() {
+        CpiKafkaPlusEndpoint ep = new CpiKafkaPlusEndpoint();
+        ep.setSecurityProtocol("SASL_SSL");
+        ep.setSaslMechanism("OAUTHBEARER");
+        ep.setCredentialAlias("oauth-client-credentials");
+        ep.setOauthTokenEndpointUrl("https://idp.example.com/oauth/token");
+        ep.validateConfiguration();
+    }
+
     @Test
     public void testValidateConfigurationPassesPlaintextWithoutAlias() {
         CpiKafkaPlusEndpoint ep = new CpiKafkaPlusEndpoint();

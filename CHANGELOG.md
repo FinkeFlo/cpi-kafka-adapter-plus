@@ -8,6 +8,14 @@ and the project follows [Semantic Versioning](https://semver.org/). See
 iFlow compatibility.
 
 ## [Unreleased]
+### Added
+- Added OAuth2 Client Credentials support for Kafka SASL/OAUTHBEARER authentication, including new endpoint parameters (`oauthTokenEndpointUrl`, optional `oauthScope`) and UI metadata exposure for Sender/Receiver variants.
+
+### Changed
+- Extended shared security configuration to build OAUTHBEARER JAAS and callback handler properties, while keeping token refresh responsibility outside the adapter (Credential Service/Kafka runtime handling).
+- For OAUTHBEARER, DLQ now reuses the primary OAuth credentials and does not apply a separate DLQ credential override.
+- Updated authentication/configuration docs and README security feature list to cover SASL/OAUTHBEARER usage.
+
 ### Changed
 - Standardized pull request quality gates: enforce Conventional Commit format for PR titles in CI, set squash merge to use PR title and body, add repository-managed local Git hooks (`commit-msg` for Conventional Commits validation, `pre-push` for fast unit tests + secret scans).
 - Added setup script and documentation for local hook and commit-template activation in CONTRIBUTING.md.

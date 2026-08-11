@@ -19,8 +19,10 @@ All adapter parameters are configured on the `CpiKafkaPlusEndpoint`. The section
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `securityProtocol` | `SASL_SSL` | Security protocol, covering transport and authentication in one value: `SASL_SSL` (UI: "SASL_SSL (SASL over TLS)"), `SSL` (UI: "SSL (TLS, certificate authentication)"), `SASL_PLAINTEXT` (UI: "SASL_PLAINTEXT (no TLS)"), `PLAINTEXT` (UI: "PLAINTEXT (no TLS, no authentication)"). Managed brokers such as Confluent Cloud accept TLS only. |
-| `saslMechanism` | `PLAIN` | SASL mechanism: `PLAIN`, `SCRAM-SHA-256`, `SCRAM-SHA-512`. |
-| `credentialAlias` | — | Credential alias for SASL username/password from CPI Secure Store. |
+| `saslMechanism` | `PLAIN` | SASL mechanism: `PLAIN`, `SCRAM-SHA-256`, `SCRAM-SHA-512`, `OAUTHBEARER`. |
+| `credentialAlias` | — | Credential alias from CPI Secure Store. For `OAUTHBEARER`, use User Credentials with `username=client_id` and `password=client_secret`. |
+| `oauthTokenEndpointUrl` | — | OAuth2 token endpoint URL (required when `saslMechanism=OAUTHBEARER`). |
+| `oauthScope` | — | Optional OAuth2 scope (used when `saslMechanism=OAUTHBEARER`). |
 | `sslKeystoreAlias` | — | Leave empty for brokers with a publicly trusted certificate (e.g. Confluent Cloud) — the JVM default truststore is used and TLS is still active. Set a CPI Keystore alias only for a private/company CA, a self-signed broker certificate, or client-certificate authentication (mTLS). |
 
 For detailed security setup, see [Authentication](security/authentication.md).
@@ -140,8 +142,10 @@ For details on DLQ and retry behavior, see [Dead Letter Queue](features/dead-let
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `securityProtocol` | `SASL_SSL` | Security protocol, covering transport and authentication in one value: `SASL_SSL` (UI: "SASL_SSL (SASL over TLS)"), `SSL` (UI: "SSL (TLS, certificate authentication)"), `SASL_PLAINTEXT` (UI: "SASL_PLAINTEXT (no TLS)"), `PLAINTEXT` (UI: "PLAINTEXT (no TLS, no authentication)"). Managed brokers such as Confluent Cloud accept TLS only. |
-| `saslMechanism` | `PLAIN` | SASL mechanism: `PLAIN`, `SCRAM-SHA-256`, `SCRAM-SHA-512`. |
-| `credentialAlias` | — | Credential alias for SASL username/password from CPI Secure Store. |
+| `saslMechanism` | `PLAIN` | SASL mechanism: `PLAIN`, `SCRAM-SHA-256`, `SCRAM-SHA-512`, `OAUTHBEARER`. |
+| `credentialAlias` | — | Credential alias from CPI Secure Store. For `OAUTHBEARER`, use User Credentials with `username=client_id` and `password=client_secret`. |
+| `oauthTokenEndpointUrl` | — | OAuth2 token endpoint URL (required when `saslMechanism=OAUTHBEARER`). |
+| `oauthScope` | — | Optional OAuth2 scope (used when `saslMechanism=OAUTHBEARER`). |
 | `sslKeystoreAlias` | — | Leave empty for brokers with a publicly trusted certificate (e.g. Confluent Cloud) — the JVM default truststore is used and TLS is still active. Set a CPI Keystore alias only for a private/company CA, a self-signed broker certificate, or client-certificate authentication (mTLS). |
 
 For detailed security setup, see [Authentication](security/authentication.md).

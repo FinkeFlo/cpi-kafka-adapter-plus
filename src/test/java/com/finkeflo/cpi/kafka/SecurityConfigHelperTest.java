@@ -8,12 +8,12 @@
  * it under the terms of the GNU Affero General Public License as published by
  * the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
- * 
+ *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
- * 
+ *
  * You should have received a copy of the GNU Affero General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  * #L%
@@ -92,6 +92,42 @@ public class SecurityConfigHelperTest {
         Assert.assertEquals(
                 "org.apache.kafka.common.security.plain.PlainLoginModule required username=\"user\\\"name\" password=\"pass\";",
                 result);
+    }
+
+    @Test
+    public void testBuildOauthJaasConfigIncludesTokenEndpointAndScope() {
+        String result = SecurityConfigHelper.buildOauthJaasConfig(
+                "client-id", "client-secret", "https://idp.example.com/oauth/token", "kafka.read");
+        Assert.assertTrue(result.startsWith("org.apache.kafka.common.security.oauthbearer.OAuthBearerLoginModule"));
+        Assert.assertTrue(result.contains("oauth.client.id=\"client-id\""));
+        Assert.assertTrue(result.contains("oauth.client.secret=\"client-secret\""));
+        Assert.assertTrue(result.contains("oauth.token.endpoint.uri=\"https://idp.example.com/oauth/token\""));
+        Assert.assertTrue(result.contains("oauth.scope=\"kafka.read\""));
+    }
+
+    @Test
+    public void testConfigureSecurityPropertiesOAuthBearerSetsCallbackHandler() {
+        CredentialHelper.setCredentialResolver(new CredentialHelper.CredentialResolver() {
+            public CredentialHelper.UserCredentials resolveUserCredential(String alias) {
+                return new CredentialHelper.UserCredentials("client-id", "client-secret");
+            }
+        });
+
+        Properties props = new Properties();
+        CpiKafkaPlusEndpoint endpoint = new CpiKafkaPlusEndpoint();
+        endpoint.setSecurityProtocol("SASL_SSL");
+        endpoint.setSaslMechanism("OAUTHBEARER");
+        endpoint.setCredentialAlias("oauth-client-credentials");
+        endpoint.setOauthTokenEndpointUrl("https://idp.example.com/oauth/token");
+        endpoint.setOauthScope("kafka.read");
+
+        SecurityConfigHelper.configureSecurityProperties(props, endpoint);
+
+        Assert.assertEquals("OAUTHBEARER", props.getProperty("sasl.mechanism"));
+        Assert.assertEquals("org.apache.kafka.common.security.oauthbearer.secured.OAuthBearerLoginCallbackHandler",
+                props.getProperty("sasl.login.callback.handler.class"));
+        Assert.assertNotNull(props.getProperty("sasl.jaas.config"));
+        Assert.assertTrue(props.getProperty("sasl.jaas.config").contains("oauth.token.endpoint.uri"));
     }
 
     @Test

@@ -8,12 +8,12 @@
  * it under the terms of the GNU Affero General Public License as published by
  * the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
- * 
+ *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
- * 
+ *
  * You should have received a copy of the GNU Affero General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  * #L%
@@ -33,6 +33,11 @@ import org.slf4j.LoggerFactory;
 public final class SecurityConfigHelper {
 
     private static final Logger LOG = LoggerFactory.getLogger(SecurityConfigHelper.class);
+    private static final String OAUTHBEARER = "OAUTHBEARER";
+    private static final String OAUTH_LOGIN_MODULE =
+            "org.apache.kafka.common.security.oauthbearer.OAuthBearerLoginModule";
+    private static final String OAUTH_CALLBACK_HANDLER =
+            "org.apache.kafka.common.security.oauthbearer.secured.OAuthBearerLoginCallbackHandler";
 
     private SecurityConfigHelper() {}
 
@@ -56,7 +61,11 @@ public final class SecurityConfigHelper {
     }
 
     private static void configureSasl(Properties props, CpiKafkaPlusEndpoint endpoint) {
-        props.put("sasl.mechanism", endpoint.getSaslMechanism());
+        String mechanism = endpoint.getSaslMechanism();
+        if (mechanism == null || mechanism.trim().isEmpty()) {
+            mechanism = "PLAIN";
+        }
+        props.put("sasl.mechanism", mechanism);
 
         String alias = endpoint.getCredentialAlias();
         if (alias == null || alias.isEmpty()) {
@@ -67,17 +76,22 @@ public final class SecurityConfigHelper {
         try {
             CredentialHelper.UserCredentials credentials = CredentialHelper.getUserCredential(alias);
             if (credentials != null) {
-                String jaasConfig = buildJaasConfig(
-                        endpoint.getSaslMechanism(), credentials.username(), credentials.password());
+                String jaasConfig = OAUTHBEARER.equalsIgnoreCase(mechanism)
+                        ? buildOauthJaasConfig(credentials.username(), credentials.password(),
+                                endpoint.getOauthTokenEndpointUrl(), endpoint.getOauthScope())
+                        : buildJaasConfig(mechanism, credentials.username(), credentials.password());
                 props.put("sasl.jaas.config", jaasConfig);
+                if (OAUTHBEARER.equalsIgnoreCase(mechanism)) {
+                    props.put("sasl.login.callback.handler.class", OAUTH_CALLBACK_HANDLER);
+                }
                 LOG.info("SASL credentials resolved for alias '{}'", alias);
             } else {
-                LOG.error("SASL configured but no credentials resolved for alias '{}'. " +
-                        "Kafka will fail to connect.", alias);
+                LOG.error("SASL configured but no credentials resolved for alias '{}'. "
+                        + "Kafka will fail to connect.", alias);
             }
         } catch (Exception e) {
-            LOG.error("Could not resolve SASL credentials from Secure Store alias '{}': {}. " +
-                    "Kafka client will likely fail to connect.", alias, e.getMessage());
+            LOG.error("Could not resolve SASL credentials from Secure Store alias '{}': {}. "
+                    + "Kafka client will likely fail to connect.", alias, e.getMessage());
         }
     }
 
@@ -105,11 +119,35 @@ public final class SecurityConfigHelper {
         return String.format("%s required username=\"%s\" password=\"%s\";", loginModule, safeUser, safePass);
     }
 
+    static String buildOauthJaasConfig(String clientId, String clientSecret, String tokenEndpointUrl,
+            String scope) {
+        String safeClientId = clientId.replace("\\", "\\\\").replace("\"", "\\\"");
+        String safeClientSecret = clientSecret.replace("\\", "\\\\").replace("\"", "\\\"");
+        String safeEndpoint = tokenEndpointUrl.replace("\\", "\\\\").replace("\"", "\\\"");
+        StringBuilder jaas = new StringBuilder()
+                .append(OAUTH_LOGIN_MODULE)
+                .append(" required oauth.client.id=\"").append(safeClientId).append("\"")
+                .append(" oauth.client.secret=\"").append(safeClientSecret).append("\"")
+                .append(" oauth.token.endpoint.uri=\"").append(safeEndpoint).append("\"");
+        String safeScope = trimToNull(scope);
+        if (safeScope != null) {
+            jaas.append(" oauth.scope=\"")
+                    .append(safeScope.replace("\\", "\\\\").replace("\"", "\\\""))
+                    .append("\"");
+        }
+        jaas.append(";");
+        return jaas.toString();
+    }
+
     /**
      * Override SASL credentials with a different credential alias.
      * Used by DLQ producer when the DLQ cluster requires separate credentials.
      */
     public static void overrideSaslCredentials(Properties props, String mechanism, String alias) {
+        if (OAUTHBEARER.equalsIgnoreCase(mechanism)) {
+            LOG.warn("DLQ credential override is ignored for OAUTHBEARER; reusing primary OAuth2 credentials.");
+            return;
+        }
         try {
             CredentialHelper.UserCredentials credentials = CredentialHelper.getUserCredential(alias);
             if (credentials != null) {
@@ -117,8 +155,8 @@ public final class SecurityConfigHelper {
                 props.put("sasl.jaas.config", jaasConfig);
                 LOG.info("DLQ SASL credentials resolved for alias '{}'", alias);
             } else {
-                LOG.error("DLQ credential alias '{}' configured but no credentials resolved. " +
-                        "DLQ producer will fail to connect.", alias);
+                LOG.error("DLQ credential alias '{}' configured but no credentials resolved. "
+                        + "DLQ producer will fail to connect.", alias);
             }
         } catch (Exception e) {
             LOG.warn("Could not resolve DLQ credentials from Secure Store alias '{}': {}",

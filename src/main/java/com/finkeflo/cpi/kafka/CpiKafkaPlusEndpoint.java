@@ -64,12 +64,21 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
     private String securityProtocol = "SASL_SSL";
 
     @UriParam(label = "security", defaultValue = "PLAIN",
-            description = "SASL mechanism: PLAIN, SCRAM-SHA-256, SCRAM-SHA-512")
+            description = "SASL mechanism: PLAIN, SCRAM-SHA-256, SCRAM-SHA-512, OAUTHBEARER")
     private String saslMechanism = "PLAIN";
 
     @UriParam(label = "security",
-            description = "Credential alias for SASL username/password from CPI Secure Store")
+            description = "Credential alias for SASL credentials from CPI Secure Store. "
+                    + "For OAUTHBEARER: username=client_id, password=client_secret.")
     private String credentialAlias;
+
+    @UriParam(label = "security",
+            description = "OAuth2 token endpoint URL (required for SASL mechanism OAUTHBEARER)")
+    private String oauthTokenEndpointUrl;
+
+    @UriParam(label = "security",
+            description = "Optional OAuth2 scope sent during token request (OAUTHBEARER only)")
+    private String oauthScope;
 
     @UriParam(label = "security",
             description = "Leave empty for brokers with a publicly trusted certificate (e.g. Confluent Cloud) — "
@@ -347,6 +356,13 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
                     "Security protocol " + securityProtocol
                     + " requires SASL authentication but no credentialAlias is configured.");
         }
+        if (securityProtocol != null
+                && securityProtocol.toUpperCase().contains("SASL")
+                && "OAUTHBEARER".equalsIgnoreCase(saslMechanism)
+                && (oauthTokenEndpointUrl == null || oauthTokenEndpointUrl.trim().isEmpty())) {
+            throw new IllegalArgumentException(
+                    "SASL mechanism OAUTHBEARER requires oauthTokenEndpointUrl to be configured.");
+        }
     }
 
     @Override
@@ -433,6 +449,12 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
 
     public String getCredentialAlias() { return credentialAlias; }
     public void setCredentialAlias(String credentialAlias) { this.credentialAlias = credentialAlias; }
+
+    public String getOauthTokenEndpointUrl() { return oauthTokenEndpointUrl; }
+    public void setOauthTokenEndpointUrl(String oauthTokenEndpointUrl) { this.oauthTokenEndpointUrl = oauthTokenEndpointUrl; }
+
+    public String getOauthScope() { return oauthScope; }
+    public void setOauthScope(String oauthScope) { this.oauthScope = oauthScope; }
 
     public String getSslKeystoreAlias() { return sslKeystoreAlias; }
     public void setSslKeystoreAlias(String sslKeystoreAlias) { this.sslKeystoreAlias = sslKeystoreAlias; }
