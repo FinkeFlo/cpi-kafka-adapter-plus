@@ -1,0 +1,9 @@
+# <type>(<scope>): <short summary>
+#
+# Examples:
+#   feat(producer): add batch DLQ fallback
+#   fix(consumer): prevent offset commit on route failure
+#   docs: update SSL setup guide
+#
+# Body (optional): Why this change and impact.
+# Footer (optional): Closes #123, BREAKING CHANGE:

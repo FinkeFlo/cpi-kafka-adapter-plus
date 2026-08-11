@@ -69,6 +69,34 @@ merges are squashed into a single commit on `main`.
 4. Open a **pull request**. The title of your pull request should follow the conventional commit format. 
 5. All CI checks must be green and the maintainer must approve before merging. When merged, **all changes will be squashed into a single commit**. 
 
+PR titles are validated in CI (`PR Title` workflow). Use the same conventional format as commits (for example `fix: ...`, `feat(scope): ...`).
+
+### Optional local commit template
+To make conventional commit messages easier and more consistent locally, you can enable the shared template from this repository:
+
+```bash
+git config commit.template .gitmessage.txt
+```
+
+### Optional local pre-push quality gate
+To automatically run a local quality gate before every `git push`, enable the repository-managed hooks path:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+or set up both hook path and commit template in one step:
+
+```bash
+scripts/setup-local-hooks.sh
+```
+
+With hooks enabled, this repository provides:
+- `commit-msg`: enforces Conventional Commit subjects (`<type>(<scope>): <summary>`).
+- `pre-push`: runs `mvn test` (fast unit-test gate, no broker required) and, when installed, a local `gitleaks` scan.
+
+This catches many issues before CI and helps keep PR checks green.
+
 ### Breaking Changes
 If your PR introduces a breaking change, add an exclamation mark `!` after the conventional commit type (e.g., `feat!: require new connection parameter`). This signifies a breaking change that requires a major SemVer bump.
 

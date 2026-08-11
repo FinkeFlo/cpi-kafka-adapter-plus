@@ -7,6 +7,12 @@ and the project follows [Semantic Versioning](https://semver.org/). See
 [VERSIONING.md](https://github.com/finkeflo/cpi-kafka-adapter-plus/blob/main/VERSIONING.md) for how the adapter version maps to SAP CPI
 iFlow compatibility.
 
+## [Unreleased]
+### Changed
+- Standardized pull request quality gates: enforce Conventional Commit format for PR titles in CI, set squash merge to use PR title and body, add repository-managed local Git hooks (`commit-msg` for Conventional Commits validation, `pre-push` for fast unit tests + secret scans).
+- Added setup script and documentation for local hook and commit-template activation in CONTRIBUTING.md.
+- Enforce `REVIEW_REQUIRED` and `CODEOWNER_REVIEW` on main branch protection; disallow force push and branch deletion.
+
 ## [1.2.3] - 2026-08-11
 ### Fixed
 - Prevented `Node Crashed` on a plaintext Security Protocol against TLS-only brokers by probing bootstrap listeners for TLS before creating Kafka clients (producer, transactional producer, consumer).

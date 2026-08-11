@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo "[pre-push] Running local quality gate..."
+
+# Fast default gate before push. This mirrors the CI unit-test job and catches
+# most regressions without requiring Docker/Testcontainers.
+mvn -B test
+
+if command -v gitleaks >/dev/null 2>&1; then
+  echo "[pre-push] Running local gitleaks scan..."
+  gitleaks git --redact --verbose
+else
+  echo "[pre-push] gitleaks not found locally; skipping secret scan (CI still enforces it)."
+fi
+
+echo "[pre-push] OK"
