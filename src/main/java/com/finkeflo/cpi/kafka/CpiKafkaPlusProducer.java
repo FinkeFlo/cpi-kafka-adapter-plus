@@ -248,6 +248,10 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
             Properties props = ProducerConfigFactory.buildProducerProperties(endpoint);
             LOG.debug("[CPI-KAFKA-PLUS-DIAG] ensureInitialized: producer properties built, security={}, sasl={}",
                     endpoint.getSecurityProtocol(), endpoint.getSaslMechanism());
+            // Install global OOM guard BEFORE creating the producer so that Kafka's
+            // network thread is protected even if it throws before our per-thread
+            // handler can be registered via installSslMismatchDetector().
+            installGlobalOomGuard();
             kafkaProducer = BundleBackedClassLoader.withBundleClassLoader(getClass(),
                     () -> new KafkaProducer<>(props,
                             new ByteArraySerializer(), new ByteArraySerializer()));
@@ -259,6 +263,36 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
             lastInitException = e;
             return false;
         }
+    }
+
+    /**
+     * Registers (or chains) a JVM-wide default UncaughtExceptionHandler that
+     * intercepts OutOfMemoryErrors on kafka-producer-network-thread threads.
+     * This fires even if the OOM occurs before installSslMismatchDetector() can
+     * find and configure the per-thread handler.
+     */
+    private void installGlobalOomGuard() {
+        String protocol = endpoint.getSecurityProtocol();
+        if (protocol != null && protocol.toUpperCase().contains("SSL")) {
+            return; // TLS configured — no plaintext/SSL mismatch possible
+        }
+        Thread.UncaughtExceptionHandler existing = Thread.getDefaultUncaughtExceptionHandler();
+        Thread.setDefaultUncaughtExceptionHandler((t, e) -> {
+            if (t.getName().contains("kafka-producer-network-thread") && e instanceof OutOfMemoryError) {
+                String hint = "Possible SSL/plaintext mismatch: the broker may require TLS. "
+                        + "Use SASL_SSL (or SSL) instead of " + protocol + ".";
+                String msg = "[CPI-KAFKA-PLUS-DIAG] Kafka network thread '" + t.getName()
+                        + "' caught OOM — " + hint;
+                LOG.error(msg, e);
+                lastInitException = new IllegalStateException(hint + " Full error: " + e, e);
+                initialized = false;
+                kafkaProducer = null;
+                return; // swallow — do not re-throw; prevents JVM crash
+            }
+            if (existing != null) {
+                existing.uncaughtException(t, e);
+            }
+        });
     }
 
     /**
