@@ -91,7 +91,11 @@ or set up both hook path and commit template in one step:
 scripts/setup-local-hooks.sh
 ```
 
-The current `pre-push` hook runs `mvn test` (fast unit-test gate, no broker required). This catches many issues before CI and helps keep PR checks green.
+With hooks enabled, this repository provides:
+- `commit-msg`: enforces Conventional Commit subjects (`<type>(<scope>): <summary>`).
+- `pre-push`: runs `mvn test` (fast unit-test gate, no broker required) and, when installed, a local `gitleaks` scan.
+
+This catches many issues before CI and helps keep PR checks green.
 
 ### Breaking Changes
 If your PR introduces a breaking change, add an exclamation mark `!` after the conventional commit type (e.g., `feat!: require new connection parameter`). This signifies a breaking change that requires a major SemVer bump.
