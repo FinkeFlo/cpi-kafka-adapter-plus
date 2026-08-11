@@ -5,7 +5,7 @@
     <modelVersion>4.0.0</modelVersion>
     <groupId>com.finkeflo.cpi.kafka</groupId>
     <artifactId>cpi-kafka-adapter-plus</artifactId>
-    <version>1.2.2</version>
+    <version>1.2.3</version>
     <packaging>bundle</packaging>
     <name>Kafka Adapter Plus</name>
     <description>Custom Apache Kafka adapter for SAP Cloud Integration (CPI) with advanced batch processing, Avro/Schema Registry support, and SASL/SSL security.</description>
@@ -357,13 +357,11 @@
                             <!-- org.ietf.jgss: Kafka's SaslChannelBuilder statically references this
                                  package even for SASL PLAIN, but CPI's OSGi runtime does not export it.
                                  We ship empty stubs (src/stubs/java, compiled with release 8) inside the
-                                 bundle. This optional import is the substitutability hook: on CPI it stays
-                                 UNWIRED (no exporter) so the bundle-local stubs resolve the class; if a
-                                 framework ever exported the real java.security.jgss, the import would wire
-                                 and the real classes would replace the stubs. CAVEAT: the stubs are empty,
-                                 so SASL/GSSAPI (Kerberos) would fail silently — only PLAIN/SCRAM/OAuth are
-                                 supported. Other JDK security packages below are plain optional imports. -->
-                            org.ietf.jgss;resolution:=optional,
+                                 bundle. Using !org.ietf.jgss (exclude from imports) so BND embeds the
+                                 local stub classes from target/classes instead of treating the package
+                                 as an external import. CAVEAT: stubs are empty, so SASL/GSSAPI (Kerberos)
+                                 would fail silently — only PLAIN/SCRAM/OAuth are supported. -->
+                            !org.ietf.jgss,
                             javax.security.*;resolution:=optional,
                             javax.net.ssl;resolution:=optional,
                             javax.crypto;resolution:=optional,
@@ -387,7 +385,7 @@
                         <Export-Package>com.finkeflo.cpi.kafka</Export-Package>
                         <!-- kafka-clients is unpacked into target/classes by maven-dependency-plugin;
                              listed here as Private-Package so bnd includes it without re-exporting. -->
-                        <Private-Package>org.apache.kafka.*</Private-Package>
+                        <Private-Package>org.apache.kafka.*,org.ietf.jgss</Private-Package>
                         <Embed-Dependency>
                             avro;scope=compile,
                             jackson-databind;scope=compile,

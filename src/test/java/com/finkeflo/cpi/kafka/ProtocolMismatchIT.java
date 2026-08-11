@@ -199,19 +199,15 @@ public class ProtocolMismatchIT {
                 chain.contains("does not exist"));
 
         // The whole point of the fix: the message must say why, not just that it timed out.
+        // The probe now recognises the broker's TLS alert, so this is caught before any
+        // Kafka client is built - earlier than the pre-send check that used to report it.
         String message = thrown.getMessage();
-        Assert.assertTrue("The failure must report that the broker was unreachable during the "
-                + "pre-send check, but was: " + message,
-                message.contains("could not be reached during the pre-send check"));
-        Assert.assertTrue("The failure must name the missing TLS as the likely cause, but was: "
-                + message, message.contains("does not use TLS"));
+        Assert.assertTrue("The failure must name the configured protocol, but was: " + message,
+                message.contains("SASL_PLAINTEXT"));
+        Assert.assertTrue("The failure must state that the broker requires TLS, but was: "
+                + message, message.contains("requires TLS"));
         Assert.assertTrue("The hint must point at the protocol that would work, but was: " + message,
                 message.contains("SASL_SSL"));
-
-        // The probe's own exception travels along as a suppressed exception, so a trace-level
-        // reader gets the full stack and not only the summarised message text.
-        Assert.assertEquals("Expected the probe failure to be attached as a suppressed exception",
-                1, thrown.getSuppressed().length);
     }
 
     // -----------------------------------------------------------------------

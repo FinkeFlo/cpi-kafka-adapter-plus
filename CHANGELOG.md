@@ -7,6 +7,18 @@ and the project follows [Semantic Versioning](https://semver.org/). See
 [VERSIONING.md](https://github.com/finkeflo/cpi-kafka-adapter-plus/blob/main/VERSIONING.md) for how the adapter version maps to SAP CPI
 iFlow compatibility.
 
+## [1.2.3] - 2026-08-11
+### Fixed
+- Prevented `Node Crashed` on a plaintext Security Protocol against TLS-only brokers by probing bootstrap listeners for TLS before creating Kafka clients (producer, transactional producer, consumer).
+- Detect TLS listeners that reject the probe handshake with a TLS alert before sending a certificate, avoiding false inconclusive results for TLS-version, cipher-suite or fronting-device mismatches.
+- Cache TLS listener-probe results per bootstrap/security configuration so transactional batches do not open probe connections and wait on silent endpoints for every message.
+- Bounded producer send waits (`delivery.timeout.ms` + guard margin) so a dead Kafka sender thread cannot block CPI worker threads indefinitely; applies to single-send, batch and DLQ paths.
+- Bounded topic-existence checks and removed unbounded `flush()` on batch abort paths to avoid hangs in the same sender-thread failure mode.
+
+### Changed
+- Added `scripts/build-esa.sh` for CI-parity local ESA builds via Docker and hardened it against macOS `.DS_Store` clean-step interference.
+- Added a `tls-mismatch` scenario to the producer E2E suite that points a plaintext Security Protocol at a TLS-only listener on the test tenant and fails if the adapter ever lets the node crash again. CI-only; no effect on the adapter runtime.
+
 ## [1.2.2] - 2026-08-10
 ### Changed
 - CI now fails a pull request that leaves `CHANGELOG.md` untouched, enforcing a rule that was documented but unchecked. Add the `no-changelog` label to a pull request that genuinely needs no entry. `CONTRIBUTING.md` states the rule per pull request instead of per commit, since merges are squashed into a single commit on `main`.

@@ -94,6 +94,14 @@ jobs:
             response-format: xml
             expected-topic: e2e.kafka-adapter-plus.batch-xml
             expected-record-count: 3
+          # Negative scenario: plaintext protocol against a TLS-only listener. The adapter
+          # must reject it up front; the iFlow's exception subprocess returns the error.
+          - name: tls-mismatch
+            endpoint: /http/kafkaadapterplus/producer/tls-missmatch
+            template: tests/payloads/producer_tls_mismatch.json
+            content-type: application/json
+            response-format: tls-mismatch
+            expected-status: '500'
     steps:
       - uses: actions/checkout@v7
 
@@ -139,28 +147,43 @@ jobs:
             --data @"${{ steps.render.outputs.rendered_file }}")
           echo "http_code=$http_code" >> "$GITHUB_OUTPUT"
           echo "--- Response ($http_code) ---"
-          cat response.txt
+          # Public repo: this response names the broker, so never echo it.
+          if [ "${{ matrix.response-format }}" = "tls-mismatch" ]; then
+            echo "(response withheld: contains broker endpoint details; assertions run in the next step)"
+          else
+            cat response.txt
+          fi
 
       - name: Validate response
         run: |
           python3 - <<'PY'
           import json
           import os
+          import re
           import sys
           import xml.etree.ElementTree as ET
+
+          def redact(text):
+              """Mask broker endpoints; public repo. Java packages carry no port, so they stay."""
+              return re.sub(
+                  r"\b(?:[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\.)+[A-Za-z]{2,}:\d+",
+                  "<broker>:<port>",
+                  text,
+              )
 
           http_code = "${{ steps.send.outputs.http_code }}"
           response_format = "${{ matrix.response-format }}"
           expected_topic = "${{ matrix.expected-topic }}"
           expected_record_count = "${{ matrix.expected-record-count }}"
+          # Per-scenario expected status (default 200); negative cases return an error.
+          expected_status = "${{ matrix.expected-status }}" or "200"
 
           with open("response.txt") as f:
               body = f.read()
 
           errors = []
-          if http_code != "200":
-              errors.append(f"expected HTTP 200, got {http_code}")
-
+          if http_code != expected_status:
+              errors.append(f"expected HTTP {expected_status}, got {http_code}")
           if response_format == "json":
               try:
                   data = json.loads(body)
@@ -187,6 +210,22 @@ jobs:
                       errors.append(
                           f"expected recordCount '{expected_record_count}', got '{record_count}'"
                       )
+          elif response_format == "tls-mismatch":
+              # The adapter must reject a plaintext client against a TLS-only listener,
+              # and say what to change.
+              required = [
+                  "requires TLS",
+                  "SASL_SSL",
+              ]
+              for needle in required:
+                  if needle not in body:
+                      errors.append(f"expected TLS-mismatch error to contain {needle!r}")
+              # Without the probe the client OOMs the node instead of erroring.
+              for needle in ("OutOfMemoryError", "Node Crashed"):
+                  if needle in body:
+                      errors.append(
+                          f"response contains {needle!r} - the TLS probe did not prevent the crash"
+                      )
 
           summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
           status = "PASSED" if not errors else "FAILED"
@@ -194,16 +233,26 @@ jobs:
               with open(summary_path, "a") as summary:
                   summary.write(f"### Producer E2E test: `${{ matrix.name }}` - {status}\n\n")
                   summary.write(f"- HTTP status: {http_code}\n")
-                  summary.write(f"- Expected topic: `{expected_topic}`\n")
-                  summary.write("```\n" + body + "\n```\n")
+                  if expected_topic:
+                      summary.write(f"- Expected topic: `{expected_topic}`\n")
+                  if response_format == "tls-mismatch":
+                      # Withheld: names the broker, and summaries are public.
+                      summary.write(
+                          "- Response withheld (broker endpoint details); "
+                          "asserted on the TLS-mismatch error markers only\n"
+                      )
+                  else:
+                      # Error responses carry a full stacktrace; keep the summary readable.
+                      excerpt = body if len(body) <= 2000 else body[:2000] + "\n... (truncated)"
+                      summary.write("```\n" + redact(excerpt) + "\n```\n")
                   if errors:
                       summary.write("\nErrors:\n")
                       for e in errors:
-                          summary.write(f"- {e}\n")
+                          summary.write(f"- {redact(e)}\n")
 
           if errors:
               for e in errors:
-                  print(f"::error::{e}")
+                  print(f"::error::{redact(e)}")
               sys.exit(1)
           print(f"Producer E2E test '${{ matrix.name }}' passed.")
           PY

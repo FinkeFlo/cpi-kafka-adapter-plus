@@ -79,6 +79,11 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
 
     private final CpiKafkaPlusEndpoint endpoint;
     /**
+     * Bounds every wait for a send result so a sender thread that died — the classic case is a TLS
+     * mismatch — cannot block a CPI worker thread indefinitely and surface as {@code Node Crashed}.
+     */
+    private final ProducerSendGuard sendGuard;
+    /**
      * Topics already confirmed to exist. Only ever holds <em>positive</em> results: a topic that
      * the broker reported as missing must never be cached, otherwise creating the topic would not
      * take effect until the IFlow is redeployed.
@@ -110,6 +115,7 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
     public CpiKafkaPlusProducer(CpiKafkaPlusEndpoint endpoint) {
         super(endpoint);
         this.endpoint = endpoint;
+        this.sendGuard = ProducerSendGuard.forEndpoint(endpoint);
     }
 
     @Override
@@ -245,6 +251,11 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
     /** @return true if the KafkaProducer was created successfully */
     private boolean createKafkaProducer() {
         try {
+            // Before any Kafka client exists: a plaintext protocol against a TLS-only broker makes
+            // Kafka allocate the broker's TLS alert as a 352 MB frame until jvmkill takes the node
+            // down. That cannot be caught afterwards, so it must not be started.
+            TlsListenerProbe.assertNoTlsListener(endpoint.getBootstrapServers(),
+                    endpoint.getSecurityProtocol());
             Properties props = ProducerConfigFactory.buildProducerProperties(endpoint);
             LOG.debug("[CPI-KAFKA-PLUS-DIAG] ensureInitialized: producer properties built, security={}, sasl={}",
                     endpoint.getSecurityProtocol(), endpoint.getSaslMechanism());
@@ -313,9 +324,13 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
             if (kafkaProducer == null) {
                 String msg = "Kafka producer not initialized — init failed, will retry on next exchange";
                 if (lastInitException != null) {
-                    msg += ". Cause: " + KafkaErrorHelper.describeChain(lastInitException);
+                    msg += ". Root cause: " + KafkaErrorHelper.describeChain(lastInitException);
                 }
-                throw new IllegalStateException(msg, lastInitException);
+                // Do not pass lastInitException as the cause: CPI's HTTP adapter surfaces
+                // getCause().getMessage() rather than this exception's own message, which would
+                // swallow the descriptive chain we just built. The full stack trace is already
+                // logged by logInitFailure(); we only need a readable message here.
+                throw new IllegalStateException(msg);
             }
         }
 
@@ -364,7 +379,7 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
             try {
                 ProducerBatchHelper.BatchSendResult result = ProducerBatchHelper.sendBatch(
                         kafkaProducer, records, topic, fallbackKey, partition, timestamp,
-                        in, this::addRecordHeaders, valueSerializer, null);
+                        in, this::addRecordHeaders, valueSerializer, null, sendGuard);
 
                 ProducerBatchHelper.setResponseHeadersAndBody(in, topic, batchMode, result);
                 recordSendSuccess();
@@ -379,6 +394,13 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
                                         java.util.List<BatchRecord> records, String fallbackKey,
                                         Integer partition, Long timestamp,
                                         ProducerBatchHelper.ByteSerializer valueSerializer) throws Exception {
+        // The transactional producer is created outside ensureInitialized(), so it needs the same
+        // protection against a plaintext protocol on a TLS-only broker. The probe is cached per
+        // bootstrap/security config, and it runs before acquiring a transaction slot so a first
+        // inconclusive timeout on a silent endpoint cannot hold scarce slots.
+        TlsListenerProbe.assertNoTlsListener(endpoint.getBootstrapServers(),
+                endpoint.getSecurityProtocol());
+
         int slotId = -1;
         try {
             txnSlotSemaphore.acquire();
@@ -418,7 +440,7 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
 
             ProducerBatchHelper.BatchSendResult result = ProducerBatchHelper.sendBatch(
                     txnProducer, records, topic, fallbackKey, partition, timestamp,
-                    in, this::addRecordHeaders, valueSerializer, null);
+                    in, this::addRecordHeaders, valueSerializer, null, sendGuard);
 
             txnProducer.commitTransaction();
 
@@ -526,7 +548,8 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
         // Send synchronously to ensure delivery before IFlow continues
         try {
             Future<RecordMetadata> future = kafkaProducer.send(record);
-            RecordMetadata metadata = future.get();
+            RecordMetadata metadata = sendGuard.await(future, sendGuard.newDeadline(),
+                    "Send to topic '" + topic + "'");
 
             in.setHeader("SAP_Receiver", metadata.topic());
             // Adapter-native headers, consistent with the batch producer and consumer.
@@ -917,9 +940,15 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
             DescribeTopicsResult result = admin.describeTopics(Collections.singletonList(topic));
             KafkaFuture<TopicDescription> future = result.topicNameValues().get(topic);
             try {
-                future.get();
+                // Bounded: the AdminClient completes this future from its own network thread, so an
+                // unbounded get() would hang for good if that thread dies.
+                future.get(TOPIC_CHECK_TIMEOUT_MS, java.util.concurrent.TimeUnit.MILLISECONDS);
                 LOG.debug("[CPI-KAFKA-PLUS-DIAG] Topic '{}' confirmed to exist", topic);
                 return TopicCheckResult.EXISTS;
+            } catch (java.util.concurrent.TimeoutException te) {
+                LOG.warn("[CPI-KAFKA-PLUS-DIAG] Timed out after {} ms while checking whether topic "
+                        + "'{}' exists. Skipping the check.", TOPIC_CHECK_TIMEOUT_MS, topic);
+                return TopicCheckResult.inconclusive(te);
             } catch (java.util.concurrent.ExecutionException ex) {
                 Throwable cause = ex.getCause();
                 if (cause instanceof UnknownTopicOrPartitionException) {
