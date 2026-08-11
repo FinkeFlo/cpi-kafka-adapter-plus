@@ -17,6 +17,7 @@ iFlow compatibility.
 
 ### Changed
 - Added `scripts/build-esa.sh` for CI-parity local ESA builds via Docker and hardened it against macOS `.DS_Store` clean-step interference.
+- Added a `tls-mismatch` scenario to the producer E2E suite that points a plaintext Security Protocol at a TLS-only listener on the test tenant and fails if the adapter ever lets the node crash again. CI-only; no effect on the adapter runtime.
 
 ## [1.2.2] - 2026-08-10
 ### Changed
