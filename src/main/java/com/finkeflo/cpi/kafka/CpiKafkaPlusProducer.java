@@ -394,6 +394,13 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
                                         java.util.List<BatchRecord> records, String fallbackKey,
                                         Integer partition, Long timestamp,
                                         ProducerBatchHelper.ByteSerializer valueSerializer) throws Exception {
+        // The transactional producer is created outside ensureInitialized(), so it needs the same
+        // protection against a plaintext protocol on a TLS-only broker. The probe is cached per
+        // bootstrap/security config, and it runs before acquiring a transaction slot so a first
+        // inconclusive timeout on a silent endpoint cannot hold scarce slots.
+        TlsListenerProbe.assertNoTlsListener(endpoint.getBootstrapServers(),
+                endpoint.getSecurityProtocol());
+
         int slotId = -1;
         try {
             txnSlotSemaphore.acquire();
@@ -420,10 +427,6 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
             // resolvedMemberSuffix is resolved once (fail-fast) in doStart() — never null here.
             String transactionalId = endpoint.getTransactionalIdPrefix() + "-" + resolvedMemberSuffix + "-" + slotId;
 
-            // The transactional producer is created outside ensureInitialized(), so it needs the
-            // same protection against a plaintext protocol on a TLS-only broker.
-            TlsListenerProbe.assertNoTlsListener(endpoint.getBootstrapServers(),
-                    endpoint.getSecurityProtocol());
             java.util.Properties props = ProducerConfigFactory.buildProducerProperties(endpoint);
             props.put(org.apache.kafka.clients.producer.ProducerConfig.TRANSACTIONAL_ID_CONFIG, transactionalId);
 

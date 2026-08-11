@@ -28,15 +28,15 @@ import java.util.Set;
 import java.util.concurrent.Future;
 
 import org.apache.camel.Message;
-import org.apache.kafka.clients.producer.KafkaProducer;
+import org.apache.kafka.clients.producer.Producer;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.clients.producer.RecordMetadata;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Sends a list of {@link BatchRecord} to Kafka using async send + flush
- * for maximum throughput. Sets response headers and XML summary body.
+ * Sends a list of {@link BatchRecord} to Kafka using async sends and bounded waits.
+ * Sets response headers and XML summary body.
  */
 public final class ProducerBatchHelper {
 
@@ -71,7 +71,7 @@ public final class ProducerBatchHelper {
     }
 
     /**
-     * Send all records asynchronously, flush, evaluate futures.
+     * Send all records asynchronously, then evaluate their futures against one shared deadline.
      *
      * @param producer     Kafka producer instance
      * @param records      parsed batch records
@@ -85,7 +85,7 @@ public final class ProducerBatchHelper {
      * @return BatchSendResult with offsets and timing
      */
     public static BatchSendResult sendBatch(
-            KafkaProducer<byte[], byte[]> producer,
+            Producer<byte[], byte[]> producer,
             List<BatchRecord> records,
             String topic,
             String fallbackKey,
@@ -153,7 +153,7 @@ public final class ProducerBatchHelper {
     }
 
     private static List<Future<RecordMetadata>> sendRecordsAsync(
-            KafkaProducer<byte[], byte[]> producer,
+            Producer<byte[], byte[]> producer,
             List<BatchRecord> records,
             String topic,
             String fallbackKey,

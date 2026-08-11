@@ -81,7 +81,6 @@ final class ProducerSendGuard {
         try {
             return future.get(remaining, TimeUnit.MILLISECONDS);
         } catch (TimeoutException e) {
-            future.cancel(true);
             throw new SendStalledException(stalledMessage(description), e);
         }
     }
@@ -89,7 +88,8 @@ final class ProducerSendGuard {
     /**
      * Waits for all futures against a single shared deadline, logging instead of throwing. Used on
      * abort paths, where the send outcome is only needed for diagnostics and must never replace the
-     * original failure.
+     * original failure. Kafka's own send futures cannot be cancelled reliably, so a stalled future
+     * stops the diagnostic drain without claiming that buffered records were released.
      */
     void awaitAllQuietly(List<Future<RecordMetadata>> futures, long deadlineMs) {
         for (int i = 0; i < futures.size(); i++) {
@@ -97,8 +97,6 @@ final class ProducerSendGuard {
                 await(futures.get(i), deadlineMs, "Buffered record " + i);
             } catch (SendStalledException e) {
                 LOG.warn("[CPI-KAFKA-PLUS-DIAG] {}", e.getMessage());
-                // Every remaining future waits on the same dead sender thread.
-                cancelAll(futures, i + 1);
                 return;
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
@@ -107,12 +105,6 @@ final class ProducerSendGuard {
                 LOG.warn("[CPI-KAFKA-PLUS-DIAG] Buffered record {} failed during abort: {}",
                         i, e.getMessage());
             }
-        }
-    }
-
-    private static void cancelAll(List<Future<RecordMetadata>> futures, int fromIndex) {
-        for (int i = fromIndex; i < futures.size(); i++) {
-            futures.get(i).cancel(true);
         }
     }
 

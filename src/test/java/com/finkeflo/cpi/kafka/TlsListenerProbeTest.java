@@ -29,12 +29,14 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.security.KeyStore;
 import java.security.SecureRandom;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLServerSocket;
 
 import org.junit.AfterClass;
+import org.junit.After;
 import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -59,7 +61,10 @@ public class TlsListenerProbeTest {
     /** Generated with the JDK's own keytool so the test carries no key material in the repository. */
     @BeforeClass
     public static void createServerCertificate() throws Exception {
-        keystoreDir = Files.createTempDirectory("tls-listener-probe");
+        Path parent = Paths.get("target", "test-work");
+        Files.createDirectories(parent);
+        keystoreDir = parent.resolve("tls-listener-probe-" + System.nanoTime());
+        Files.createDirectory(keystoreDir);
         Process process = new ProcessBuilder(
                 Paths.get(System.getProperty("java.home"), "bin", "keytool").toString(),
                 "-genkeypair", "-alias", "probe", "-keyalg", "RSA", "-keysize", "2048",
@@ -76,6 +81,11 @@ public class TlsListenerProbeTest {
     public static void deleteServerCertificate() throws Exception {
         Files.deleteIfExists(keystoreDir.resolve("server.p12"));
         Files.deleteIfExists(keystoreDir);
+    }
+
+    @After
+    public void clearProbeCache() {
+        TlsListenerProbe.clearCacheForTests();
     }
 
     private static SSLContext serverContext() throws Exception {
@@ -119,6 +129,66 @@ public class TlsListenerProbeTest {
                     TlsListenerProbe.probe("localhost", server.getLocalPort());
 
             Assert.assertEquals(TlsListenerProbe.Verdict.INCONCLUSIVE, verdict);
+        } finally {
+            close(server, acceptor);
+        }
+    }
+
+    @Test
+    public void fatalTlsAlertRecordProvesTheListenerIsTls() throws Exception {
+        ServerSocket server = new ServerSocket(0);
+        Thread acceptor = acceptAndReply(server, new byte[] {0x15, 0x03, 0x03, 0x00, 0x02, 0x02, 0x28});
+        try {
+            Assert.assertEquals(TlsListenerProbe.Verdict.TLS,
+                    TlsListenerProbe.probe("localhost", server.getLocalPort()));
+        } finally {
+            close(server, acceptor);
+        }
+    }
+
+    @Test
+    public void serverHelloRecordProvesTheListenerIsTls() throws Exception {
+        ServerSocket server = new ServerSocket(0);
+        Thread acceptor = acceptAndReply(server, new byte[] {0x16, 0x03, 0x03, 0x00, 0x00});
+        try {
+            Assert.assertEquals(TlsListenerProbe.Verdict.TLS,
+                    TlsListenerProbe.probe("localhost", server.getLocalPort()));
+        } finally {
+            close(server, acceptor);
+        }
+    }
+
+    @Test
+    public void peerThatClosesImmediatelyStaysInconclusive() throws Exception {
+        ServerSocket server = new ServerSocket(0);
+        Thread acceptor = acceptAndClose(server);
+        try {
+            Assert.assertEquals(TlsListenerProbe.Verdict.INCONCLUSIVE,
+                    TlsListenerProbe.probe("localhost", server.getLocalPort()));
+        } finally {
+            close(server, acceptor);
+        }
+    }
+
+    @Test
+    public void peerThatStaysSilentStaysInconclusive() throws Exception {
+        ServerSocket server = new ServerSocket(0);
+        Thread acceptor = acceptAndStaySilent(server);
+        try {
+            Assert.assertEquals(TlsListenerProbe.Verdict.INCONCLUSIVE,
+                    TlsListenerProbe.probe("localhost", server.getLocalPort()));
+        } finally {
+            close(server, acceptor);
+        }
+    }
+
+    @Test
+    public void plaintextKafkaLikePeerThatReadsAndDiscardsStaysInconclusive() throws Exception {
+        ServerSocket server = new ServerSocket(0);
+        Thread acceptor = acceptOnce(server, false);
+        try {
+            Assert.assertEquals(TlsListenerProbe.Verdict.INCONCLUSIVE,
+                    TlsListenerProbe.probe("localhost", server.getLocalPort()));
         } finally {
             close(server, acceptor);
         }
@@ -177,6 +247,47 @@ public class TlsListenerProbeTest {
         TlsListenerProbe.assertNoTlsListener(null, "PLAINTEXT");
     }
 
+    @Test
+    public void repeatedAssertionsUseTheCachedProbeVerdict() {
+        final AtomicInteger calls = new AtomicInteger();
+        TlsListenerProbe.setProbeRunnerForTests(new TlsListenerProbe.ProbeRunner() {
+            @Override
+            public TlsListenerProbe.Verdict probe(String address) {
+                calls.incrementAndGet();
+                return TlsListenerProbe.Verdict.INCONCLUSIVE;
+            }
+        });
+
+        TlsListenerProbe.assertNoTlsListener("broker1:9092,broker2:9092", "PLAINTEXT");
+        TlsListenerProbe.assertNoTlsListener("broker1:9092,broker2:9092", "PLAINTEXT");
+
+        Assert.assertEquals("The bootstrap list should be probed once for the same config key",
+                2, calls.get());
+    }
+
+    @Test
+    public void cachedTlsVerdictStillThrowsOnEveryCall() {
+        final AtomicInteger calls = new AtomicInteger();
+        TlsListenerProbe.setProbeRunnerForTests(new TlsListenerProbe.ProbeRunner() {
+            @Override
+            public TlsListenerProbe.Verdict probe(String address) {
+                calls.incrementAndGet();
+                return TlsListenerProbe.Verdict.TLS;
+            }
+        });
+
+        for (int i = 0; i < 2; i++) {
+            try {
+                TlsListenerProbe.assertNoTlsListener("broker1:9092", "SASL_PLAINTEXT");
+                Assert.fail("Expected cached TLS mismatch to be raised");
+            } catch (IllegalStateException e) {
+                Assert.assertTrue(e.getMessage(), e.getMessage().contains("requires TLS"));
+            }
+        }
+
+        Assert.assertEquals(1, calls.get());
+    }
+
     private static Thread acceptOnce(final ServerSocket server, final boolean speakTls) {
         Thread thread = new Thread(new Runnable() {
             @Override
@@ -196,6 +307,55 @@ public class TlsListenerProbeTest {
                     }
                 } catch (Exception ignored) {
                     // The probe closing the socket mid-handshake is the expected outcome here.
+                }
+            }
+        });
+        thread.setDaemon(true);
+        thread.start();
+        return thread;
+    }
+
+    private static Thread acceptAndReply(final ServerSocket server, final byte[] response) {
+        Thread thread = new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try (Socket socket = server.accept()) {
+                    socket.getInputStream().read(new byte[64]);
+                    OutputStream out = socket.getOutputStream();
+                    out.write(response);
+                    out.flush();
+                } catch (Exception ignored) {
+                    // The probe closing the socket is expected.
+                }
+            }
+        });
+        thread.setDaemon(true);
+        thread.start();
+        return thread;
+    }
+
+    private static Thread acceptAndClose(final ServerSocket server) {
+        Thread thread = new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try (Socket ignored = server.accept()) {
+                    // Close immediately.
+                } catch (Exception ignored) {
+                }
+            }
+        });
+        thread.setDaemon(true);
+        thread.start();
+        return thread;
+    }
+
+    private static Thread acceptAndStaySilent(final ServerSocket server) {
+        Thread thread = new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try (Socket ignored = server.accept()) {
+                    Thread.sleep(TlsListenerProbe.HANDSHAKE_TIMEOUT_MS + 500L);
+                } catch (Exception ignored) {
                 }
             }
         });

@@ -21,14 +21,17 @@
 package com.finkeflo.cpi.kafka;
 
 import java.io.IOException;
+import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.net.Socket;
-import java.security.cert.CertificateException;
+import java.nio.ByteBuffer;
 import java.util.Locale;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 
-import javax.net.ssl.SSLException;
-import javax.net.ssl.SSLSocket;
-import javax.net.ssl.SSLSocketFactory;
+import javax.net.ssl.SSLEngine;
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLSession;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -50,11 +53,11 @@ import org.slf4j.LoggerFactory;
  * with an unlimited receive size. The only reliable defence is to detect the TLS listener before a
  * Kafka client is created at all.
  *
- * <p>The probe therefore opens a plain TCP connection and offers a TLS handshake. It blocks only on
- * a definitive answer:
+ * <p>The probe therefore opens a plain TCP connection and offers a TLS client hello. It blocks only
+ * on a definitive answer:
  * <ul>
- *   <li>the handshake completes, or fails because the certificate is not trusted — either way the
- *       peer sent a TLS server response, so the listener speaks TLS;</li>
+ *   <li>the peer answers with a TLS handshake or alert record — either way the listener speaks
+ *       TLS;</li>
  *   <li>anything else — a plaintext listener, a connection error, a timeout — is inconclusive and
  *       lets the connection proceed unchanged.</li>
  * </ul>
@@ -68,6 +71,19 @@ final class TlsListenerProbe {
 
     static final int CONNECT_TIMEOUT_MS = 3_000;
     static final int HANDSHAKE_TIMEOUT_MS = 3_000;
+
+    private static final int TLS_RECORD_HANDSHAKE = 0x16;
+    private static final int TLS_RECORD_ALERT = 0x15;
+
+    private static final ConcurrentMap<ProbeCacheKey, ProbeResult> CACHE =
+            new ConcurrentHashMap<>();
+
+    private static volatile ProbeRunner probeRunner = new ProbeRunner() {
+        @Override
+        public Verdict probe(String address) {
+            return TlsListenerProbe.probe(address);
+        }
+    };
 
     private TlsListenerProbe() {
     }
@@ -88,17 +104,31 @@ final class TlsListenerProbe {
         if (!isPlaintext(securityProtocol) || bootstrapServers == null) {
             return;
         }
+        ProbeResult result = CACHE.computeIfAbsent(new ProbeCacheKey(bootstrapServers, securityProtocol),
+                new java.util.function.Function<ProbeCacheKey, ProbeResult>() {
+                    @Override
+                    public ProbeResult apply(ProbeCacheKey key) {
+                        return probeBootstrapServers(key.bootstrapServers);
+                    }
+                });
+        if (result.verdict == Verdict.TLS) {
+            throw new IllegalStateException(
+                    "Security Protocol '" + securityProtocol + "' sends unencrypted traffic, but "
+                    + "broker " + result.address + " requires TLS. Use SASL_SSL (or SSL) instead.");
+        }
+    }
+
+    private static ProbeResult probeBootstrapServers(String bootstrapServers) {
         for (String server : bootstrapServers.split(",")) {
             String address = server.trim();
             if (address.isEmpty()) {
                 continue;
             }
-            if (probe(address) == Verdict.TLS) {
-                throw new IllegalStateException(
-                        "Security Protocol '" + securityProtocol + "' sends unencrypted traffic, but "
-                        + "broker " + address + " requires TLS. Use SASL_SSL (or SSL) instead.");
+            if (probeRunner.probe(address) == Verdict.TLS) {
+                return new ProbeResult(Verdict.TLS, address);
             }
         }
+        return new ProbeResult(Verdict.INCONCLUSIVE, null);
     }
 
     /** Visible for testing. */
@@ -123,19 +153,17 @@ final class TlsListenerProbe {
             plain.connect(new InetSocketAddress(host, port), CONNECT_TIMEOUT_MS);
             plain.setSoTimeout(HANDSHAKE_TIMEOUT_MS);
 
-            // The socket is layered rather than created directly so that a broker which does not
-            // speak TLS costs one TCP connection and nothing else.
-            SSLSocketFactory factory = (SSLSocketFactory) SSLSocketFactory.getDefault();
-            try (SSLSocket tls = (SSLSocket) factory.createSocket(plain, host, port, false)) {
-                tls.setUseClientMode(true);
-                tls.setSoTimeout(HANDSHAKE_TIMEOUT_MS);
-                tls.startHandshake();
-                LOG.warn("[CPI-KAFKA-PLUS-DIAG] {}:{} completed a TLS handshake — the listener requires TLS",
-                        host, port);
+            sendClientHello(plain, host, port);
+            int firstByte = plain.getInputStream().read();
+            if (firstByte == TLS_RECORD_HANDSHAKE || firstByte == TLS_RECORD_ALERT) {
+                LOG.warn("[CPI-KAFKA-PLUS-DIAG] {}:{} answered the TLS probe with record type 0x{} "
+                        + "— the listener requires TLS",
+                        host, port, Integer.toHexString(firstByte));
                 return Verdict.TLS;
             }
-        } catch (SSLException e) {
-            return classifyHandshakeFailure(host, port, e);
+            LOG.debug("[CPI-KAFKA-PLUS-DIAG] TLS probe of {}:{} found no TLS server (first byte {}) "
+                    + "— inconclusive", host, port, firstByte);
+            return Verdict.INCONCLUSIVE;
         } catch (IOException e) {
             // Unreachable, refused or timed out: says nothing about the protocol. Kafka's own
             // connection error is the better message here, so do not interfere.
@@ -149,38 +177,96 @@ final class TlsListenerProbe {
         }
     }
 
-    private static Verdict classifyHandshakeFailure(String host, int port, SSLException e) {
-        if (hasCertificateCause(e)) {
-            // The peer sent a certificate we do not trust. Untrusted or not, only a TLS server
-            // sends one, and that is the whole question here.
-            LOG.warn("[CPI-KAFKA-PLUS-DIAG] {}:{} presented a TLS certificate ({}) — the listener "
-                    + "requires TLS", host, port, e.getMessage());
-            return Verdict.TLS;
+    private static void sendClientHello(Socket plain, String host, int port) throws IOException {
+        SSLEngine engine;
+        try {
+            engine = SSLContext.getDefault().createSSLEngine(host, port);
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new IOException("Default TLS context is unavailable", e);
         }
-        // "Unrecognized SSL message, plaintext connection?" and peers that simply drop a client
-        // hello they cannot parse are what a plaintext listener looks like.
-        LOG.debug("[CPI-KAFKA-PLUS-DIAG] TLS probe of {}:{} found no TLS server ({}) — inconclusive",
-                host, port, e.toString());
-        return Verdict.INCONCLUSIVE;
-    }
+        engine.setUseClientMode(true);
+        engine.beginHandshake();
 
-    private static boolean hasCertificateCause(Throwable t) {
-        for (Throwable current = t; current != null; current = current.getCause()) {
-            if (current instanceof CertificateException) {
-                return true;
-            }
-            if (current.getClass().getName().endsWith("ValidatorException")) {
-                return true;
-            }
-            if (current.getCause() == current) {
-                break;
-            }
+        SSLSession session = engine.getSession();
+        ByteBuffer empty = ByteBuffer.allocate(0);
+        ByteBuffer outbound = ByteBuffer.allocate(session.getPacketBufferSize());
+        javax.net.ssl.SSLEngineResult result = engine.wrap(empty, outbound);
+        if (result.bytesProduced() <= 0) {
+            throw new IOException("TLS engine did not produce a client hello (status "
+                    + result.getHandshakeStatus() + ")");
         }
-        return false;
+        outbound.flip();
+
+        OutputStream out = plain.getOutputStream();
+        byte[] bytes = new byte[outbound.remaining()];
+        outbound.get(bytes);
+        out.write(bytes);
+        out.flush();
     }
 
     static boolean isPlaintext(String securityProtocol) {
         return securityProtocol == null
                 || !securityProtocol.toUpperCase(Locale.ROOT).contains("SSL");
+    }
+
+    /** Visible for testing. */
+    static void setProbeRunnerForTests(ProbeRunner runner) {
+        probeRunner = runner;
+        CACHE.clear();
+    }
+
+    /** Visible for testing. */
+    static void clearCacheForTests() {
+        CACHE.clear();
+        probeRunner = new ProbeRunner() {
+            @Override
+            public Verdict probe(String address) {
+                return TlsListenerProbe.probe(address);
+            }
+        };
+    }
+
+    interface ProbeRunner {
+        Verdict probe(String address);
+    }
+
+    private static final class ProbeCacheKey {
+        private final String bootstrapServers;
+        private final String securityProtocol;
+
+        ProbeCacheKey(String bootstrapServers, String securityProtocol) {
+            this.bootstrapServers = bootstrapServers;
+            this.securityProtocol = securityProtocol;
+        }
+
+        @Override
+        public boolean equals(Object other) {
+            if (this == other) {
+                return true;
+            }
+            if (!(other instanceof ProbeCacheKey)) {
+                return false;
+            }
+            ProbeCacheKey that = (ProbeCacheKey) other;
+            return this.bootstrapServers.equals(that.bootstrapServers)
+                    && String.valueOf(this.securityProtocol).equals(String.valueOf(that.securityProtocol));
+        }
+
+        @Override
+        public int hashCode() {
+            int result = bootstrapServers.hashCode();
+            result = 31 * result + String.valueOf(securityProtocol).hashCode();
+            return result;
+        }
+    }
+
+    private static final class ProbeResult {
+        private final Verdict verdict;
+        private final String address;
+
+        ProbeResult(Verdict verdict, String address) {
+            this.verdict = verdict;
+            this.address = address;
+        }
     }
 }

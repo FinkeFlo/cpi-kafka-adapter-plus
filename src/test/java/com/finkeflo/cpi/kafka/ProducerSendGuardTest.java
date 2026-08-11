@@ -25,6 +25,8 @@ import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.clients.producer.RecordMetadata;
@@ -75,7 +77,8 @@ public class ProducerSendGuardTest {
         } catch (Exception e) {
             Assert.fail("Expected SendStalledException but got " + e);
         }
-        Assert.assertTrue("The abandoned future must be cancelled", neverCompletes.isCancelled());
+        Assert.assertFalse("Kafka futures are not reliably cancellable; timeout is the guarantee",
+                neverCompletes.isCancelled());
     }
 
     @Test
@@ -101,10 +104,23 @@ public class ProducerSendGuardTest {
         Assert.assertTrue("Waited " + elapsedMs + " ms for " + futures.size()
                 + " records on a " + SHORT_BUDGET_MS + " ms budget",
                 elapsedMs < SHORT_BUDGET_MS * futures.size());
-        for (Future<RecordMetadata> future : futures) {
-            Assert.assertTrue("Every record of a stalled batch must be released",
-                    future.isCancelled());
-        }
+    }
+
+    @Test
+    public void abortDrainDoesNotDependOnKafkaFuturesBeingCancellable() {
+        ProducerSendGuard guard = ProducerSendGuard.of(SHORT_BUDGET_MS, "PLAINTEXT");
+        NonCancellableFuture first = new NonCancellableFuture();
+        NonCancellableFuture second = new NonCancellableFuture();
+        List<Future<RecordMetadata>> futures = Arrays.<Future<RecordMetadata>>asList(first, second);
+
+        long startMs = System.currentTimeMillis();
+        guard.awaitAllQuietly(futures, guard.newDeadline());
+        long elapsedMs = System.currentTimeMillis() - startMs;
+
+        Assert.assertTrue("Waited " + elapsedMs + " ms on a " + SHORT_BUDGET_MS + " ms budget",
+                elapsedMs < SHORT_BUDGET_MS * futures.size());
+        Assert.assertTrue("The guard may attempt cancellation in the future, but Kafka returns false",
+                !first.cancelled && !second.cancelled);
     }
 
     @Test
@@ -132,5 +148,36 @@ public class ProducerSendGuardTest {
         ProducerSendGuard guard = ProducerSendGuard.forEndpoint(endpoint);
 
         Assert.assertEquals(60_000L + ProducerSendGuard.GUARD_MARGIN_MS, guard.getBudgetMs());
+    }
+
+    private static final class NonCancellableFuture implements Future<RecordMetadata> {
+        private boolean cancelled;
+
+        @Override
+        public boolean cancel(boolean mayInterruptIfRunning) {
+            cancelled = true;
+            return false;
+        }
+
+        @Override
+        public boolean isCancelled() {
+            return false;
+        }
+
+        @Override
+        public boolean isDone() {
+            return false;
+        }
+
+        @Override
+        public RecordMetadata get() throws InterruptedException {
+            Thread.sleep(Long.MAX_VALUE);
+            return null;
+        }
+
+        @Override
+        public RecordMetadata get(long timeout, TimeUnit unit) throws TimeoutException {
+            throw new TimeoutException("not done");
+        }
     }
 }

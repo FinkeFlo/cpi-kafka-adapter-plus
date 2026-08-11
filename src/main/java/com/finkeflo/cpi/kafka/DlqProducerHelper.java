@@ -31,6 +31,7 @@ import java.util.TimeZone;
 
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.producer.KafkaProducer;
+import org.apache.kafka.clients.producer.Producer;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.TopicPartition;
@@ -49,14 +50,18 @@ public final class DlqProducerHelper implements Closeable {
     private static final Logger LOG = LoggerFactory.getLogger(DlqProducerHelper.class);
 
     private final String dlqTopic;
-    private final KafkaProducer<byte[], byte[]> producer;
+    private final Producer<byte[], byte[]> producer;
+    private final ProducerSendGuard sendGuard;
 
     public DlqProducerHelper(CpiKafkaPlusEndpoint endpoint) {
         this.dlqTopic = endpoint.getDlqTopic();
+        this.sendGuard = ProducerSendGuard.forEndpoint(endpoint);
         LOG.info("Creating DLQ producer for topic '{}'", dlqTopic);
 
         try {
             Properties props = buildProducerProperties(endpoint);
+            TlsListenerProbe.assertNoTlsListener(endpoint.getBootstrapServers(),
+                    endpoint.getSecurityProtocol());
             this.producer = BundleBackedClassLoader.withBundleClassLoader(DlqProducerHelper.class,
                     () -> new KafkaProducer<byte[], byte[]>(props,
                             new ByteArraySerializer(), new ByteArraySerializer()));
@@ -65,6 +70,13 @@ public final class DlqProducerHelper implements Closeable {
             LOG.error("[CPI-KAFKA-PLUS-DIAG] DLQ producer creation FAILED for topic='{}': {}", dlqTopic, e.getMessage(), e);
             throw (e instanceof RuntimeException) ? (RuntimeException) e : new RuntimeException(e);
         }
+    }
+
+    /** Visible for testing. */
+    DlqProducerHelper(String dlqTopic, Producer<byte[], byte[]> producer, ProducerSendGuard sendGuard) {
+        this.dlqTopic = dlqTopic;
+        this.producer = producer;
+        this.sendGuard = sendGuard;
     }
 
     /**
@@ -118,7 +130,8 @@ public final class DlqProducerHelper implements Closeable {
                 dlqTopic, record.topic(), record.partition(), record.offset(), retryCount, error.getMessage());
 
         try {
-            producer.send(dlqRecord).get();
+            sendGuard.await(producer.send(dlqRecord), sendGuard.newDeadline(),
+                    "DLQ send to topic '" + dlqTopic + "'");
             LOG.debug("[CPI-KAFKA-PLUS-DIAG] DLQ send OK for offset={} partition={}",
                     record.offset(), record.partition());
         } catch (Exception e) {
@@ -180,7 +193,8 @@ public final class DlqProducerHelper implements Closeable {
                 dlqTopic, tp.topic(), tp.partition(), offset, causeMsg);
 
         try {
-            producer.send(dlqRecord).get();
+            sendGuard.await(producer.send(dlqRecord), sendGuard.newDeadline(),
+                    "DLQ deserialization-failure send to topic '" + dlqTopic + "'");
             LOG.debug("[CPI-KAFKA-PLUS-DIAG] DLQ deser-failure send OK for offset={} partition={}",
                     offset, tp.partition());
         } catch (Exception e) {

@@ -10,9 +10,10 @@ iFlow compatibility.
 ## [1.2.3] - 2026-08-11
 ### Fixed
 - Prevented `Node Crashed` on a plaintext Security Protocol against TLS-only brokers by probing bootstrap listeners for TLS before creating Kafka clients (producer, transactional producer, consumer).
-- Bounded producer send waits (`delivery.timeout.ms` + guard margin) so a dead Kafka sender thread cannot block CPI worker threads indefinitely; applies to single-send and batch paths.
+- Detect TLS listeners that reject the probe handshake with a TLS alert before sending a certificate, avoiding false inconclusive results for TLS-version, cipher-suite or fronting-device mismatches.
+- Cache TLS listener-probe results per bootstrap/security configuration so transactional batches do not open probe connections and wait on silent endpoints for every message.
+- Bounded producer send waits (`delivery.timeout.ms` + guard margin) so a dead Kafka sender thread cannot block CPI worker threads indefinitely; applies to single-send, batch and DLQ paths.
 - Bounded topic-existence checks and removed unbounded `flush()` on batch abort paths to avoid hangs in the same sender-thread failure mode.
-- Removed the JVM-wide default uncaught-exception handler workaround; the bounded-send guard makes it unnecessary and avoids cross-iFlow side effects on shared nodes.
 
 ### Changed
 - Added `scripts/build-esa.sh` for CI-parity local ESA builds via Docker and hardened it against macOS `.DS_Store` clean-step interference.
