@@ -96,9 +96,7 @@ final class TlsListenerProbe {
             if (probe(address) == Verdict.TLS) {
                 throw new IllegalStateException(
                         "Security Protocol '" + securityProtocol + "' sends unencrypted traffic, but "
-                        + "broker " + address + " requires TLS. Use SASL_SSL (or SSL) instead. "
-                        + "Connecting anyway would make the Kafka client read the broker's TLS alert "
-                        + "as a 352 MB message frame and exhaust the node's heap.");
+                        + "broker " + address + " requires TLS. Use SASL_SSL (or SSL) instead.");
             }
         }
     }

@@ -10,7 +10,7 @@ If you are changing the docs or fixing a bug, feel free to fork and open a PR. I
 
 - **JDK 17** (the project builds with JDK 17 but targets **Java 11 bytecode** — see the constraint below)
 - **Maven 3.8+**
-- **Docker** (only needed for integration tests / `*IT.java`)
+- **Docker** (required for integration tests / `*IT.java`, and for the local ESA build script)
 
 ## Build & Test
 
@@ -25,6 +25,18 @@ Unit tests must pass **without** a running Kafka broker. Integration tests
 (`*IT.java`) use Testcontainers and require Docker; they run in `mvn verify`.
 The CI `build` workflow uploads the unit-test JaCoCo report as an artifact so it
 can be downloaded from the Actions run.
+
+### Local ESA build
+
+To produce a deployable `.esa` locally with exact CI parity (`linux/amd64`), use the build script:
+
+```bash
+scripts/build-esa.sh
+```
+
+It runs `mvn clean install` inside a `linux/amd64` Docker container (`maven:3.9-eclipse-temurin-17`),
+mounts your local Maven cache for fast subsequent runs, and prints the path to the generated
+`.esa` at the end. Docker must be running.
 
 ---
 
