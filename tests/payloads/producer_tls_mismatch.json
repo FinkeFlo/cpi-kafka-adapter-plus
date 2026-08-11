@@ -1,0 +1,5 @@
+{
+  "testId": "__TEST_ID__",
+  "message": "e2e test message tls mismatch (plaintext protocol against TLS-only listener)",
+  "timestamp": "__TIMESTAMP__"
+}
