@@ -275,28 +275,51 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
         if (protocol != null && protocol.toUpperCase().contains("SSL")) {
             return; // TLS is configured — no mismatch possible
         }
-        ThreadGroup group = Thread.currentThread().getThreadGroup();
-        Thread[] threads = new Thread[(int) (group.activeCount() * 2)];
-        int count = group.enumerate(threads);
-        for (int i = 0; i < count; i++) {
-            if (threads[i] != null && threads[i].getName().contains("kafka-producer-network-thread")) {
-                threads[i].setUncaughtExceptionHandler((t, e) -> {
-                    String hint = (e instanceof OutOfMemoryError)
-                            ? "Possible SSL/plaintext mismatch: the broker may require TLS. "
-                              + "Use SASL_SSL (or SSL) instead of " + protocol + "."
-                            : "";
-                    String msg = "Kafka producer network thread '" + t.getName()
-                            + "' crashed — " + hint + e;
-                    LOG.error("[CPI-KAFKA-PLUS-DIAG] {}", msg, e);
-                    lastInitException = new IllegalStateException(msg, e);
-                    initialized = false;
-                    kafkaProducer = null;
-                });
-                LOG.debug("[CPI-KAFKA-PLUS-DIAG] SSL-mismatch detector installed on thread '{}'",
-                        threads[i].getName());
-                break;
+        Thread senderThread = null;
+        for (int attempt = 0; attempt < 10 && senderThread == null; attempt++) {
+            senderThread = findKafkaNetworkThread();
+            if (senderThread == null) {
+                try {
+                    Thread.sleep(20);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
             }
         }
+        if (senderThread == null) {
+            LOG.warn("[CPI-KAFKA-PLUS-DIAG] Could not find kafka-producer-network-thread — SSL-mismatch detector not installed");
+            return;
+        }
+        senderThread.setUncaughtExceptionHandler((t, e) -> {
+            String hint = (e instanceof OutOfMemoryError)
+                    ? "Possible SSL/plaintext mismatch: the broker may require TLS. "
+                      + "Use SASL_SSL (or SSL) instead of " + protocol + "."
+                    : "";
+            String msg = "Kafka producer network thread '" + t.getName()
+                    + "' crashed — " + hint + e;
+            LOG.error("[CPI-KAFKA-PLUS-DIAG] {}", msg, e);
+            lastInitException = new IllegalStateException(msg, e);
+            initialized = false;
+            kafkaProducer = null;
+        });
+        LOG.debug("[CPI-KAFKA-PLUS-DIAG] SSL-mismatch detector installed on thread '{}'",
+                senderThread.getName());
+    }
+
+    private Thread findKafkaNetworkThread() {
+        ThreadGroup root = Thread.currentThread().getThreadGroup();
+        while (root.getParent() != null) {
+            root = root.getParent();
+        }
+        Thread[] threads = new Thread[(int) (root.activeCount() * 2)];
+        int count = root.enumerate(threads, true);
+        for (int i = 0; i < count; i++) {
+            if (threads[i] != null && threads[i].getName().contains("kafka-producer-network-thread")) {
+                return threads[i];
+            }
+        }
+        return null;
     }
 
     /** @return true if all helpers were created successfully */
