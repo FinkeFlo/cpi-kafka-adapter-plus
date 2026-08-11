@@ -79,6 +79,11 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
 
     private final CpiKafkaPlusEndpoint endpoint;
     /**
+     * Bounds every wait for a send result so a sender thread that died — the classic case is a TLS
+     * mismatch — cannot block a CPI worker thread indefinitely and surface as {@code Node Crashed}.
+     */
+    private final ProducerSendGuard sendGuard;
+    /**
      * Topics already confirmed to exist. Only ever holds <em>positive</em> results: a topic that
      * the broker reported as missing must never be cached, otherwise creating the topic would not
      * take effect until the IFlow is redeployed.
@@ -110,6 +115,7 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
     public CpiKafkaPlusProducer(CpiKafkaPlusEndpoint endpoint) {
         super(endpoint);
         this.endpoint = endpoint;
+        this.sendGuard = ProducerSendGuard.forEndpoint(endpoint);
     }
 
     @Override
@@ -248,14 +254,9 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
             Properties props = ProducerConfigFactory.buildProducerProperties(endpoint);
             LOG.debug("[CPI-KAFKA-PLUS-DIAG] ensureInitialized: producer properties built, security={}, sasl={}",
                     endpoint.getSecurityProtocol(), endpoint.getSaslMechanism());
-            // Install global OOM guard BEFORE creating the producer so that Kafka's
-            // network thread is protected even if it throws before our per-thread
-            // handler can be registered via installSslMismatchDetector().
-            installGlobalOomGuard();
             kafkaProducer = BundleBackedClassLoader.withBundleClassLoader(getClass(),
                     () -> new KafkaProducer<>(props,
                             new ByteArraySerializer(), new ByteArraySerializer()));
-            installSslMismatchDetector();
             return true;
         } catch (Throwable e) {
             logInitFailure("KafkaProducer", e);
@@ -263,97 +264,6 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
             lastInitException = e;
             return false;
         }
-    }
-
-    /**
-     * Registers (or chains) a JVM-wide default UncaughtExceptionHandler that
-     * intercepts OutOfMemoryErrors on kafka-producer-network-thread threads.
-     * This fires even if the OOM occurs before installSslMismatchDetector() can
-     * find and configure the per-thread handler.
-     */
-    private void installGlobalOomGuard() {
-        String protocol = endpoint.getSecurityProtocol();
-        if (protocol != null && protocol.toUpperCase().contains("SSL")) {
-            return; // TLS configured — no plaintext/SSL mismatch possible
-        }
-        Thread.UncaughtExceptionHandler existing = Thread.getDefaultUncaughtExceptionHandler();
-        Thread.setDefaultUncaughtExceptionHandler((t, e) -> {
-            if (t.getName().contains("kafka-producer-network-thread") && e instanceof OutOfMemoryError) {
-                String hint = "Possible SSL/plaintext mismatch: the broker may require TLS. "
-                        + "Use SASL_SSL (or SSL) instead of " + protocol + ".";
-                String msg = "[CPI-KAFKA-PLUS-DIAG] Kafka network thread '" + t.getName()
-                        + "' caught OOM — " + hint;
-                LOG.error(msg, e);
-                lastInitException = new IllegalStateException(hint + " Full error: " + e, e);
-                initialized = false;
-                kafkaProducer = null;
-                return; // swallow — do not re-throw; prevents JVM crash
-            }
-            if (existing != null) {
-                existing.uncaughtException(t, e);
-            }
-        });
-    }
-
-    /**
-     * If a non-TLS security protocol is configured, find Kafka's producer network
-     * thread and attach an UncaughtExceptionHandler. When the broker speaks TLS but
-     * the client uses plaintext, Kafka's NetworkClient misreads the SSL handshake as
-     * a ~352 MB Kafka frame and throws OutOfMemoryError in that thread.
-     * We catch the OOM here, convert it to a readable IllegalStateException, and mark
-     * the producer as failed so the next exchange gets a clear error instead of a
-     * CPI node crash.
-     */
-    private void installSslMismatchDetector() {
-        String protocol = endpoint.getSecurityProtocol();
-        if (protocol != null && protocol.toUpperCase().contains("SSL")) {
-            return; // TLS is configured — no mismatch possible
-        }
-        Thread senderThread = null;
-        for (int attempt = 0; attempt < 10 && senderThread == null; attempt++) {
-            senderThread = findKafkaNetworkThread();
-            if (senderThread == null) {
-                try {
-                    Thread.sleep(20);
-                } catch (InterruptedException ie) {
-                    Thread.currentThread().interrupt();
-                    return;
-                }
-            }
-        }
-        if (senderThread == null) {
-            LOG.warn("[CPI-KAFKA-PLUS-DIAG] Could not find kafka-producer-network-thread — SSL-mismatch detector not installed");
-            return;
-        }
-        senderThread.setUncaughtExceptionHandler((t, e) -> {
-            String hint = (e instanceof OutOfMemoryError)
-                    ? "Possible SSL/plaintext mismatch: the broker may require TLS. "
-                      + "Use SASL_SSL (or SSL) instead of " + protocol + "."
-                    : "";
-            String msg = "Kafka producer network thread '" + t.getName()
-                    + "' crashed — " + hint + e;
-            LOG.error("[CPI-KAFKA-PLUS-DIAG] {}", msg, e);
-            lastInitException = new IllegalStateException(msg, e);
-            initialized = false;
-            kafkaProducer = null;
-        });
-        LOG.debug("[CPI-KAFKA-PLUS-DIAG] SSL-mismatch detector installed on thread '{}'",
-                senderThread.getName());
-    }
-
-    private Thread findKafkaNetworkThread() {
-        ThreadGroup root = Thread.currentThread().getThreadGroup();
-        while (root.getParent() != null) {
-            root = root.getParent();
-        }
-        Thread[] threads = new Thread[(int) (root.activeCount() * 2)];
-        int count = root.enumerate(threads, true);
-        for (int i = 0; i < count; i++) {
-            if (threads[i] != null && threads[i].getName().contains("kafka-producer-network-thread")) {
-                return threads[i];
-            }
-        }
-        return null;
     }
 
     /** @return true if all helpers were created successfully */
@@ -464,7 +374,7 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
             try {
                 ProducerBatchHelper.BatchSendResult result = ProducerBatchHelper.sendBatch(
                         kafkaProducer, records, topic, fallbackKey, partition, timestamp,
-                        in, this::addRecordHeaders, valueSerializer, null);
+                        in, this::addRecordHeaders, valueSerializer, null, sendGuard);
 
                 ProducerBatchHelper.setResponseHeadersAndBody(in, topic, batchMode, result);
                 recordSendSuccess();
@@ -518,7 +428,7 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
 
             ProducerBatchHelper.BatchSendResult result = ProducerBatchHelper.sendBatch(
                     txnProducer, records, topic, fallbackKey, partition, timestamp,
-                    in, this::addRecordHeaders, valueSerializer, null);
+                    in, this::addRecordHeaders, valueSerializer, null, sendGuard);
 
             txnProducer.commitTransaction();
 
@@ -626,7 +536,8 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
         // Send synchronously to ensure delivery before IFlow continues
         try {
             Future<RecordMetadata> future = kafkaProducer.send(record);
-            RecordMetadata metadata = future.get();
+            RecordMetadata metadata = sendGuard.await(future, sendGuard.newDeadline(),
+                    "Send to topic '" + topic + "'");
 
             in.setHeader("SAP_Receiver", metadata.topic());
             // Adapter-native headers, consistent with the batch producer and consumer.
@@ -1017,9 +928,15 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
             DescribeTopicsResult result = admin.describeTopics(Collections.singletonList(topic));
             KafkaFuture<TopicDescription> future = result.topicNameValues().get(topic);
             try {
-                future.get();
+                // Bounded: the AdminClient completes this future from its own network thread, so an
+                // unbounded get() would hang for good if that thread dies.
+                future.get(TOPIC_CHECK_TIMEOUT_MS, java.util.concurrent.TimeUnit.MILLISECONDS);
                 LOG.debug("[CPI-KAFKA-PLUS-DIAG] Topic '{}' confirmed to exist", topic);
                 return TopicCheckResult.EXISTS;
+            } catch (java.util.concurrent.TimeoutException te) {
+                LOG.warn("[CPI-KAFKA-PLUS-DIAG] Timed out after {} ms while checking whether topic "
+                        + "'{}' exists. Skipping the check.", TOPIC_CHECK_TIMEOUT_MS, topic);
+                return TopicCheckResult.inconclusive(te);
             } catch (java.util.concurrent.ExecutionException ex) {
                 Throwable cause = ex.getCause();
                 if (cause instanceof UnknownTopicOrPartitionException) {

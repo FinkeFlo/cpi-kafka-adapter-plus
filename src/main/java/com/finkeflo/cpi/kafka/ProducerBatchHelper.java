@@ -81,6 +81,7 @@ public final class ProducerBatchHelper {
      * @param timestamp    timestamp from kafka.OVERRIDE_TIMESTAMP header (may be null)
      * @param message      exchange message for adding record headers
      * @param headerAdder  function to add exchange headers to each ProducerRecord
+     * @param sendGuard    bounds the wait for the send results of this batch
      * @return BatchSendResult with offsets and timing
      */
     public static BatchSendResult sendBatch(
@@ -93,15 +94,22 @@ public final class ProducerBatchHelper {
             Message message,
             RecordHeaderAdder headerAdder,
             ByteSerializer valueSerializer,
-            ByteSerializer keySerializer) throws Exception {
+            ByteSerializer keySerializer,
+            ProducerSendGuard sendGuard) throws Exception {
 
         long startMs = System.currentTimeMillis();
+        // One deadline for the whole batch: waiting per record would multiply the budget by the
+        // record count and re-open the very hang this guard exists to prevent.
+        long deadlineMs = sendGuard.newDeadline();
 
         List<Future<RecordMetadata>> futures = sendRecordsAsync(
                 producer, records, topic, fallbackKey, partition, timestamp,
-                message, headerAdder, valueSerializer, keySerializer);
+                message, headerAdder, valueSerializer, keySerializer, sendGuard, deadlineMs);
 
-        producer.flush();
+        // No producer.flush() here: flush() waits on the sender thread with no timeout of its own,
+        // so a dead sender thread would block before any future could be evaluated. With
+        // linger.ms=0 the records are handed to the sender immediately anyway, and the bounded
+        // waits below provide the same "all records completed" guarantee.
 
         long firstOffset = -1;
         long lastOffset = -1;
@@ -110,7 +118,10 @@ public final class ProducerBatchHelper {
         for (int i = 0; i < futures.size(); i++) {
             RecordMetadata metadata;
             try {
-                metadata = futures.get(i).get();
+                metadata = sendGuard.await(futures.get(i), deadlineMs,
+                        "Batch send to topic '" + topic + "' (record index " + i + ")");
+            } catch (ProducerSendGuard.SendStalledException e) {
+                throw e;
             } catch (Exception e) {
                 throw new RuntimeException(
                         "Batch send failed at record index " + i + ": " + e.getMessage(), e);
@@ -151,7 +162,9 @@ public final class ProducerBatchHelper {
             Message message,
             RecordHeaderAdder headerAdder,
             ByteSerializer valueSerializer,
-            ByteSerializer keySerializer) {
+            ByteSerializer keySerializer,
+            ProducerSendGuard sendGuard,
+            long deadlineMs) {
 
         List<Future<RecordMetadata>> futures = new ArrayList<>(records.size());
 
@@ -196,9 +209,10 @@ public final class ProducerBatchHelper {
                 futures.add(producer.send(pr));
             } catch (Exception e) {
                 LOG.warn("[CPI-KAFKA-PLUS-DIAG] Batch send() failed at index {}, "
-                        + "flushing {} buffered records: {}", i, futures.size(), e.getMessage());
-                flushQuietly(producer);
-                evaluateFuturesQuietly(futures);
+                        + "draining {} buffered records: {}", i, futures.size(), e.getMessage());
+                // Bounded drain instead of flush(): flush() has no timeout and would hang here if
+                // the sender thread is what caused this failure in the first place.
+                sendGuard.awaitAllQuietly(futures, deadlineMs);
                 throw new RuntimeException(
                         "Batch send failed at record index " + i + ": " + e.getMessage(), e);
             }
@@ -236,25 +250,6 @@ public final class ProducerBatchHelper {
         sb.append("</kafkaBatchResult>");
 
         message.setBody(sb.toString());
-    }
-
-    private static void flushQuietly(KafkaProducer<byte[], byte[]> producer) {
-        try {
-            producer.flush();
-        } catch (Exception e) {
-            LOG.warn("[CPI-KAFKA-PLUS-DIAG] Error during batch abort flush: {}", e.getMessage());
-        }
-    }
-
-    private static void evaluateFuturesQuietly(List<Future<RecordMetadata>> futures) {
-        for (int i = 0; i < futures.size(); i++) {
-            try {
-                futures.get(i).get();
-            } catch (Exception e) {
-                LOG.warn("[CPI-KAFKA-PLUS-DIAG] Buffered record {} failed during abort: {}",
-                        i, e.getMessage());
-            }
-        }
     }
 
     /** Functional interface for adding exchange headers to a ProducerRecord. */

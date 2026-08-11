@@ -7,6 +7,12 @@ and the project follows [Semantic Versioning](https://semver.org/). See
 [VERSIONING.md](https://github.com/finkeflo/cpi-kafka-adapter-plus/blob/main/VERSIONING.md) for how the adapter version maps to SAP CPI
 iFlow compatibility.
 
+## [Unreleased]
+### Fixed
+- Fixed a plaintext Security Protocol against a TLS-only broker taking the whole node down with `Node Crashed` instead of failing the message. Kafka enforces `delivery.timeout.ms` from inside its producer sender thread; when that thread dies, nothing completes or expires the pending record futures any more. The adapter waited on those futures without a timeout, so the CPI worker thread was pinned indefinitely (over 14 minutes in a captured thread dump) until the node was declared dead. Every wait for a send result is now bounded by `delivery.timeout.ms` plus a 30 s margin, so Kafka still reports its own delivery failures first and only a sender thread that stopped working runs into the guard. The resulting error names the likely TLS mismatch and the exchange fails normally. A batch shares one deadline across all its records, so the record count cannot multiply the wait, and the topic-existence probe is bounded the same way.
+  - The trigger is a known Kafka client behaviour: a plaintext client reads the broker's TLS handshake bytes as a Kafka frame header and tries to allocate a frame of several hundred megabytes, and the resulting `OutOfMemoryError` kills the sender thread silently.
+- Removed the JVM-wide `Thread.setDefaultUncaughtExceptionHandler` that had been added to intercept that `OutOfMemoryError`. On a shared CPI node it replaced the handler for every other iFlow in the JVM, and it was chained again on each producer initialisation. It also could not identify its own producer: it matched any thread named `kafka-producer-network-thread`, which on a CPI node includes SAP's own internal producers. The bounded wait makes it unnecessary — an uncaught exception ends the thread it happens on, it never brought the JVM down.
+
 ## [1.2.2] - 2026-08-10
 ### Changed
 - CI now fails a pull request that leaves `CHANGELOG.md` untouched, enforcing a rule that was documented but unchecked. Add the `no-changelog` label to a pull request that genuinely needs no entry. `CONTRIBUTING.md` states the rule per pull request instead of per commit, since merges are squashed into a single commit on `main`.
