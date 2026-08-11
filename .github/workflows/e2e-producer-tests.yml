@@ -105,6 +105,7 @@ jobs:
             template: tests/payloads/producer_tls_mismatch.json
             content-type: application/json
             response-format: tls-mismatch
+            expected-status: '500'
     steps:
       - uses: actions/checkout@v7
 
@@ -164,14 +165,16 @@ jobs:
           response_format = "${{ matrix.response-format }}"
           expected_topic = "${{ matrix.expected-topic }}"
           expected_record_count = "${{ matrix.expected-record-count }}"
+          # Negative scenarios let the iFlow's exception subprocess answer with an
+          # error status, so the expected status is per-scenario (default 200).
+          expected_status = "${{ matrix.expected-status }}" or "200"
 
           with open("response.txt") as f:
               body = f.read()
 
           errors = []
-          if http_code != "200":
-              errors.append(f"expected HTTP 200, got {http_code}")
-
+          if http_code != expected_status:
+              errors.append(f"expected HTTP {expected_status}, got {http_code}")
           if response_format == "json":
               try:
                   data = json.loads(body)
