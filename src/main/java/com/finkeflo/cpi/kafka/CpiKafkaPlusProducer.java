@@ -251,6 +251,11 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
     /** @return true if the KafkaProducer was created successfully */
     private boolean createKafkaProducer() {
         try {
+            // Before any Kafka client exists: a plaintext protocol against a TLS-only broker makes
+            // Kafka allocate the broker's TLS alert as a 352 MB frame until jvmkill takes the node
+            // down. That cannot be caught afterwards, so it must not be started.
+            TlsListenerProbe.assertNoTlsListener(endpoint.getBootstrapServers(),
+                    endpoint.getSecurityProtocol());
             Properties props = ProducerConfigFactory.buildProducerProperties(endpoint);
             LOG.debug("[CPI-KAFKA-PLUS-DIAG] ensureInitialized: producer properties built, security={}, sasl={}",
                     endpoint.getSecurityProtocol(), endpoint.getSaslMechanism());
@@ -415,6 +420,10 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
             // resolvedMemberSuffix is resolved once (fail-fast) in doStart() — never null here.
             String transactionalId = endpoint.getTransactionalIdPrefix() + "-" + resolvedMemberSuffix + "-" + slotId;
 
+            // The transactional producer is created outside ensureInitialized(), so it needs the
+            // same protection against a plaintext protocol on a TLS-only broker.
+            TlsListenerProbe.assertNoTlsListener(endpoint.getBootstrapServers(),
+                    endpoint.getSecurityProtocol());
             java.util.Properties props = ProducerConfigFactory.buildProducerProperties(endpoint);
             props.put(org.apache.kafka.clients.producer.ProducerConfig.TRANSACTIONAL_ID_CONFIG, transactionalId);
 

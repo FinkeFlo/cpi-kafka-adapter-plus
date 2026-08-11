@@ -383,6 +383,10 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
     /** @return true if the KafkaConsumer was created and subscribed successfully */
     private boolean createKafkaConsumer() {
         try {
+            // Same node-killing failure mode as on the producer side: a plaintext protocol against
+            // a TLS-only broker makes Kafka allocate the broker's TLS alert as a 352 MB frame.
+            TlsListenerProbe.assertNoTlsListener(endpoint.getBootstrapServers(),
+                    endpoint.getSecurityProtocol());
             Properties props = buildConsumerProperties();
             LOG.debug("[CPI-KAFKA-PLUS-DIAG] ensureInitialized: consumer properties built, security={}, sasl={}, credentialAlias='{}'",
                     endpoint.getSecurityProtocol(), endpoint.getSaslMechanism(), endpoint.getCredentialAlias());
