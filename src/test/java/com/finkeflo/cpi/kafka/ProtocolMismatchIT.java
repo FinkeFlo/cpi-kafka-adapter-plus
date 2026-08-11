@@ -199,9 +199,8 @@ public class ProtocolMismatchIT {
                 chain.contains("does not exist"));
 
         // The whole point of the fix: the message must say why, not just that it timed out.
-        // The listener probe now recognises this broker's TLS alert, so the mismatch is caught
-        // before any Kafka client is built - earlier, and with a more specific message, than the
-        // pre-send reachability check that used to report it.
+        // The probe now recognises the broker's TLS alert, so this is caught before any
+        // Kafka client is built - earlier than the pre-send check that used to report it.
         String message = thrown.getMessage();
         Assert.assertTrue("The failure must name the configured protocol, but was: " + message,
                 message.contains("SASL_PLAINTEXT"));

@@ -246,9 +246,8 @@ def run_batch(args, api, xml):
         missing = expected_ids - found_ids
         raise AssertionError(f"missing {len(missing)} testId(s) after {args.timeout}s timeout: {missing}")
 
-    # A previous run's MPL entries can still fall inside the LogEnd window, and the consumer can
-    # replay records this run did not produce. Both add foreign testIds, which must not fail the
-    # run - only the records this run produced are in scope for the batching assertions below.
+    # A previous run's MPL entries can fall inside the LogEnd window and the consumer can
+    # replay foreign records; only this run's ids are in scope for the assertions below.
     parsed_batches = [batch for batch in parsed_batches if expected_ids.intersection(batch)]
 
     batch_sizes = [len(b) for b in parsed_batches]

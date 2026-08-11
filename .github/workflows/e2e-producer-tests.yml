@@ -94,12 +94,8 @@ jobs:
             response-format: xml
             expected-topic: e2e.kafka-adapter-plus.batch-xml
             expected-record-count: 3
-          # Negative scenario: the iFlow points a plaintext protocol (SASL_PLAINTEXT)
-          # at a TLS-only listener. The adapter's TlsListenerProbe must reject this up
-          # front with an actionable error instead of letting the Kafka client read the
-          # broker's TLS alert as a multi-hundred-MB frame and kill the node.
-          # The iFlow's exception subprocess returns the message/stacktrace with HTTP 200,
-          # so this scenario asserts on the error text rather than on a topic/offset.
+          # Negative scenario: plaintext protocol against a TLS-only listener. The adapter
+          # must reject it up front; the iFlow's exception subprocess returns the error.
           - name: tls-mismatch
             endpoint: /http/kafkaadapterplus/producer/tls-missmatch
             template: tests/payloads/producer_tls_mismatch.json
@@ -151,9 +147,7 @@ jobs:
             --data @"${{ steps.render.outputs.rendered_file }}")
           echo "http_code=$http_code" >> "$GITHUB_OUTPUT"
           echo "--- Response ($http_code) ---"
-          # This repository is public and Actions logs are world-readable. The negative TLS
-          # scenario answers with the broker endpoint plus a full stacktrace, so its response
-          # is never echoed verbatim - the next step asserts on it without printing it.
+          # Public repo: this response names the broker, so never echo it.
           if [ "${{ matrix.response-format }}" = "tls-mismatch" ]; then
             echo "(response withheld: contains broker endpoint details; assertions run in the next step)"
           else
@@ -170,12 +164,7 @@ jobs:
           import xml.etree.ElementTree as ET
 
           def redact(text):
-              """Strip broker endpoints before anything reaches a public Actions log.
-
-              The TLS-mismatch error names the broker it refused to talk to, and this
-              repository is public. Java package names in the stacktrace look similar but
-              never carry a port, so requiring ':<port>' keeps them readable.
-              """
+              """Mask broker endpoints; public repo. Java packages carry no port, so they stay."""
               return re.sub(
                   r"\b(?:[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\.)+[A-Za-z]{2,}:\d+",
                   "<broker>:<port>",
@@ -186,8 +175,7 @@ jobs:
           response_format = "${{ matrix.response-format }}"
           expected_topic = "${{ matrix.expected-topic }}"
           expected_record_count = "${{ matrix.expected-record-count }}"
-          # Negative scenarios let the iFlow's exception subprocess answer with an
-          # error status, so the expected status is per-scenario (default 200).
+          # Per-scenario expected status (default 200); negative cases return an error.
           expected_status = "${{ matrix.expected-status }}" or "200"
 
           with open("response.txt") as f:
@@ -223,8 +211,8 @@ jobs:
                           f"expected recordCount '{expected_record_count}', got '{record_count}'"
                       )
           elif response_format == "tls-mismatch":
-              # The adapter must refuse to build a plaintext Kafka client against a
-              # TLS-only listener, and the error must tell the operator what to change.
+              # The adapter must reject a plaintext client against a TLS-only listener,
+              # and say what to change.
               required = [
                   "requires TLS",
                   "SASL_SSL",
@@ -232,8 +220,7 @@ jobs:
               for needle in required:
                   if needle not in body:
                       errors.append(f"expected TLS-mismatch error to contain {needle!r}")
-              # If the probe ever regresses, the Kafka client reads the TLS alert as a
-              # huge frame and the node dies with OOM instead of returning this error.
+              # Without the probe the client OOMs the node instead of erroring.
               for needle in ("OutOfMemoryError", "Node Crashed"):
                   if needle in body:
                       errors.append(
@@ -249,8 +236,7 @@ jobs:
                   if expected_topic:
                       summary.write(f"- Expected topic: `{expected_topic}`\n")
                   if response_format == "tls-mismatch":
-                      # Never render this response: it carries the broker endpoint and a
-                      # full stacktrace, and job summaries are public on this repository.
+                      # Withheld: names the broker, and summaries are public.
                       summary.write(
                           "- Response withheld (broker endpoint details); "
                           "asserted on the TLS-mismatch error markers only\n"
