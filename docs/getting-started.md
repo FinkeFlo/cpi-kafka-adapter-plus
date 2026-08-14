@@ -1,54 +1,39 @@
 # Getting Started
 
-## Download
+## 1. Download the latest release
 
-Get the ready-to-deploy ESA archive from the [GitHub Releases page](https://github.com/FinkeFlo/cpi-kafka-adapter-plus/releases) — no build required.
+Go to the [GitHub Releases page](https://github.com/FinkeFlo/cpi-kafka-adapter-plus/releases) and download the `.esa` file from the latest release (e.g. `cpi-kafka-adapter-plus-1.2.3.esa`).
 
-Download the `.esa` file attached to the latest release and continue with the deployment steps below.
+No build step required — the ESA is a ready-to-deploy artifact.
 
-## Building from Source (optional)
+## 2. Upload to SAP Integration Suite
 
-If you want to build the adapter yourself instead of using a release artifact:
+1. Open your SAP Integration Suite tenant and navigate to **Design**
+2. Open the Integration Package you want to add the adapter to (or create a new one)
+3. Switch the package to edit mode and click **Add → Integration Adapter**
+4. Select the downloaded `.esa` file and confirm the upload
 
-- **Java 17+** — Compiles to Java 8 bytecode for CPI runtime compatibility
-- **Maven 3.8+**
-- **SAP ADK artifacts** in your local Maven repository
+The adapter now appears as an artifact inside the package.
 
-```bash
-mvn clean install
-```
+## 3. Deploy the adapter
 
-This produces two artifacts:
+Select the adapter artifact in the package and click **Deploy**. The adapter runtime becomes available on the tenant once the deployment completes.
 
-1. **OSGi bundle JAR** — Fat bundle with embedded Kafka, Avro, Confluent, and Jackson dependencies
-2. **ESA archive** — Deployable to SAP CPI via the ADK `build` goal
+!!! note "Verify availability"
+    After deployment, open any IFlow and add a Sender or Receiver channel — **CPI Kafka Plus** should appear in the adapter type list.
 
-Run the test suite with `mvn test` (no Kafka broker required).
+## Updating to a newer version
 
-## Deployment to SAP CPI
+1. Download the new `.esa` from the [Releases page](https://github.com/FinkeFlo/cpi-kafka-adapter-plus/releases)
+2. Open the existing adapter artifact in the package and upload the new ESA
+3. **Before deploying**, open the artifact and click **View Metadata** — this refreshes the adapter metadata in the package and prevents transport issues with SAP Cloud Transport Management
+4. Deploy the updated artifact
 
-Deploy the generated ESA archive to SAP CPI using one of these methods:
-
-### Via CPI Web UI
-
-1. Navigate to your CPI tenant's Design workspace
-2. Open or create an Integration Package
-3. Upload the ESA file as a custom adapter
-4. The adapter appears as **CPI Kafka Plus** in the IFlow editor
-
-### Via Integration Content API
-
-Use the SAP CPI OData API to upload the ESA programmatically.
-
-## Verify the Installation
-
-After deployment, create a new IFlow and verify that:
-
-- **Sender channel**: "CPI Kafka Plus" is available as an adapter type
-- **Receiver channel**: "CPI Kafka Plus" is available as an adapter type
+!!! warning "Always refresh metadata before transport"
+    Skipping the **View Metadata** step can cause inconsistencies when transporting the package via SAP Cloud Transport Management.
 
 ## What's Next
 
-- [Configuration Reference](configuration.md) — Configure connection, security, batch, and Avro settings
+- [Configuration Reference](configuration.md) — All connection, security, batch, and Avro settings
 - [Batch Processing](features/batch-processing.md) — Set up high-throughput batch consumption
 - [Authentication](security/authentication.md) — Configure SASL/SSL security
