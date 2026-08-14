@@ -31,3 +31,4 @@ flowchart TD
 - [Getting Started](getting-started.md) — Build the adapter and deploy it to CPI
 - [Configuration Reference](configuration.md) — All available adapter parameters
 - [Features](features/batch-processing.md) — Detailed feature documentation
+- [Kafka Headers](features/kafka-headers.md) — All consumer, producer, and DLQ headers
