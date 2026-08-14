@@ -58,6 +58,8 @@ nav:
       - Avro / Schema Registry: features/avro-schema-registry.md
       - Producer Batch Send: features/producer-batch.md
       - JSON Schema Validation: features/json-schema-validation.md
+      - Kafka Headers: features/kafka-headers.md
+      - Dead Letter Queue: features/dead-letter-queue.md
   - Security:
       - Authentication: security/authentication.md
   - Architecture Decisions:
