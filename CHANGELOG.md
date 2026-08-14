@@ -8,6 +8,9 @@ and the project follows [Semantic Versioning](https://semver.org/). See
 iFlow compatibility.
 
 ## [Unreleased]
+### Added
+- New docs page `docs/features/kafka-headers.md` listing all consumer, producer, and DLQ Kafka headers with descriptions, types, and conditions.
+
 ### Changed
 - Standardized pull request quality gates: enforce Conventional Commit format for PR titles in CI, set squash merge to use PR title and body, add repository-managed local Git hooks (`commit-msg` for Conventional Commits validation, `pre-push` for fast unit tests + secret scans).
 - Added setup script and documentation for local hook and commit-template activation in CONTRIBUTING.md.
