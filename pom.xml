@@ -262,6 +262,14 @@
             <version>2.22.0</version>
             <scope>test</scope>
         </dependency>
+        <!-- Pin assertj-core to fix CVE: XXE vulnerability in isXmlEqualTo (GHSA-hfq2-r834-5x6f).
+             assertj 3.21.0 is pulled transitively; 3.27.7 is the first patched release. -->
+        <dependency>
+            <groupId>org.assertj</groupId>
+            <artifactId>assertj-core</artifactId>
+            <version>3.27.7</version>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>
