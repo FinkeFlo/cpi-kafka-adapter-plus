@@ -94,6 +94,20 @@ jobs:
             response-format: xml
             expected-topic: e2e.kafka-adapter-plus.batch-xml
             expected-record-count: 3
+          - name: txn-batch-json-v1
+            endpoint: /http/kafkaadapterplus/producer/batch/json/transactional/V1
+            template: tests/payloads/producer_batch_json_transactional.json
+            content-type: application/json
+            response-format: xml
+            expected-topic: e2e.kafka-adapter-plus.transactional.v1
+            expected-record-count: 3
+          - name: txn-batch-json-v2
+            endpoint: /http/kafkaadapterplus/producer/batch/json/transactional
+            template: tests/payloads/producer_batch_json_transactional.json
+            content-type: application/json
+            response-format: xml
+            expected-topic: e2e.kafka-adapter-plus.transactional.v2
+            expected-record-count: 3
           # Negative scenario: plaintext protocol against a TLS-only listener. The adapter
           # must reject it up front; the iFlow's exception subprocess returns the error.
           - name: tls-mismatch

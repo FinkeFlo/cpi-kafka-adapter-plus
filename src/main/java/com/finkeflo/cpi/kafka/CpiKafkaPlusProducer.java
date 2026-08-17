@@ -21,6 +21,8 @@
 package com.finkeflo.cpi.kafka;
 
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.util.Collections;
 import java.util.Map;
@@ -98,6 +100,13 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
     private java.util.concurrent.Semaphore txnSlotSemaphore;
     private boolean[] txnSlotInUse;
     private String resolvedMemberSuffix;
+    /**
+     * Short (8 hex-char) SHA-256 digest of the target topic name. Included in every
+     * {@code transactional.id} so that two producers with the same
+     * {@code transactionalIdPrefix} but different target topics never share an id —
+     * which would cause them to fence each other on every call.
+     */
+    private String topicHash;
 
     private volatile boolean initialized = false;
     private volatile boolean helpersInitialized = false;
@@ -120,6 +129,16 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
 
     @Override
     protected void doStart() throws Exception {
+        try {
+            doStartInternal();
+        } catch (Exception e) {
+            LOG.error("[CPI-KAFKA-PLUS] Adapter failed to start (topic='{}'): {}",
+                    endpoint.getEffectiveTopic(), e.getMessage(), e);
+            throw e;
+        }
+    }
+
+    private void doStartInternal() throws Exception {
         // Fail-fast: validate shared configuration (Schema Registry, JSON Schema, SASL)
         endpoint.validateConfiguration();
 
@@ -164,11 +183,30 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
                         + "change on every restart.",
                         resolvedMemberSuffix);
             }
+
+            // A short hash of the target topic is included in every transactional.id so that two
+            // producers configured with the same transactionalIdPrefix but different target topics
+            // (a common copy-paste pattern) never share an id. Shared ids cause constant mutual
+            // fencing: each new producer bumps the epoch and invalidates all concurrent ones.
+            topicHash = computeTopicHash(endpoint.getEffectiveTopic());
+
+            // Validate that the resulting id fits within a safe length budget before any producer
+            // is created. Prefix + hash + memberSuffix + slotId + separators must stay short enough
+            // to be handled by all Kafka broker versions without truncation.
+            String exampleId = endpoint.getTransactionalIdPrefix() + "-" + topicHash
+                    + "-" + resolvedMemberSuffix + "-0";
+            if (exampleId.length() > 249) {
+                throw new IllegalArgumentException(
+                        "The computed transactional.id '" + exampleId + "' is " + exampleId.length()
+                        + " characters long. Please shorten transactionalIdPrefix to keep it under 249 characters.");
+            }
+
             txnSlotSemaphore = new java.util.concurrent.Semaphore(slots, true);
             txnSlotInUse = new boolean[slots];
             LOG.info("[CPI-KAFKA-PLUS-DIAG] Transactional batching enabled with max {} concurrent transactions. "
-                    + "Prefix: {}, memberSuffix: {}",
-                    slots, endpoint.getTransactionalIdPrefix(), resolvedMemberSuffix);
+                    + "Prefix: {}, topicHash: {}, memberSuffix: {}, transactionV2: {}, example transactional.id: {}",
+                    slots, endpoint.getTransactionalIdPrefix(), topicHash, resolvedMemberSuffix,
+                    endpoint.isTransactionV2Enabled(), exampleId);
         }
 
         // Surface a missing topic in the deployment log right away, and warm the cache when it is
@@ -384,6 +422,8 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
                 ProducerBatchHelper.setResponseHeadersAndBody(in, topic, batchMode, result);
                 recordSendSuccess();
             } catch (Exception e) {
+                tracingHelper.traceError(exchange, e,
+                        java.util.Collections.singletonMap("topic", topic));
                 handleSendFailure(e);
                 throw sendFailure("Failed to send batch to", topic, e);
             }
@@ -402,6 +442,7 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
                 endpoint.getSecurityProtocol());
 
         int slotId = -1;
+        String transactionalId = null;
         try {
             txnSlotSemaphore.acquire();
         } catch (InterruptedException e) {
@@ -424,11 +465,20 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
                 throw new IllegalStateException("Acquired semaphore but no slot was free. This is a bug.");
             }
 
-            // resolvedMemberSuffix is resolved once (fail-fast) in doStart() — never null here.
-            String transactionalId = endpoint.getTransactionalIdPrefix() + "-" + resolvedMemberSuffix + "-" + slotId;
+            // resolvedMemberSuffix and topicHash are resolved once (fail-fast) in doStart() — never null here.
+            transactionalId = endpoint.getTransactionalIdPrefix() + "-" + topicHash
+                    + "-" + resolvedMemberSuffix + "-" + slotId;
 
             java.util.Properties props = ProducerConfigFactory.buildProducerProperties(endpoint);
             props.put(org.apache.kafka.clients.producer.ProducerConfig.TRANSACTIONAL_ID_CONFIG, transactionalId);
+
+            // transaction.two.phase.commit.enable controls Kafka Transaction Protocol V2 (KIP-890),
+            // introduced in Kafka 4.x. Confluent Cloud supports V2, but certain Kafka 4.x client
+            // versions have a bug in the TransactionManager that causes IllegalMonitorStateException
+            // when V2 is active. Set transactionV2Enabled=false in the adapter UI to force V1
+            // (the Kafka 3.x protocol) as a workaround until the upstream client bug is fixed.
+            props.put(org.apache.kafka.clients.producer.ProducerConfig.TRANSACTION_TWO_PHASE_COMMIT_ENABLE_CONFIG,
+                    endpoint.isTransactionV2Enabled());
 
             txnProducer = BundleBackedClassLoader.withBundleClassLoader(getClass(),
                     () -> new KafkaProducer<>(props,
@@ -456,6 +506,14 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
                     e.addSuppressed(abortEx);
                 }
             }
+            java.util.Map<String, String> ctx = new java.util.LinkedHashMap<>();
+            ctx.put("topic", topic);
+            ctx.put("batchMode", batchMode);
+            ctx.put("transactionalId", transactionalId != null ? transactionalId : "(not yet assigned)");
+            ctx.put("slotId", String.valueOf(slotId));
+            ctx.put("topicHash", topicHash != null ? topicHash : "(not yet computed)");
+            ctx.put("transactionV2Enabled", String.valueOf(endpoint.isTransactionV2Enabled()));
+            tracingHelper.traceError(in.getExchange(), e, ctx);
             handleTxnSendFailure(e);
             throw sendFailure("Failed to send transactional batch to", topic, e);
         } finally {
@@ -566,6 +624,8 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
             LOG.debug("[CPI-KAFKA-PLUS-DIAG] Message sent to topic '{}' partition {} offset {}",
                     metadata.topic(), metadata.partition(), metadata.offset());
         } catch (Exception e) {
+            tracingHelper.traceError(exchange, e,
+                    java.util.Collections.singletonMap("topic", topic));
             handleSendFailure(e);
             throw sendFailure("Failed to send message to", topic, e);
         }
@@ -754,6 +814,29 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
         MISSING,
         /** No usable answer (no Describe permission, broker unreachable, unsupported API, ...). */
         INCONCLUSIVE
+    }
+
+    /**
+     * Returns the first 8 hex characters of the SHA-256 digest of the given topic name.
+     * Used as a stable, short segment in {@code transactional.id} to ensure that two producers
+     * with the same {@code transactionalIdPrefix} but different target topics never share an id.
+     *
+     * <p>SHA-256 is used rather than {@link String#hashCode()} because the latter is not
+     * guaranteed to be stable across JVM versions or implementations.
+     */
+    static String computeTopicHash(String topic) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hash = digest.digest(topic.getBytes(StandardCharsets.UTF_8));
+            StringBuilder sb = new StringBuilder(8);
+            for (int i = 0; i < 4; i++) {
+                sb.append(String.format("%02x", hash[i]));
+            }
+            return sb.toString();
+        } catch (NoSuchAlgorithmException e) {
+            // SHA-256 is mandated by the Java SE spec — this branch is unreachable in practice.
+            throw new IllegalStateException("SHA-256 not available", e);
+        }
     }
 
     /**

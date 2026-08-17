@@ -16,6 +16,21 @@ iFlow compatibility.
 - Added setup script and documentation for local hook and commit-template activation in CONTRIBUTING.md.
 - Enforce `REVIEW_REQUIRED` and `CODEOWNER_REVIEW` on main branch protection; disallow force push and branch deletion.
 
+## [1.2.4] - 2026-08-17
+### Added
+- New adapter parameter `transactionV2Enabled` (default `true`) to disable Kafka Transaction Protocol V2 (KIP-890). Set to `false` as a workaround for `IllegalMonitorStateException` in Kafka 4.x clients when a transactional producer is fenced during `initTransactions()`. V1 behavior (Kafka ≤ 3.x compatible) is stable and avoids the race condition in the `TransactionManager` sender thread.
+- Topic hash in `transactional.id` schema: the computed ID now includes an 8-character SHA-256 prefix of the target topic name (`{prefix}-{topicHash}-{instanceIndex}-{slotId}`). This structurally prevents two iFlows with the same `transactionalIdPrefix` but different target topics from sharing a transactional producer ID and fencing each other.
+- `AdapterTracingHelper.traceError()`: enriched MPL error tracing with structured context fields (topic, transactionalId, batchSize, errorType). Called in transactional batch, regular batch, and single-send failure paths. No-op unless CPI Trace level is active.
+
+### Fixed
+- `InvalidProducerEpochException` and `IllegalMonitorStateException` on transactional producer iFlows sharing the same `transactionalIdPrefix` across multiple topics.
+- `CAMEL_CONTEXT_NOT_STARTED` caused by leading/trailing whitespace in adapter config fields (e.g. topic name). SAP CPI does not URL-encode field values; spaces in query parameter values now trimmed automatically before Camel parses the URI.
+- Startup failures now logged as `[CPI-KAFKA-PLUS] Adapter failed to start (topic='...') : <cause>` before re-throwing, making `CAMEL_CONTEXT_NOT_STARTED` diagnosable from the trace log.
+
+### Changed
+- Startup log now includes the full computed `transactional.id` example and the effective `transactionV2Enabled` flag for diagnostics.
+- `transactional.id` length is validated at startup; throws `IllegalArgumentException` if the computed ID exceeds 249 characters (Kafka broker limit).
+
 ## [1.2.3] - 2026-08-11
 ### Fixed
 - Prevented `Node Crashed` on a plaintext Security Protocol against TLS-only brokers by probing bootstrap listeners for TLS before creating Kafka clients (producer, transactional producer, consumer).

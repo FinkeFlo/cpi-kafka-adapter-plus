@@ -200,6 +200,13 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
             description = "Maximum number of concurrent transactional producers per worker node")
     private int maxConcurrentTransactions = 5;
 
+    @UriParam(label = "producer", defaultValue = "true",
+            description = "Enable Kafka Transaction Protocol V2 (two-phase commit, KIP-890). "
+            + "Requires Kafka broker 4.0+ / Confluent Platform 7.6+. "
+            + "Set to false to force Transaction Protocol V1 for compatibility with older brokers "
+            + "or as a workaround for client-side bugs in Kafka 4.x.")
+    private boolean transactionV2Enabled = true;
+
     @UriParam(label = "producer", defaultValue = "*",
             description = "Pipe-separated list of headers to send to Kafka (e.g. SAP_*|MyHeader|*). Use * for all.")
     private String allowedHeaders = "*";
@@ -320,7 +327,7 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
 
     public CpiKafkaPlusEndpoint(String uri, String remaining, CpiKafkaPlusComponent component) throws URISyntaxException {
         this(uri, component);
-        this.topicFromUri = remaining;
+        this.topicFromUri = remaining != null ? remaining.trim() : null;
     }
 
     /**
@@ -328,6 +335,16 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
      * Called from doStart() of both sides for fail-fast behaviour.
      */
     public void validateConfiguration() {
+        String effectiveTopic = getEffectiveTopic();
+        if (effectiveTopic == null || effectiveTopic.trim().isEmpty()) {
+            throw new IllegalArgumentException(
+                    "[CPI-KAFKA-PLUS] Topic is not configured. Please set the target topic in the adapter Connection tab.");
+        }
+        if (!effectiveTopic.equals(effectiveTopic.trim())) {
+            throw new IllegalArgumentException(
+                    "[CPI-KAFKA-PLUS] Topic name '" + effectiveTopic + "' contains leading or trailing whitespace. "
+                    + "Please remove any spaces around the topic name in the adapter Connection tab.");
+        }
         if (schemaRegistryEnabled
                 && (schemaRegistryUrl == null || schemaRegistryUrl.isEmpty())) {
             throw new IllegalArgumentException(
@@ -420,7 +437,7 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
     public void setBootstrapServers(String bootstrapServers) { this.bootstrapServers = bootstrapServers; }
 
     public String getTopic() { return topic; }
-    public void setTopic(String topic) { this.topic = topic; }
+    public void setTopic(String topic) { this.topic = topic != null ? topic.trim() : null; }
 
     public String getGroupId() { return groupId; }
     public void setGroupId(String groupId) { this.groupId = groupId; }
@@ -570,6 +587,9 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
 
     public int getMaxConcurrentTransactions() { return maxConcurrentTransactions; }
     public void setMaxConcurrentTransactions(int maxConcurrentTransactions) { this.maxConcurrentTransactions = maxConcurrentTransactions; }
+
+    public boolean isTransactionV2Enabled() { return transactionV2Enabled; }
+    public void setTransactionV2Enabled(boolean transactionV2Enabled) { this.transactionV2Enabled = transactionV2Enabled; }
 
     public String getAllowedHeaders() { return allowedHeaders; }
     public void setAllowedHeaders(String allowedHeaders) { this.allowedHeaders = allowedHeaders; }
