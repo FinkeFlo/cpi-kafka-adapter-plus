@@ -157,6 +157,16 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
 
     @Override
     protected void doStart() throws Exception {
+        try {
+            doStartInternal();
+        } catch (Exception e) {
+            LOG.error("[CPI-KAFKA-PLUS] Adapter failed to start (topic='{}'): {}",
+                    endpoint.getEffectiveTopic(), e.getMessage(), e);
+            throw e;
+        }
+    }
+
+    private void doStartInternal() throws Exception {
         shutdownRequested = false;
         stoppedByErrorPolicy = false;
         stoppedByError = null;

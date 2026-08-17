@@ -129,6 +129,16 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
 
     @Override
     protected void doStart() throws Exception {
+        try {
+            doStartInternal();
+        } catch (Exception e) {
+            LOG.error("[CPI-KAFKA-PLUS] Adapter failed to start (topic='{}'): {}",
+                    endpoint.getEffectiveTopic(), e.getMessage(), e);
+            throw e;
+        }
+    }
+
+    private void doStartInternal() throws Exception {
         // Fail-fast: validate shared configuration (Schema Registry, JSON Schema, SASL)
         endpoint.validateConfiguration();
 
