@@ -58,6 +58,10 @@ iFlow compatibility.
 - Added setup script and documentation for local hook and commit-template activation in CONTRIBUTING.md.
 - Enforce `REVIEW_REQUIRED` and `CODEOWNER_REVIEW` on main branch protection; disallow force push and branch deletion.
 
+## [1.2.5] - 2026-08-17
+### Fixed
+- `IllegalMonitorStateException: current thread is not owner` on **non-transactional** batch producer iFlows. In Kafka 4.x, `enable.idempotence=true` (the client default) activates the KIP-890 Transaction Protocol V2 code path inside `TransactionManager` even without a `transactional.id`. The same race condition that affects transactional producers on Kafka 4.x also affects idempotent-only producers. Setting `transactionV2Enabled=false` in the adapter UI now applies `transaction.two.phase.commit.enable=false` to **all** producers (regular and transactional), not only to transactional ones.
+
 ## [1.2.4] - 2026-08-17
 ### Added
 - New adapter parameter `transactionV2Enabled` (default `true`) to disable Kafka Transaction Protocol V2 (KIP-890). Set to `false` as a workaround for `IllegalMonitorStateException` in Kafka 4.x clients when a transactional producer is fenced during `initTransactions()`. V1 behavior (Kafka ≤ 3.x compatible) is stable and avoids the race condition in the `TransactionManager` sender thread.

@@ -111,8 +111,14 @@ public final class ProducerConfigFactory {
         // Security - reuse same logic as consumer
         SecurityConfigHelper.configureSecurityProperties(props, endpoint);
 
-        // Note: transaction.two.phase.commit.enable is set in CpiKafkaPlusProducer.sendTransactionalBatch
-        // where the transactional producer is created, not here. See e6 comment there for details.
+        // transaction.two.phase.commit.enable controls Kafka Transaction Protocol V2 (KIP-890).
+        // In Kafka 4.x this config is active for ALL producers with enable.idempotence=true
+        // (the default), not only for transactional ones. The same race condition in
+        // TransactionManager that causes IllegalMonitorStateException on transactional producers
+        // also affects idempotent-only producers. Apply the workaround unconditionally.
+        if (!endpoint.isTransactionV2Enabled()) {
+            props.put(ProducerConfig.TRANSACTION_TWO_PHASE_COMMIT_ENABLE_CONFIG, false);
+        }
 
         return props;
     }
