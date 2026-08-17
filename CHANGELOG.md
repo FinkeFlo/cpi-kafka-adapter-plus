@@ -60,7 +60,13 @@ iFlow compatibility.
 
 ## [1.2.5] - 2026-08-17
 ### Fixed
-- `IllegalMonitorStateException: current thread is not owner` on **non-transactional** batch producer iFlows. In Kafka 4.x, `enable.idempotence=true` (the client default) activates the KIP-890 Transaction Protocol V2 code path inside `TransactionManager` even without a `transactional.id`. The same race condition that affects transactional producers on Kafka 4.x also affects idempotent-only producers. Setting `transactionV2Enabled=false` in the adapter UI now applies `transaction.two.phase.commit.enable=false` to **all** producers (regular and transactional), not only to transactional ones.
+- Transactional producers no longer request Kafka two-phase commit (KIP-939). In 1.2.4 the default `transactionV2Enabled=true` was written straight into `transaction.two.phase.commit.enable`, so transactional producers asked the broker for 2PC — a mode that requires explicit broker support plus a `TWO_PHASE_COMMIT` ACL and makes transactions non-expiring. The adapter now only ever pins the config to `false` and never enables 2PC.
+
+### Changed
+- `transaction.two.phase.commit.enable=false` is applied in `ProducerConfigFactory.buildProducerProperties()` for **all** producers (regular and transactional) when `transactionV2Enabled=false`, instead of only in the transactional path.
+
+### Note
+- `transactionV2Enabled` cannot actually switch off Kafka Transaction Protocol V2 (KIP-890): the client derives V2 usage exclusively from the broker's finalized `transaction.version` feature, and `transaction.two.phase.commit.enable` (default `false`) is an unrelated KIP-939 switch. Do not rely on this parameter as a workaround for `IllegalMonitorStateException`; that issue is still under investigation.
 
 ## [1.2.4] - 2026-08-17
 ### Added

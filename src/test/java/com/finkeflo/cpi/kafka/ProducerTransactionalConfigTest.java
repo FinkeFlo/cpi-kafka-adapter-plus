@@ -171,9 +171,10 @@ public class ProducerTransactionalConfigTest {
 
     @Test
     public void testTransactionV2DisabledAppliedToRegularProducer() throws Exception {
-        // transactionV2Enabled=false must set TRANSACTION_TWO_PHASE_COMMIT_ENABLE to false
-        // for ALL producers (not only transactional ones), because Kafka 4.x activates the
-        // KIP-890 V2 code path even for idempotent-only producers (enable.idempotence=true default).
+        // transactionV2Enabled=false pins TRANSACTION_TWO_PHASE_COMMIT_ENABLE to false for ALL
+        // producers (not only transactional ones), so two-phase commit (KIP-939) can never be
+        // negotiated. Note: this does NOT disable Transaction Protocol V2 (KIP-890), which the
+        // client derives from the broker's finalized "transaction.version" feature.
         try (org.apache.camel.impl.DefaultCamelContext ctx = new org.apache.camel.impl.DefaultCamelContext()) {
             ctx.addComponent("cpi-kafka-plus", new CpiKafkaPlusComponent());
             ctx.start();
@@ -192,7 +193,9 @@ public class ProducerTransactionalConfigTest {
 
     @Test
     public void testTransactionV2EnabledByDefaultForRegularProducer() throws Exception {
-        // Default: transactionV2Enabled=true → TRANSACTION_TWO_PHASE_COMMIT_ENABLE must NOT be false
+        // Default (transactionV2Enabled=true): the adapter must not touch the config at all, so the
+        // Kafka client default (false) applies. It must never be set to true — that would request
+        // two-phase commit, which needs broker support and a TWO_PHASE_COMMIT ACL.
         try (org.apache.camel.impl.DefaultCamelContext ctx = new org.apache.camel.impl.DefaultCamelContext()) {
             ctx.addComponent("cpi-kafka-plus", new CpiKafkaPlusComponent());
             ctx.start();
@@ -202,11 +205,29 @@ public class ProducerTransactionalConfigTest {
             Assert.assertTrue("transactionV2Enabled should default to true", endpoint.isTransactionV2Enabled());
 
             java.util.Properties props = ProducerConfigFactory.buildProducerProperties(endpoint);
+            Assert.assertNull(
+                    "transaction.two.phase.commit.enable must not be set when transactionV2Enabled=true",
+                    props.get(org.apache.kafka.clients.producer.ProducerConfig.TRANSACTION_TWO_PHASE_COMMIT_ENABLE_CONFIG));
+        }
+    }
+
+    @Test
+    public void testTwoPhaseCommitNeverEnabledForTransactionalProducer() throws Exception {
+        // Regression guard for 1.2.4: the transactional path must never write
+        // transaction.two.phase.commit.enable=true, regardless of transactionV2Enabled.
+        try (org.apache.camel.impl.DefaultCamelContext ctx = new org.apache.camel.impl.DefaultCamelContext()) {
+            ctx.addComponent("cpi-kafka-plus", new CpiKafkaPlusComponent());
+            ctx.start();
+
+            String uri = "cpi-kafka-plus:some-topic?bootstrapServers=localhost%3A9999&securityProtocol=PLAINTEXT"
+                    + "&enableTransactions=true&transactionalIdPrefix=cpi-test";
+            CpiKafkaPlusEndpoint endpoint = (CpiKafkaPlusEndpoint) ctx.getEndpoint(uri);
+
+            java.util.Properties props = ProducerConfigFactory.buildProducerProperties(endpoint);
             Assert.assertNotEquals(
-                    "transaction.two.phase.commit.enable must not be false when transactionV2Enabled=true",
-                    false,
+                    "two-phase commit must never be requested by the adapter",
+                    true,
                     props.get(org.apache.kafka.clients.producer.ProducerConfig.TRANSACTION_TWO_PHASE_COMMIT_ENABLE_CONFIG));
         }
     }
 }
-
