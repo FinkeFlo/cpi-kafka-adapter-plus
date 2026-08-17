@@ -8,6 +8,13 @@ and the project follows [Semantic Versioning](https://semver.org/). See
 iFlow compatibility.
 
 ## [Unreleased]
+### Added
+- New docs page `docs/features/kafka-headers.md` listing all consumer, producer, and DLQ Kafka headers with descriptions, types, and conditions.
+
+### Changed
+- Standardized pull request quality gates: enforce Conventional Commit format for PR titles in CI, set squash merge to use PR title and body, add repository-managed local Git hooks (`commit-msg` for Conventional Commits validation, `pre-push` for fast unit tests + secret scans).
+- Added setup script and documentation for local hook and commit-template activation in CONTRIBUTING.md.
+- Enforce `REVIEW_REQUIRED` and `CODEOWNER_REVIEW` on main branch protection; disallow force push and branch deletion.
 
 ## [1.2.4] - 2026-08-17
 ### Added
@@ -16,7 +23,9 @@ iFlow compatibility.
 - `AdapterTracingHelper.traceError()`: enriched MPL error tracing with structured context fields (topic, transactionalId, batchSize, errorType). Called in transactional batch, regular batch, and single-send failure paths. No-op unless CPI Trace level is active.
 
 ### Fixed
-- `InvalidProducerEpochException` and `IllegalMonitorStateException` on transactional producer iFlows sharing the same `transactionalIdPrefix` across multiple topics. Root cause: all "Follow the sun" iFlows used the same prefix, resulting in identical `transactional.id` values per CF instance index and slot — causing constant mutual fencing every polling cycle.
+- `InvalidProducerEpochException` and `IllegalMonitorStateException` on transactional producer iFlows sharing the same `transactionalIdPrefix` across multiple topics.
+- `CAMEL_CONTEXT_NOT_STARTED` caused by leading/trailing whitespace in adapter config fields (e.g. topic name). SAP CPI does not URL-encode field values; spaces in query parameter values now trimmed automatically before Camel parses the URI.
+- Startup failures now logged as `[CPI-KAFKA-PLUS] Adapter failed to start (topic='...') : <cause>` before re-throwing, making `CAMEL_CONTEXT_NOT_STARTED` diagnosable from the trace log.
 
 ### Changed
 - Startup log now includes the full computed `transactional.id` example and the effective `transactionV2Enabled` flag for diagnostics.
