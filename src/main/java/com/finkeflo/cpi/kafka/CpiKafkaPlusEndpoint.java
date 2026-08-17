@@ -200,6 +200,13 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
             description = "Maximum number of concurrent transactional producers per worker node")
     private int maxConcurrentTransactions = 5;
 
+    @UriParam(label = "producer", defaultValue = "true",
+            description = "Enable Kafka Transaction Protocol V2 (two-phase commit, KIP-890). "
+            + "Requires Kafka broker 4.0+ / Confluent Platform 7.6+. "
+            + "Set to false to force Transaction Protocol V1 for compatibility with older brokers "
+            + "or as a workaround for client-side bugs in Kafka 4.x.")
+    private boolean transactionV2Enabled = true;
+
     @UriParam(label = "producer", defaultValue = "*",
             description = "Pipe-separated list of headers to send to Kafka (e.g. SAP_*|MyHeader|*). Use * for all.")
     private String allowedHeaders = "*";
@@ -570,6 +577,9 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
 
     public int getMaxConcurrentTransactions() { return maxConcurrentTransactions; }
     public void setMaxConcurrentTransactions(int maxConcurrentTransactions) { this.maxConcurrentTransactions = maxConcurrentTransactions; }
+
+    public boolean isTransactionV2Enabled() { return transactionV2Enabled; }
+    public void setTransactionV2Enabled(boolean transactionV2Enabled) { this.transactionV2Enabled = transactionV2Enabled; }
 
     public String getAllowedHeaders() { return allowedHeaders; }
     public void setAllowedHeaders(String allowedHeaders) { this.allowedHeaders = allowedHeaders; }

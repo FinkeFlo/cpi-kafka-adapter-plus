@@ -128,4 +128,44 @@ public class ProducerTransactionalConfigTest {
             producer.doStop();
         }
     }
+
+    @Test
+    public void testComputeTopicHashIsDeterministic() {
+        String hash1 = CpiKafkaPlusProducer.computeTopicHash("FRA_aspire_eXtend_IPCSDD_STOCK_AMOUNT");
+        String hash2 = CpiKafkaPlusProducer.computeTopicHash("FRA_aspire_eXtend_IPCSDD_STOCK_AMOUNT");
+        Assert.assertEquals("Hash must be deterministic across calls", hash1, hash2);
+        Assert.assertEquals("Hash must be exactly 8 hex characters", 8, hash1.length());
+        Assert.assertTrue("Hash must contain only hex characters", hash1.matches("[0-9a-f]+"));
+    }
+
+    @Test
+    public void testComputeTopicHashDiffersForDifferentTopics() {
+        String hashStock   = CpiKafkaPlusProducer.computeTopicHash("FRA_aspire_eXtend_IPCSDD_STOCK_AMOUNT");
+        String hashDemand  = CpiKafkaPlusProducer.computeTopicHash("FRA_aspire_eXtend_IPCSDD_DEMAND_DETAIL_SAP_PRD");
+        String hashSales   = CpiKafkaPlusProducer.computeTopicHash("FRA_aspire_eXtend_IPCSDD_SALES_ORDER");
+        String hashSku     = CpiKafkaPlusProducer.computeTopicHash("FRA_aspire_eXtend_IPCSDD_SKU");
+        String hashOrder   = CpiKafkaPlusProducer.computeTopicHash("FRA_aspire_eXtend_IPCSDD_ORDER_PLAN_OUTB");
+
+        java.util.Set<String> hashes = new java.util.HashSet<>(
+                java.util.Arrays.asList(hashStock, hashDemand, hashSales, hashSku, hashOrder));
+        Assert.assertEquals(
+                "All 5 follow-the-sun topics must produce distinct hashes to prevent producer fencing",
+                5, hashes.size());
+    }
+
+    @Test
+    public void testTooLongTransactionalIdPrefixIsRejected() throws Exception {
+        // A prefix long enough that prefix + hash + memberSuffix + slotId > 249 chars
+        String longPrefix = new String(new char[240]).replace('\0', 'x');
+        Map<String, String> params = new HashMap<>();
+        params.put("transactionalIdPrefix", longPrefix);
+        CpiKafkaPlusProducer producer = createProducer(params);
+        try {
+            producer.doStart();
+            Assert.fail("Expected IllegalArgumentException for transactionalIdPrefix that produces an id > 249 chars");
+        } catch (IllegalArgumentException e) {
+            Assert.assertTrue("Message should mention length: " + e.getMessage(),
+                    e.getMessage().contains("249"));
+        }
+    }
 }

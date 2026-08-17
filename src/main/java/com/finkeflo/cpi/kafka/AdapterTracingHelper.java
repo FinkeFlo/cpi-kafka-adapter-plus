@@ -81,6 +81,43 @@ public class AdapterTracingHelper {
         writeTrace(exchange, body, "RECEIVER_OUTBOUND", "Sending CPI Kafka Connector message");
     }
 
+    /**
+     * Writes a structured error trace to the CPI Message Processing Log (visible when trace level
+     * is active). Includes the exception type, message, cause chain, and any caller-supplied
+     * context entries (e.g. topic, transactionalId, slotId).
+     *
+     * <p>This is intentionally generic — callers supply only the context they know. No hint text
+     * is hardcoded here; that belongs in higher-level helpers if needed.
+     *
+     * @param exchange  the current Camel exchange (used to look up the MPL log handle)
+     * @param e         the exception that triggered the failure
+     * @param context   additional key-value pairs to include in the trace (may be empty, not null)
+     */
+    public void traceError(Exchange exchange, Exception e, java.util.Map<String, String> context) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("ERROR: ").append(e.getClass().getName())
+          .append(": ").append(e.getMessage());
+
+        Throwable cause = e.getCause();
+        int depth = 0;
+        while (cause != null && depth < 5) {
+            sb.append("\nCaused by: ").append(cause.getClass().getName())
+              .append(": ").append(cause.getMessage());
+            cause = cause.getCause();
+            depth++;
+        }
+
+        if (!context.isEmpty()) {
+            sb.append("\n\n--- Context ---");
+            for (java.util.Map.Entry<String, String> entry : context.entrySet()) {
+                sb.append('\n').append(entry.getKey()).append(": ").append(entry.getValue());
+            }
+        }
+
+        writeTrace(exchange, sb.toString().getBytes(StandardCharsets.UTF_8),
+                "RECEIVER_OUTBOUND", "Kafka send failed");
+    }
+
     @SuppressWarnings("unchecked")
     private void writeTrace(Exchange exchange, byte[] traceData, String enumValue, String logMessage) {
         if (!tracingAvailable || traceData == null || traceData.length == 0) return;
