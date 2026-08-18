@@ -68,9 +68,9 @@ public class AdapterTracingHelper {
      * where the absence is expected and must stay quiet.
      */
     private final boolean adkMessageLogPresent;
-    /** Guards the unavailability report so a broken binding is stated once, not per message. */
-    private final java.util.concurrent.atomic.AtomicBoolean unavailabilityReported =
-            new java.util.concurrent.atomic.AtomicBoolean();
+    /** Guards the unavailability report so each distinct binding defect is stated once, not per message. */
+    private final java.util.Set<String> unavailabilityReported =
+            java.util.concurrent.ConcurrentHashMap.newKeySet();
 
     public AdapterTracingHelper(CpiKafkaPlusEndpoint endpoint) {
         this.endpoint = endpoint;
@@ -126,16 +126,16 @@ public class AdapterTracingHelper {
     }
 
     /**
-     * Reports a dead Message Processing Log binding once, at ERROR.
+     * Reports a dead Message Processing Log binding once per distinct failure, at ERROR.
      *
      * <p>ERROR because only ERROR reaches the CPI tenant trace file: at DEBUG — where this used to
      * be — a broken binding is indistinguishable from a working one, which is precisely how the
-     * registry lookup above stayed broken unnoticed. Once, because the alternative is one line per
-     * message.
+     * registry lookup above stayed broken unnoticed. Once per key, because the alternative is one
+     * line per message, but we still want each distinct binding defect to be reported.
      */
     private void reportUnavailableOnce(String what, Throwable cause) {
-        if (!unavailabilityReported.compareAndSet(false, true)) {
-            return;
+        if (!unavailabilityReported.add(what)) {
+            return;  // already reported this exact failure
         }
         AdapterDiagnostics.Event event = AdapterDiagnostics.event("adapter.mpl.unavailable")
                 .with("detail", what)
@@ -185,25 +185,32 @@ public class AdapterTracingHelper {
      *
      * @param exchange  the current Camel exchange
      * @param e         the exception that triggered the failure
-     * @param context   additional key-value pairs (may be empty)
+     * @param context   additional key-value pairs (may be empty or null)
      * @param senderDirection  true for consumer/sender direction (SENDER_OUTBOUND_FAULT),
      *                         false for producer/receiver direction (RECEIVER_INBOUND_FAULT)
      */
     public void traceError(Exchange exchange, Exception e, Map<String, String> context,
                            boolean senderDirection) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("ERROR: ").append(AdapterDiagnostics.describeThrowable(e));
+        // ADR 0004: diagnostic code must never throw — guard entire body
+        try {
+            Map<String, String> safeContext = context != null ? context : java.util.Collections.emptyMap();
+            StringBuilder sb = new StringBuilder();
+            sb.append("ERROR: ").append(AdapterDiagnostics.describeThrowable(e));
 
-        if (!context.isEmpty()) {
-            sb.append("\n\n--- Context ---");
-            for (Map.Entry<String, String> entry : context.entrySet()) {
-                sb.append('\n').append(entry.getKey()).append(": ").append(entry.getValue());
+            if (!safeContext.isEmpty()) {
+                sb.append("\n\n--- Context ---");
+                for (Map.Entry<String, String> entry : safeContext.entrySet()) {
+                    sb.append('\n').append(entry.getKey()).append(": ").append(entry.getValue());
+                }
             }
-        }
 
-        String traceType = senderDirection ? "SENDER_OUTBOUND_FAULT" : "RECEIVER_INBOUND_FAULT";
-        String logMessage = senderDirection ? "Kafka consume failed" : "Kafka send failed";
-        writeTrace(exchange, sb.toString().getBytes(StandardCharsets.UTF_8), traceType, logMessage);
+            String traceType = senderDirection ? "SENDER_OUTBOUND_FAULT" : "RECEIVER_INBOUND_FAULT";
+            String logMessage = senderDirection ? "Kafka consume failed" : "Kafka send failed";
+            writeTrace(exchange, sb.toString().getBytes(StandardCharsets.UTF_8), traceType, logMessage);
+        } catch (Exception traceError) {
+            // Never let diagnostic code replace the exception it was meant to enrich
+            reportUnavailableOnce("traceError failed", traceError);
+        }
     }
 
     /**
@@ -241,21 +248,28 @@ public class AdapterTracingHelper {
             return;
         }
 
-        // Build the full diagnostic block for the attachment
-        String fullDiagnostic = buildFullDiagnostic(e, errorCode, context);
-
-        // Determine retryability
-        String retryable = RecordProcessor.isRetryable(e) ? "true" : "false";
-
-        // Extract topic from context or endpoint
-        String topic = context.getOrDefault("topic", endpoint.getEffectiveTopic());
-
-        // Extract producerPath from context if present
-        String producerPath = context.get("producerPath");
+        // ADR 0004: all preparation must be inside the try — nothing before can throw
+        // and replace the original exception this diagnostic was meant to enrich.
+        Object mplLog = null;
+        boolean useStatusVariant = fireStatusEvent;
 
         try {
-            Object mplLog;
-            boolean useStatusVariant = fireStatusEvent;
+            // Null-safe context (treat null as empty)
+            Map<String, String> safeContext = context != null ? context : java.util.Collections.emptyMap();
+
+            // Build the full diagnostic block for the attachment (null-safe)
+            String fullDiagnostic = buildFullDiagnosticSafe(e, errorCode, safeContext);
+
+            // Determine retryability (null-safe)
+            String retryable = isRetryableSafe(e) ? "true" : "false";
+
+            // Extract topic from context or endpoint (lazy evaluation for endpoint)
+            String topic = safeContext.containsKey("topic")
+                    ? safeContext.get("topic")
+                    : getEffectiveTopicSafe();
+
+            // Extract producerPath from context if present
+            String producerPath = safeContext.get("producerPath");
 
             Class<?> factoryInterface =
                     Class.forName("com.sap.it.api.msglog.adapter.AdapterMessageLogFactory");
@@ -320,12 +334,7 @@ public class AdapterTracingHelper {
                             Class.forName("com.sap.it.api.msglog.adapter.AdapterMessageLogWithStatus");
                     @SuppressWarnings("unchecked")
                     Object failedEvent = Enum.valueOf((Class<Enum>) statusEventClass, "FAILED");
-                    String statusMessage = (errorCode != null ? errorCode + ": " : "")
-                            + (e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName());
-                    // Truncate status message to avoid exceeding any platform limits
-                    if (statusMessage.length() > 500) {
-                        statusMessage = statusMessage.substring(0, 497) + "...";
-                    }
+                    String statusMessage = buildStatusMessage(errorCode, e);
                     Method fireStatusEventMethod = logWithStatusInterface.getMethod(
                             "fireStatusEvent", statusEventClass, String.class);
                     fireStatusEventMethod.invoke(mplLog, failedEvent, statusMessage);
@@ -334,12 +343,19 @@ public class AdapterTracingHelper {
                 LOG.debug("MPL failure reported: errorCode={} topic={} retryable={} fireStatusEvent={}",
                         errorCode, topic, retryable, useStatusVariant);
             } finally {
-                // f5: Always close the log with status variant
-                if (useStatusVariant) {
-                    Class<?> logWithStatusInterface =
-                            Class.forName("com.sap.it.api.msglog.adapter.AdapterMessageLogWithStatus");
-                    Method closeMethod = logWithStatusInterface.getMethod("close");
-                    closeMethod.invoke(mplLog);
+                // f5: Always close the log with status variant.
+                // CRITICAL: Guard the close so a failure here cannot mask a primary exception.
+                // An exception in finally replaces any in-flight exception from the try body.
+                if (useStatusVariant && mplLog != null) {
+                    try {
+                        Class<?> logWithStatusInterface =
+                                Class.forName("com.sap.it.api.msglog.adapter.AdapterMessageLogWithStatus");
+                        Method closeMethod = logWithStatusInterface.getMethod("close");
+                        closeMethod.invoke(mplLog);
+                    } catch (Exception closeError) {
+                        // Report separately — do not let this displace the actual binding defect
+                        reportUnavailableOnce("reportFailure close failed", closeError);
+                    }
                 }
             }
         } catch (Exception reflectionError) {
@@ -347,10 +363,62 @@ public class AdapterTracingHelper {
         }
     }
 
+    /** Builds a status message from errorCode and exception, null-safe, with length limit. */
+    private String buildStatusMessage(String errorCode, Exception e) {
+        StringBuilder sb = new StringBuilder();
+        if (errorCode != null) {
+            sb.append(errorCode).append(": ");
+        }
+        if (e != null && e.getMessage() != null) {
+            sb.append(e.getMessage());
+        } else if (e != null) {
+            sb.append(e.getClass().getSimpleName());
+        } else {
+            sb.append("Unknown error");
+        }
+        String statusMessage = sb.toString();
+        // Truncate status message to avoid exceeding any platform limits
+        if (statusMessage.length() > 500) {
+            statusMessage = statusMessage.substring(0, 497) + "...";
+        }
+        return statusMessage;
+    }
+
+    /** Null-safe wrapper for RecordProcessor.isRetryable. */
+    private boolean isRetryableSafe(Exception e) {
+        if (e == null) {
+            return false;
+        }
+        try {
+            return RecordProcessor.isRetryable(e);
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    /** Null-safe wrapper for endpoint.getEffectiveTopic(). */
+    private String getEffectiveTopicSafe() {
+        try {
+            return endpoint != null ? endpoint.getEffectiveTopic() : "unknown";
+        } catch (Exception ignored) {
+            return "unknown";
+        }
+    }
+
+    /** Null-safe wrapper for building the full diagnostic. */
+    private String buildFullDiagnosticSafe(Exception e, String errorCode, Map<String, String> context) {
+        try {
+            return buildFullDiagnostic(e, errorCode, context);
+        } catch (Exception ignored) {
+            return "Failed to build diagnostic for: " + (errorCode != null ? errorCode : "unknown error");
+        }
+    }
+
     /**
-     * Builds the full diagnostic block for attachment.
+     * Builds the full diagnostic block for attachment (null-safe for context).
      */
     private String buildFullDiagnostic(Exception e, String errorCode, Map<String, String> context) {
+        Map<String, String> safeContext = context != null ? context : java.util.Collections.emptyMap();
         StringBuilder sb = new StringBuilder();
         sb.append("=== Kafka Adapter Plus Diagnostic ===\n\n");
         if (errorCode != null) {
@@ -358,22 +426,42 @@ public class AdapterTracingHelper {
         }
         sb.append("Exception: ").append(AdapterDiagnostics.describeThrowable(e)).append("\n\n");
 
-        if (!context.isEmpty()) {
+        if (!safeContext.isEmpty()) {
             sb.append("--- Context ---\n");
-            for (Map.Entry<String, String> entry : context.entrySet()) {
+            for (Map.Entry<String, String> entry : safeContext.entrySet()) {
                 sb.append(entry.getKey()).append(": ").append(entry.getValue()).append('\n');
             }
             sb.append('\n');
         }
 
-        // Add correlation IDs from CorrelationHelper patterns
+        // Add correlation IDs from CorrelationHelper patterns (all null-safe)
         sb.append("--- Correlation ---\n");
-        sb.append("endpoint.topic: ").append(endpoint.getEffectiveTopic()).append('\n');
-        sb.append("endpoint.groupId: ")
-                .append(endpoint.getGroupId() != null ? endpoint.getGroupId() : "N/A").append('\n');
-        sb.append("endpoint.bootstrapServers: ").append(endpoint.getBootstrapServers()).append('\n');
+        sb.append("endpoint.topic: ").append(getEffectiveTopicSafe()).append('\n');
+        sb.append("endpoint.groupId: ").append(getGroupIdSafe()).append('\n');
+        sb.append("endpoint.bootstrapServers: ").append(getBootstrapServersSafe()).append('\n');
 
         return sb.toString();
+    }
+
+    /** Null-safe wrapper for endpoint.getGroupId(). */
+    private String getGroupIdSafe() {
+        try {
+            if (endpoint != null && endpoint.getGroupId() != null) {
+                return endpoint.getGroupId();
+            }
+        } catch (Exception ignored) {
+            // Fall through to default
+        }
+        return "N/A";
+    }
+
+    /** Null-safe wrapper for endpoint.getBootstrapServers(). */
+    private String getBootstrapServersSafe() {
+        try {
+            return endpoint != null ? endpoint.getBootstrapServers() : "unknown";
+        } catch (Exception ignored) {
+            return "unknown";
+        }
     }
 
     @SuppressWarnings("unchecked")

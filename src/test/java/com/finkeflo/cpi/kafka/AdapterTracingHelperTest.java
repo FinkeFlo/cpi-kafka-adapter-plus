@@ -252,4 +252,131 @@ public class AdapterTracingHelperTest {
         helper.reportFailure(exchange, new IllegalStateException("test error"),
                 null, context, false);
     }
+
+    // === Regression tests for ADR 0004 defects (diagnostic code must never throw) ===
+
+    /**
+     * Regression for defect #1: reportFailure must not throw when called with null context
+     * or a null-message exception.
+     *
+     * <p>Before the fix, the preparation block sat outside the try, and:
+     * <ul>
+     *   <li>{@code context.getOrDefault(...)} threw NPE if context was null</li>
+     *   <li>{@code endpoint.getEffectiveTopic()} was eagerly evaluated even when key present</li>
+     *   <li>{@code buildFullDiagnostic} and {@code isRetryable} were unguarded for null exception</li>
+     * </ul>
+     *
+     * <p>ADR 0004 mandates: enriching a diagnostic must never throw and replace the diagnostic
+     * it was meant to enrich. An exception in reportFailure on a failure path is strictly worse
+     * than the bug it set out to fix.
+     */
+    @Test
+    public void reportFailureWithNullContextAndNullMessageExceptionDoesNotThrow() {
+        org.apache.camel.Exchange exchange = new org.apache.camel.support.DefaultExchange(ctx);
+
+        // Null context - must not throw NPE
+        helper.reportFailure(exchange, new IllegalStateException("error"), "CODE", null, false);
+
+        // Exception with null message - must not throw
+        Exception nullMsgException = new RuntimeException((String) null);
+        helper.reportFailure(exchange, nullMsgException, "CODE", new java.util.HashMap<>(), false);
+
+        // Both null context AND null-message exception - worst case
+        helper.reportFailure(exchange, nullMsgException, "CODE", null, false);
+
+        // Null exception entirely - must handle gracefully
+        helper.reportFailure(exchange, null, "CODE", null, false);
+    }
+
+    /**
+     * Regression for defect #1 (traceError variant): traceError must not throw when called with
+     * null context or null exception.
+     */
+    @Test
+    public void traceErrorWithNullInputsDoesNotThrow() {
+        org.apache.camel.Exchange exchange = new org.apache.camel.support.DefaultExchange(ctx);
+
+        // Null context
+        helper.traceError(exchange, new IllegalStateException("error"), null);
+        helper.traceError(exchange, new IllegalStateException("error"), null, true);
+        helper.traceError(exchange, new IllegalStateException("error"), null, false);
+
+        // Null exception
+        helper.traceError(exchange, null, new java.util.HashMap<>());
+        helper.traceError(exchange, null, new java.util.HashMap<>(), true);
+
+        // Both null
+        helper.traceError(exchange, null, null);
+        helper.traceError(exchange, null, null, false);
+    }
+
+    /**
+     * Regression for defect #3: two different binding failures must both produce reports.
+     *
+     * <p>Before the fix, a single AtomicBoolean was shared by all call sites. The first
+     * binding failure permanently suppressed reports for every other binding failure on
+     * that endpoint. So if reportFailure's reflection failed once, a later different
+     * failure (e.g., getMessageLog binding going dead after an ADK upgrade) was never
+     * reported.
+     *
+     * <p>After the fix, each distinct failure (keyed by the "what" description) is reported
+     * exactly once.
+     */
+    @Test
+    public void differentBindingFailuresAreBothReported() throws Exception {
+        // Create a fresh helper to get a clean unavailability set
+        CpiKafkaPlusEndpoint endpoint = (CpiKafkaPlusEndpoint) ctx.getEndpoint(
+                "cpi-kafka-plus:topic-for-unavailable-test?bootstrapServers=localhost:9092&groupId=grp");
+        AdapterTracingHelper freshHelper = new AdapterTracingHelper(endpoint);
+
+        // Use reflection to access the reportUnavailableOnce method and verify per-key behavior.
+        java.lang.reflect.Method reportMethod = AdapterTracingHelper.class.getDeclaredMethod(
+                "reportUnavailableOnce", String.class, Throwable.class);
+        reportMethod.setAccessible(true);
+
+        // First failure type
+        reportMethod.invoke(freshHelper, "binding-A failed", new RuntimeException("A"));
+
+        // Different failure type - should also be tracked (not suppressed)
+        reportMethod.invoke(freshHelper, "binding-B failed", new RuntimeException("B"));
+
+        // Verify both keys are tracked by checking the unavailability set
+        java.lang.reflect.Field unavailField = AdapterTracingHelper.class.getDeclaredField("unavailabilityReported");
+        unavailField.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        java.util.Set<String> unavailSet = (java.util.Set<String>) unavailField.get(freshHelper);
+
+        Assert.assertTrue("First binding failure should be recorded",
+                unavailSet.contains("binding-A failed"));
+        Assert.assertTrue("Second (different) binding failure should also be recorded",
+                unavailSet.contains("binding-B failed"));
+        Assert.assertEquals("Both failures should be tracked separately", 2, unavailSet.size());
+    }
+
+    /**
+     * Regression for defect #3: the same binding failure reported twice should only produce
+     * one entry (i.e., is reported only once).
+     */
+    @Test
+    public void sameBindingFailureTwiceIsReportedOnlyOnce() throws Exception {
+        CpiKafkaPlusEndpoint endpoint = (CpiKafkaPlusEndpoint) ctx.getEndpoint(
+                "cpi-kafka-plus:topic-for-duplicate-test?bootstrapServers=localhost:9092&groupId=grp");
+        AdapterTracingHelper freshHelper = new AdapterTracingHelper(endpoint);
+
+        java.lang.reflect.Method reportMethod = AdapterTracingHelper.class.getDeclaredMethod(
+                "reportUnavailableOnce", String.class, Throwable.class);
+        reportMethod.setAccessible(true);
+
+        // Same failure twice
+        reportMethod.invoke(freshHelper, "binding-X failed", new RuntimeException("X1"));
+        reportMethod.invoke(freshHelper, "binding-X failed", new RuntimeException("X2"));
+
+        java.lang.reflect.Field unavailField = AdapterTracingHelper.class.getDeclaredField("unavailabilityReported");
+        unavailField.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        java.util.Set<String> unavailSet = (java.util.Set<String>) unavailField.get(freshHelper);
+
+        Assert.assertTrue("Binding failure should be recorded", unavailSet.contains("binding-X failed"));
+        Assert.assertEquals("Same failure twice should still be just one entry", 1, unavailSet.size());
+    }
 }
