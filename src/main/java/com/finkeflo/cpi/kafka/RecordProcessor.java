@@ -198,7 +198,13 @@ final class RecordProcessor {
                                 dlqHelper.sendToDlq(record, new RuntimeException(validationError), 0);
                                 dlqCount++;
                             } catch (Exception dlqEx) {
-                                LOG.error("[CPI-KAFKA-PLUS-DIAG] DLQ send failed for validation-failed record in batch", dlqEx);
+                                AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("dlq.send.failed")
+                                        .with("trigger", "schemaValidation")
+                                        .with("mode", "batch")
+                                        .with("topic", record.topic())
+                                        .with("partition", record.partition())
+                                        .with("offset", record.offset())
+                                        .with("dlqTopic", endpoint.getDlqTopic()), dlqEx);
                             }
                         }
                         Exchange errorExchange = callback.createExchange();
@@ -447,7 +453,13 @@ final class RecordProcessor {
             try {
                 dlqHelper.sendToDlq(record, new RuntimeException(validationError), 0);
             } catch (Exception dlqEx) {
-                LOG.error("[CPI-KAFKA-PLUS-DIAG] DLQ send failed for validation-failed record", dlqEx);
+                AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("dlq.send.failed")
+                        .with("trigger", "schemaValidation")
+                        .with("mode", "single")
+                        .with("topic", record.topic())
+                        .with("partition", record.partition())
+                        .with("offset", record.offset())
+                        .with("dlqTopic", endpoint.getDlqTopic()), dlqEx);
             }
         }
         if (commitAfterSuccess) {
@@ -528,7 +540,18 @@ final class RecordProcessor {
                 }
                 return 1;
             } catch (Exception dlqEx) {
-                LOG.error("[CPI-KAFKA-PLUS-DIAG] DLQ send failed, delegating to exception handler", dlqEx);
+                // Without a DLQ write there is no offset commit, so this record is polled again
+                // on the next cycle - the consumer stalls here until the cause is removed.
+                AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("dlq.send.failed")
+                        .with("trigger", "retryExhausted")
+                        .with("topic", record.topic())
+                        .with("partition", record.partition())
+                        .with("offset", record.offset())
+                        .with("dlqTopic", endpoint.getDlqTopic())
+                        .with("retryAttempts", actualRetries)
+                        .with("errorType", errorType != null ? errorType : "UNKNOWN")
+                        .with("originalError", CpiKafkaPlusErrorCode.fromThrowable(lastError).code())
+                        .with("consequence", "offset not committed, record will be reprocessed"), dlqEx);
             }
         }
 
