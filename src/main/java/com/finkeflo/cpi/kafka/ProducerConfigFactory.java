@@ -111,6 +111,33 @@ public final class ProducerConfigFactory {
         // Security - reuse same logic as consumer
         SecurityConfigHelper.configureSecurityProperties(props, endpoint);
 
+        /*
+         * e6 fix: KIP-939 two-phase commit opt-out.
+         *
+         * The UI flag "transactionV2Enabled" was INCORRECTLY documented in a prior version as
+         * controlling "KIP-890 Transaction Protocol V2". In reality:
+         *   - KIP-890 (Transaction Protocol V2) is broker-side and negotiated automatically.
+         *   - KIP-939 (Two-Phase Commit) is client-side and controlled by
+         *     `transaction.two.phase.commit.enable` (default=false in kafka-clients 3.9.x).
+         *
+         * The PREVIOUS code wrote:
+         *   props.put(TRANSACTION_TWO_PHASE_COMMIT_ENABLE_CONFIG, endpoint.isTransactionV2Enabled())
+         * which would REQUEST 2PC when transactionV2Enabled=true (the default), silently changing
+         * transactional behaviour if the broker supported it.
+         *
+         * CORRECTED behaviour:
+         *   - transactionV2Enabled=true (default): Don't set the config; let Kafka default (false)
+         *     apply. This preserves backward-compatible single-phase commit semantics.
+         *   - transactionV2Enabled=false: Explicitly set the config to false, making the opt-out
+         *     visible in broker logs and surviving any future default change.
+         *
+         * COMPATIBILITY NOTE: No breaking change — the old default (true) never actually enabled
+         * 2PC because kafka-clients defaults to false. This fix just makes the behaviour explicit.
+         */
+        if (!endpoint.isTransactionV2Enabled()) {
+            props.put("transaction.two.phase.commit.enable", "false");
+        }
+
         return props;
     }
 }
