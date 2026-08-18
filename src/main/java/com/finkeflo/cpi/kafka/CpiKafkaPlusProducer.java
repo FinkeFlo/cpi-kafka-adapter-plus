@@ -70,6 +70,12 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
      */
     private static final int VERIFIED_TOPICS_CACHE_LIMIT = 256;
     /**
+     * Window in which a failed metadata pre-warm may be retried. Short on purpose: the KAFKA-10902
+     * monitor fault throws immediately and is worth another attempt, whereas a genuine metadata
+     * timeout has already spent {@code max.block.ms} and must not be multiplied.
+     */
+    private static final long PREWARM_RETRY_WINDOW_MS = 5_000L;
+    /**
      * How often a reported-missing topic is re-checked before the send is failed, and how long to
      * wait between attempts. {@code createTopics} returns as soon as the controller has accepted the
      * request, so a topic can legitimately be absent from broker metadata for a moment afterwards —
@@ -91,6 +97,12 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
      * take effect until the IFlow is redeployed.
      */
     private final java.util.Set<String> verifiedTopics =
+            java.util.Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap<String, Boolean>());
+    /**
+     * Topics whose metadata this producer instance has already tried to fetch up front. Cleared
+     * whenever the producer is replaced, because a new client starts with an empty metadata cache.
+     */
+    private final java.util.Set<String> prewarmedTopics =
             java.util.Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap<String, Boolean>());
     private KafkaProducer<byte[], byte[]> kafkaProducer;
     private AvroSerializerHelper avroHelper;
@@ -385,6 +397,7 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
         // cause. Cached per topic, so this costs one AdminClient round trip per topic, not per
         // message.
         assertTopicExists(topic);
+        prewarmTopicMetadata(topic);
 
         if (!"NONE".equalsIgnoreCase(batchMode)) {
             processBatch(exchange, in, topic, batchMode);
@@ -723,6 +736,48 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
             if (val != null) {
                 record.headers().add(name, val.toString().getBytes(StandardCharsets.UTF_8));
             }
+        }
+    }
+
+    /**
+     * Fetches the metadata for a topic once per producer instance, before any record is submitted.
+     *
+     * <p>This is the preventive half of the KAFKA-10902 mitigation. {@code waitOnMetadata()} only
+     * blocks in {@code ProducerMetadata.awaitUpdate()} — the method carrying the monitor defect —
+     * when the topic's partition count is not in the client's cache. Fetching it here means the
+     * subsequent {@code send(...)} finds it present and never enters that path. Together with the
+     * raised {@code metadata.max.idle.ms} (see {@link ProducerConfigFactory}), which stops an idle
+     * topic from being evicted again, the vulnerable construct is left out of the hot path entirely
+     * rather than merely being retried when it fails.
+     *
+     * <p>Doing it here rather than at producer creation covers dynamically resolved topics as well,
+     * and it is done before any record exists, so a failure costs nothing and a retry is free.
+     *
+     * <p>Never fails the exchange. If the fetch does not succeed, the send path performs it anyway
+     * and reports a far more precise error than this method could.
+     */
+    private void prewarmTopicMetadata(String topic) {
+        if (kafkaProducer == null || topic == null || topic.isEmpty()) {
+            return;
+        }
+        // Bounded like verifiedTopics, so a flow with unbounded dynamic topics cannot grow this set
+        // without limit. Beyond the limit the pre-warm is simply skipped; the send path still works.
+        if (prewarmedTopics.size() >= VERIFIED_TOPICS_CACHE_LIMIT || !prewarmedTopics.add(topic)) {
+            return;
+        }
+        try {
+            // A short retry deadline on purpose: the monitor fault throws immediately and is worth
+            // retrying, while a genuine metadata timeout has already consumed max.block.ms and must
+            // not be multiplied by retrying it.
+            MonitorFaultRetry.execute(() -> kafkaProducer.partitionsFor(topic),
+                    new MonitorFaultRetry.Budget(),
+                    System.currentTimeMillis() + PREWARM_RETRY_WINDOW_MS,
+                    topic, -1);
+        } catch (Exception e) {
+            AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("producer.metadata.prewarm")
+                    .with("outcome", "FAILED")
+                    .with("topic", topic)
+                    .with("thread", Thread.currentThread().getName()), e);
         }
     }
 
@@ -1150,6 +1205,9 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
                 LOG.warn("[CPI-KAFKA-PLUS-DIAG] Error closing Kafka producer: {}", e.getMessage());
             }
             kafkaProducer = null;
+            // A replacement client starts with an empty metadata cache, so the pre-warm has to
+            // happen again for every topic.
+            prewarmedTopics.clear();
         }
         if (avroHelper != null) {
             try {

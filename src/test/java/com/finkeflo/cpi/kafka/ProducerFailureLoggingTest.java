@@ -210,4 +210,22 @@ public class ProducerFailureLoggingTest {
             Assert.assertTrue(logged, logged.contains(ProducerFailureLoggingTest.class.getName()));
         }
     }
+
+    @Test
+    public void keepsTopicMetadataCachedFarBeyondTheClientDefault() {
+        // The client default forgets the metadata of a topic idle for five minutes, and the next
+        // send then has to fetch it on the calling thread inside ProducerMetadata.awaitUpdate() —
+        // the method carrying the KAFKA-10902 monitor defect. A flow producing less often than that
+        // would enter the vulnerable path on every single message.
+        CpiKafkaPlusEndpoint endpoint = new CpiKafkaPlusEndpoint();
+        endpoint.setBootstrapServers("broker.example.com:9092");
+        endpoint.setTopic("test-topic");
+
+        java.util.Properties props = ProducerConfigFactory.buildProducerProperties(endpoint);
+
+        Assert.assertEquals(ProducerConfigFactory.METADATA_MAX_IDLE_MS,
+                props.get(org.apache.kafka.clients.producer.ProducerConfig.METADATA_MAX_IDLE_CONFIG));
+        Assert.assertTrue("must be well above the 5 minute client default",
+                ProducerConfigFactory.METADATA_MAX_IDLE_MS > 300_000L);
+    }
 }
