@@ -33,7 +33,7 @@ fields. Parse from the end of the line, or with a regular expression — never b
 Every failure line carries a stable error code in the form `KP-AREA-NNN`. Quote this code in support
 tickets: it identifies the failure class precisely and survives copy-paste better than a stack trace.
 
-| Code | Operation | Description |
+| Code | Symbol | Description |
 |------|-----------|-------------|
 | `KP-PROD-001` | `producer.init.failed` | Producer initialisation failed |
 | `KP-PROD-002` | `producer.send.timeout` | Send timed out |
@@ -48,6 +48,12 @@ tickets: it identifies the failure class precisely and survives copy-paste bette
 | `KP-META-001` | `metadata.fetch_timeout` | Metadata fetch timed out |
 | `KP-META-002` | `metadata.monitor_state_fault` | KAFKA-10902 monitor fault (see below) |
 | `KP-DLQ-001` | `dlq.delivery_failed` | Dead-letter queue delivery failed |
+| `KP-SR-001` | `schema_registry.failed` | Schema Registry call failed |
+| `KP-GEN-001` | `unclassified` | No code matched. Treated as unknown rather than guessed — see *Exception classification* below |
+
+The symbol is not the operation token at the start of the log line; the two are separate
+namespaces. Grep for the code (`KP-META-002`), which appears on every line that carries it, rather
+than for the symbol.
 | `KP-SR-001` | `schema_registry.failed` | Schema Registry operation failed |
 | `KP-GEN-001` | `unclassified` | Unclassified error |
 
@@ -96,7 +102,7 @@ own logic in a single step.
 
 ```bash
 # Distribution of failures across nodes
-grep '\[CPI-KAFKA-PLUS-DIAG\]' trace.log | grep 'producer.batch.send' \
+grep '\[CPI-KAFKA-PLUS-DIAG\]' trace.log | grep -E 'producer\.batch\.record\.(send|await)' \
   | awk -F'#' '{print $(NF-1)}' | sort | uniq -c | sort -rn
 ```
 
@@ -108,28 +114,28 @@ node while overall traffic is spread evenly is a node-local problem, not a Kafka
 Failure lines are flat `key=value` sequences. Values containing spaces are wrapped in single quotes.
 
 ```
-[CPI-KAFKA-PLUS-DIAG] producer.batch.send producerPath=SHARED consecutiveFailures=1
-  fatalClassification=false reconnectTriggered=false thread=… topic=… batchMode=JSON
-  recordCount=3 mplId=… exchangeId=… error='…'
+[CPI-KAFKA-PLUS-DIAG] producer.batch.record.send producerPath=SHARED phase=SYNC_SEND
+  clientId=… topic=… recordIndex=0 batchSize=3 bufferedRecords=0 elapsedMs=12
+  thread=… error='…' STACK …
 ```
 
 ### Field reference
 
 | Field | Meaning |
 |---|---|
-| *(first token after the marker)* | The operation, e.g. `producer.batch.send`, `producer.init.failed`, `producer.send.monitorFaultRetry` |
+| *(first token after the marker)* | The operation, e.g. `producer.batch.record.send`, `producer.init.failed`, `producer.send.monitorFaultRetry` |
 | `phase` | `SYNC_SEND` — `send()` threw synchronously, the record never entered the accumulator. `AWAIT_FUTURE` — the record was accepted and failed later. Only the first is safe to retry |
 | `producerPath` | `SHARED` (non-transactional) or `TRANSACTIONAL`. Check this before investigating anything transactional |
 | `topic` | Target topic |
 | `recordIndex` | Position in the batch. A failure at `0` typically means the metadata wait, not the payload |
-| `batchSize`, `recordCount` | Size of the batch |
+| `batchSize` | Size of the batch |
 | `elapsedMs` | Time since the batch started |
 | `thread` | Worker thread. Several distinct threads failing points at a node-wide condition rather than one poisoned thread |
 | `mplId`, `applicationId`, `exchangeId` | Correlation to one integration-flow message; `mplId` is what the monitor is searchable by |
 | `consecutiveFailures` | Consecutive failures on this producer. Governs reconnect only, never whether something is logged |
 | `classification` | One of `RETRIABLE`, `FATAL_PRODUCER_UNUSABLE`, `FATAL_DATA_ERROR`, `UNKNOWN_FATAL` (see above) |
 | `errorCode` | Stable error code, e.g. `KP-PROD-002` (see above) |
-| `reconnectTriggered` | Whether the producer was rebuilt as a result |
+| `producerRecreated`, `durationMs`, `attemptsSinceLastSuccess` | Emitted on the separate `producer.rebuild.outcome` line, not on the failure line. A rebuild is not reported inline — correlate by `clientId`, then look for `producer.rebuild.effect` with `outcome=RECOVERED` to see whether it actually helped |
 | `retryOutcome`, `retryCount`, `batchRetriesLeft`, `stopReason` | Outcome of the bounded retry described below |
 | `error` | Serialised exception: class, message, frames, then `CAUSED_BY` per cause level and `SUPPRESSED` where present |
 
@@ -277,6 +283,7 @@ Four custom header properties are attached to the failed message's MPL entry:
 | `KafkaAdapterTopic` | The target topic |
 | `KafkaAdapterProducerPath` | `SHARED` or `TRANSACTIONAL` |
 | `KafkaAdapterRetryable` | `true` if the classification was `RETRIABLE`, otherwise `false` |
+| `KafkaAdapterError` | Short exception description, so the monitor shows what failed without opening the attachment |
 
 These properties are visible in the monitor's message detail view and are searchable. They do **not**
 require MPL tracing to be enabled — they are attached via `addCustomHeaderProperty`, which works
@@ -303,7 +310,7 @@ supported:
 | Level | Description |
 |-------|-------------|
 | `STANDARD` (default) | All failure paths log the full serialised cause chain. Sufficient for root-causing most production incidents. |
-| `FULL` | Adds expensive or verbose extras: per-record detail in batches, JVM thread state on escalation, more frequent success baselines. Use only when actively debugging. |
+| `FULL` | Adds one thing: a bounded thread dump attached to `producer.node.fault.escalation`, capped at 20 threads and 10 frames each, with lock owners resolved. That dump is the only evidence that can settle a monitor-ownership question, and it is the reason `FULL` exists. |
 
 `STANDARD` is fully diagnostic on its own. Do not run at `FULL` permanently: the extra output adds
 volume and latency on every send. Switch to `FULL` only when you need the additional detail, then
