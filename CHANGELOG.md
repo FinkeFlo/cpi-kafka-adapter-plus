@@ -58,6 +58,17 @@ iFlow compatibility.
 - Added setup script and documentation for local hook and commit-template activation in CONTRIBUTING.md.
 - Enforce `REVIEW_REQUIRED` and `CODEOWNER_REVIEW` on main branch protection; disallow force push and branch deletion.
 
+## [1.2.6] - 2026-08-18
+### Removed
+- The `Enable Transaction Protocol V2 (KIP-890)` option was removed from the receiver channel UI. It could not do what its label said, and after 1.2.5 it could no longer do anything at all: with the option set it pinned `transaction.two.phase.commit.enable` to `false`, and without it the Kafka client default `false` applied — the same outcome in both positions. Its description was wrong on all three counts it made: it never controlled KIP-890 (the client derives Transaction Protocol V2 solely from the broker's finalized `transaction.version` feature), it never forced Protocol V1, and it was not a workaround for the `IllegalMonitorStateException` — that fix is the metadata monitor-fault retry shipped in 1.2.5.
+- Measured, not assumed: the `enable2_pc` field exists only in `InitProducerId` **v6**, and no released broker advertises it — Confluent 7.9.5 (Kafka 3.9), Apache Kafka 4.0.0, 4.1.0 and 4.2.0 all cap the API at v5. A transactional send succeeds identically with the flag set to `true` or `false`, including against a broker with an active authorizer and no `TWO_PHASE_COMMIT` ACL. The setting never reached a broker.
+
+### Changed
+- `transaction.two.phase.commit.enable=false` is now pinned unconditionally for every producer, rather than being conditional on the retired option. The safe default no longer depends on a parameter nobody should be setting.
+
+### Compatibility
+- Existing iFlows are unaffected and need no rework. The endpoint setter is retained as deprecated, so channel URIs that still carry `transactionV2Enabled` continue to resolve; the value is ignored. The field itself will be dropped at the next major version.
+
 ## [1.2.5] - 2026-08-17
 ### Fixed
 - Transactional producers no longer request Kafka two-phase commit (KIP-939). In 1.2.4 the default `transactionV2Enabled=true` was written straight into `transaction.two.phase.commit.enable`, so transactional producers asked the broker for 2PC — a mode that requires explicit broker support plus a `TWO_PHASE_COMMIT` ACL and makes transactions non-expiring. The adapter now only ever pins the config to `false` and never enables 2PC.

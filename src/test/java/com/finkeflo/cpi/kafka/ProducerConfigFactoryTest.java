@@ -90,23 +90,27 @@ public class ProducerConfigFactoryTest {
     // ─────────────────────────────────────────────────────────────────────────────
 
     /**
-     * Documents that ProducerConfigFactory does NOT set transaction.two.phase.commit.enable.
-     * This config is set in CpiKafkaPlusProducer.sendTransactionalBatch where the transactional
-     * producer is created.
-     * 
-     * e6 fix corrected the comment that wrongly attributed transaction.two.phase.commit.enable
-     * to KIP-890 (broker-side Transaction Protocol V2, negotiated automatically) when it actually
-     * controls KIP-939 (client-side Two-Phase Commit).
+     * Pins transaction.two.phase.commit.enable to false for every producer, independently of the
+     * retired transactionV2Enabled option.
+     *
+     * <p>transaction.two.phase.commit.enable controls KIP-939 (client-side Two-Phase Commit), not
+     * KIP-890 (Transaction Protocol V2, which the client derives from the broker's finalized
+     * transaction.version feature). 2PC requires broker support plus a TWO_PHASE_COMMIT ACL and
+     * makes transactions non-expiring, so the adapter must never request it.
      */
     @Test
-    public void transactionTwoPhaseNotSetInFactory() throws Exception {
-        CpiKafkaPlusEndpoint endpoint = createEndpoint();
-        endpoint.setTransactionV2Enabled(true);
-        Properties props = ProducerConfigFactory.buildProducerProperties(endpoint);
+    public void transactionTwoPhasePinnedFalseInFactory() throws Exception {
+        for (boolean legacyValue : new boolean[]{true, false}) {
+            CpiKafkaPlusEndpoint endpoint = createEndpoint();
+            endpoint.setTransactionV2Enabled(legacyValue);
+            Properties props = ProducerConfigFactory.buildProducerProperties(endpoint);
 
-        // The factory does NOT set this config - it's set in CpiKafkaPlusProducer
-        Assert.assertNull("transaction.two.phase.commit.enable should not be set in factory",
-                props.get("transaction.two.phase.commit.enable"));
+            Assert.assertEquals(
+                    "two-phase commit must be pinned to false regardless of the retired option ("
+                            + legacyValue + ")",
+                    false,
+                    props.get("transaction.two.phase.commit.enable"));
+        }
     }
 
     private CpiKafkaPlusEndpoint createEndpoint() throws Exception {

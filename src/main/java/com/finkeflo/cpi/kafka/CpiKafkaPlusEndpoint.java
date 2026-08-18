@@ -200,11 +200,19 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
             description = "Maximum number of concurrent transactional producers per worker node")
     private int maxConcurrentTransactions = 5;
 
+    /**
+     * @deprecated Retained only so existing iFlow URIs that still carry this parameter continue to
+     *     resolve. It has no effect. The option never controlled Transaction Protocol V2 (KIP-890),
+     *     which the client derives from the broker's finalized {@code transaction.version} feature.
+     *     It mapped to {@code transaction.two.phase.commit.enable} (KIP-939), which
+     *     {@link ProducerConfigFactory} now pins to {@code false} for every producer. Removed from
+     *     the channel UI in 1.2.6; drop the field at the next major version.
+     */
+    @Deprecated
     @UriParam(label = "producer", defaultValue = "true",
-            description = "Enable Kafka Transaction Protocol V2 (two-phase commit, KIP-890). "
-            + "Requires Kafka broker 4.0+ / Confluent Platform 7.6+. "
-            + "Set to false to force Transaction Protocol V1 for compatibility with older brokers "
-            + "or as a workaround for client-side bugs in Kafka 4.x.")
+            description = "Deprecated and ignored. This option never controlled Transaction Protocol "
+            + "V2 (KIP-890), which is negotiated from the broker's transaction.version feature. "
+            + "Two-phase commit (KIP-939) is now disabled for every producer regardless of this value.")
     private boolean transactionV2Enabled = true;
 
     @UriParam(label = "producer", defaultValue = "*",
@@ -604,7 +612,12 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
     public int getMaxConcurrentTransactions() { return maxConcurrentTransactions; }
     public void setMaxConcurrentTransactions(int maxConcurrentTransactions) { this.maxConcurrentTransactions = maxConcurrentTransactions; }
 
+    /** @deprecated ignored; see {@link #transactionV2Enabled}. */
+    @Deprecated
     public boolean isTransactionV2Enabled() { return transactionV2Enabled; }
+
+    /** @deprecated ignored; see {@link #transactionV2Enabled}. */
+    @Deprecated
     public void setTransactionV2Enabled(boolean transactionV2Enabled) { this.transactionV2Enabled = transactionV2Enabled; }
 
     public String getAllowedHeaders() { return allowedHeaders; }

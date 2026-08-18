@@ -290,9 +290,9 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
             txnSlotSemaphore = new java.util.concurrent.Semaphore(slots, true);
             txnSlotInUse = new boolean[slots];
             LOG.info("[CPI-KAFKA-PLUS-DIAG] Transactional batching enabled with max {} concurrent transactions. "
-                    + "Prefix: {}, topicHash: {}, memberSuffix: {}, transactionV2: {}, example transactional.id: {}",
+                    + "Prefix: {}, topicHash: {}, memberSuffix: {}, example transactional.id: {}",
                     slots, endpoint.getTransactionalIdPrefix(), topicHash, resolvedMemberSuffix,
-                    endpoint.isTransactionV2Enabled(), exampleId);
+                    exampleId);
         }
 
         // Surface a missing topic in the deployment log right away, and warm the cache when it is
@@ -605,7 +605,6 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
             ctx.put("transactionalId", transactionalId != null ? transactionalId : "(not yet assigned)");
             ctx.put("slotId", String.valueOf(slotId));
             ctx.put("topicHash", topicHash != null ? topicHash : "(not yet computed)");
-            ctx.put("transactionV2Enabled", String.valueOf(endpoint.isTransactionV2Enabled()));
             CorrelationHelper.addTo(ctx, in.getExchange());
             tracingHelper.traceError(in.getExchange(), e, ctx);
             handleTxnSendFailure(e, ctx);
