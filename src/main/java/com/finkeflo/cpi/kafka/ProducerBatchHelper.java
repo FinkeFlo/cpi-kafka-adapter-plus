@@ -45,6 +45,19 @@ public final class ProducerBatchHelper {
     private ProducerBatchHelper() {}
 
     /**
+     * Producer path identifier for diagnostics. Every diagnostic line from the producer path must
+     * include this tag so the first question in any investigation ("which path was in play?") is
+     * answered immediately.
+     */
+    public enum ProducerPath {
+        /** The shared, non-transactional producer reused across exchanges. */
+        SHARED,
+        /** A per-transaction, short-lived producer created for exactly-once batches. */
+        TRANSACTIONAL
+    }
+
+
+    /**
      * Result of a batch send operation.
      */
     public static final class BatchSendResult {
