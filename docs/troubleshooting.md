@@ -1,8 +1,11 @@
 # Troubleshooting
 
-This page is written for the situation where something has already gone wrong and the only evidence
-available is the tenant trace file. It describes what the adapter writes, where to find it, and how
-to read it.
+This page is written for the situation where something has already gone wrong. It describes what the
+adapter writes, where to find it, and how to read it. This is the *how*; see
+[ADR 0004](adrs/0004-diagnostic-logging-contract.md) for the *why*.
+
+Two diagnostic channels are available: the **tenant trace file** (always) and the **Message
+Processing Log** (per-message, when a failure occurs during an exchange). Both are described here.
 
 ## Why the adapter logs the way it does
 
@@ -24,6 +27,48 @@ text*. That is why failure lines are long.
 **`#` is not a safe field delimiter.** Trace records are `#`-separated, but the thread name itself
 contains a `#` (for example `... thread #429917`), so a record splits into a variable number of
 fields. Parse from the end of the line, or with a regular expression — never by fixed column index.
+
+## Error codes
+
+Every failure line carries a stable error code in the form `KP-AREA-NNN`. Quote this code in support
+tickets: it identifies the failure class precisely and survives copy-paste better than a stack trace.
+
+| Code | Operation | Description |
+|------|-----------|-------------|
+| `KP-PROD-001` | `producer.init.failed` | Producer initialisation failed |
+| `KP-PROD-002` | `producer.send.timeout` | Send timed out |
+| `KP-PROD-003` | `producer.send.record_too_large` | Record too large for the broker's `message.max.bytes` |
+| `KP-PROD-004` | `producer.send.serialization_failed` | Serialisation failed |
+| `KP-TXN-001` | `txn.fenced` | Producer fenced (another instance took over the transactional id) |
+| `KP-TXN-002` | `txn.failed` | Transaction failed |
+| `KP-SEC-001` | `security.authentication_failed` | Authentication failed (wrong credentials, expired token) |
+| `KP-SEC-002` | `security.authorization_denied` | Authorisation denied (ACL blocks the operation) |
+| `KP-CFG-001` | `config.invalid_topic` | Invalid topic (does not exist, auto-create disabled) |
+| `KP-CFG-002` | `config.json_schema_validation_failed` | JSON schema validation failed |
+| `KP-META-001` | `metadata.fetch_timeout` | Metadata fetch timed out |
+| `KP-META-002` | `metadata.monitor_state_fault` | KAFKA-10902 monitor fault (see below) |
+| `KP-DLQ-001` | `dlq.delivery_failed` | Dead-letter queue delivery failed |
+| `KP-SR-001` | `schema_registry.failed` | Schema Registry operation failed |
+| `KP-GEN-001` | `unclassified` | Unclassified error |
+
+`KP-GEN-001` means the adapter did not recognise the exception. It is not necessarily fatal — the
+full cause chain in `error=` is the evidence. If the same `KP-GEN-001` recurs, report it so the
+classification can be extended.
+
+## Exception classification
+
+Failure lines carry a `classification` field with one of four values. These drive the adapter's
+automatic mitigation and tell you what to try next.
+
+| Classification | Meaning | What to do |
+|----------------|---------|------------|
+| `RETRIABLE` | Transient failure (timeout, network blip). The adapter will retry automatically. | Wait. If it persists, check broker connectivity. |
+| `FATAL_PRODUCER_UNUSABLE` | The producer cannot recover without being rebuilt (fenced, auth revoked, bad broker version). | The adapter rebuilds the producer automatically. Check credentials, ACLs, broker version. |
+| `FATAL_DATA_ERROR` | A problem with the record itself (too large, invalid topic, serialisation failure). No producer rebuild will help. | Fix the payload or configuration. |
+| `UNKNOWN_FATAL` | The adapter does not recognise this exception. | Read the full `error=` field. Report it so the classification can be improved. |
+
+`UNKNOWN_FATAL` is deliberately conservative: the adapter does not guess. If you see it, the cause
+chain is the evidence. A rebuild is not triggered automatically because it might be pointless.
 
 ## Finding the adapter's lines
 
@@ -82,7 +127,8 @@ Failure lines are flat `key=value` sequences. Values containing spaces are wrapp
 | `thread` | Worker thread. Several distinct threads failing points at a node-wide condition rather than one poisoned thread |
 | `mplId`, `applicationId`, `exchangeId` | Correlation to one integration-flow message; `mplId` is what the monitor is searchable by |
 | `consecutiveFailures` | Consecutive failures on this producer. Governs reconnect only, never whether something is logged |
-| `fatalClassification` | Whether the cause was classified as fatal |
+| `classification` | One of `RETRIABLE`, `FATAL_PRODUCER_UNUSABLE`, `FATAL_DATA_ERROR`, `UNKNOWN_FATAL` (see above) |
+| `errorCode` | Stable error code, e.g. `KP-PROD-002` (see above) |
 | `reconnectTriggered` | Whether the producer was rebuilt as a result |
 | `retryOutcome`, `retryCount`, `batchRetriesLeft`, `stopReason` | Outcome of the bounded retry described below |
 | `error` | Serialised exception: class, message, frames, then `CAUSED_BY` per cause level and `SUPPRESSED` where present |
@@ -141,12 +187,61 @@ grep 'producer.send.monitorFaultRetry' trace.log | grep -o 'retryOutcome=[A-Z]*'
 glitching. Redeploying or restarting the integration flow causes the workers to be placed again, and
 the node field above is the evidence to attach to a ticket.
 
+## Node fault escalation
+
+When the same fault (keyed by exception class and error code) recurs **5 times within 20 minutes**
+on one JVM despite the adapter's mitigation, a `producer.node.fault.escalation` line is emitted.
+This is the single most actionable diagnostic line the adapter can produce: it means the node is
+experiencing a persistent problem that automatic recovery cannot fix.
+
+```
+[CPI-KAFKA-PLUS-DIAG] producer.node.fault.escalation faultClass=TimeoutException
+  errorCode=KP-PROD-002 classification=RETRIABLE countInWindow=5 windowMinutes=20
+  producerPath=SHARED topic=… thread=… advice='The same fault has recurred 5 times
+  within 20 minutes on this JVM despite mitigation…'
+```
+
+**What to do:**
+
+1. Extract the node address from the trace record's second-to-last `#`-separated field.
+2. Compare it against the distribution of all failures (see the grep recipe above). If the fault is
+   concentrated on one node while traffic is spread evenly, the problem is node-local, not Kafka.
+3. Collect the evidence (error code, classification, node address) and open a support ticket
+   requesting that the node be recycled or the integration flow redeployed.
+
+The escalation fires once per fault identity per 20-minute window. If the fault stops and returns,
+it fires again. Successful sends reset the window.
+
+## Producer rebuild tracking
+
+When the adapter rebuilds its producer (after a `FATAL_PRODUCER_UNUSABLE` classification or repeated
+failures), two events report the outcome:
+
+- `producer.rebuild.outcome` — emitted immediately after the rebuild attempt, reporting whether a
+  new producer was successfully constructed (`producerRecreated=true/false`), how long it took
+  (`durationMs`), and how many rebuild attempts have occurred since the last successful send
+  (`attemptsSinceLastSuccess`).
+
+- `producer.rebuild.effect` — emitted on the **next successful send** after a rebuild, confirming
+  that the rebuild actually helped (`outcome=RECOVERED`).
+
+If a `producer.rebuild.outcome` is followed immediately by another failure (rather than by a
+`producer.rebuild.effect`), the rebuild did not help. Check the error code and classification on the
+subsequent failure line.
+
 ## Common situations
 
 ### Nothing from the adapter in the trace at all
 
-Check the marker spelling first, then whether the flow ran at all. Note that a *successful* send is
-not logged at `ERROR`, so an absence of lines is normal for a healthy flow.
+Check the marker spelling first, then whether the flow ran at all. A *successful* send now produces
+a periodic heartbeat line (`producer.heartbeat status=HEALTHY`) at most once every 5 minutes, so a
+healthy producer is provably alive. If neither failures nor heartbeats appear, the flow did not run.
+
+### `producer.heartbeat`
+
+The throttled success heartbeat. Emitted at most once per 5 minutes when sends are succeeding, and
+immediately on recovery after a failure. It carries `sendsSinceLastHeartbeat` so you can gauge
+throughput. If the heartbeat is present but failures are absent, the producer is healthy.
 
 ### `adapter.mpl.unavailable`
 
@@ -165,3 +260,53 @@ an unreachable broker.
 The up-front metadata fetch did not succeed. This is not itself a failure: the send path performs the
 same fetch and will report a more precise error. Treat it as a hint that the broker was slow or
 unreachable at that moment.
+
+## Message Processing Log enrichment
+
+When a failure occurs during an exchange, the adapter enriches the Message Processing Log with
+structured information. This is available in the CPI monitor even when MPL *tracing* is disabled
+(which is the default). Two channels are used, both trace-independent:
+
+### Custom header properties
+
+Four custom header properties are attached to the failed message's MPL entry:
+
+| Property | Value |
+|----------|-------|
+| `KafkaAdapterErrorCode` | The stable error code, e.g. `KP-PROD-002` |
+| `KafkaAdapterTopic` | The target topic |
+| `KafkaAdapterProducerPath` | `SHARED` or `TRANSACTIONAL` |
+| `KafkaAdapterRetryable` | `true` if the classification was `RETRIABLE`, otherwise `false` |
+
+These properties are visible in the monitor's message detail view and are searchable. They do **not**
+require MPL tracing to be enabled — they are attached via `addCustomHeaderProperty`, which works
+regardless of trace level.
+
+### Status event
+
+If the adapter can obtain an MPL handle with status support (`getMessageLogWithStatus`), it fires a
+`FAILED` status event with the error code and a truncated error message. This marks the message as
+failed in the monitor, making failures visible at a glance without opening each message.
+
+### Trace attachment (when tracing is active)
+
+When MPL tracing *is* enabled (`Trace` log level in the iFlow), the adapter additionally writes a
+trace attachment containing the full error block. This is useful for detailed post-mortems, but
+since tracing is off by default and was never active in the analysed production corpus, you should
+not rely on it for routine diagnosis. Use the tenant trace file for that.
+
+## Diagnostics level
+
+The adapter's `diagnosticsLevel` option controls the verbosity of diagnostic output. Two levels are
+supported:
+
+| Level | Description |
+|-------|-------------|
+| `STANDARD` (default) | All failure paths log the full serialised cause chain. Sufficient for root-causing most production incidents. |
+| `FULL` | Adds expensive or verbose extras: per-record detail in batches, JVM thread state on escalation, more frequent success baselines. Use only when actively debugging. |
+
+`STANDARD` is fully diagnostic on its own. Do not run at `FULL` permanently: the extra output adds
+volume and latency on every send. Switch to `FULL` only when you need the additional detail, then
+switch back.
+
+See [Configuration](configuration.md) for how to set this option.

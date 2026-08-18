@@ -72,6 +72,6 @@ Not a real option. The CPI runtime is a managed service. The customer does not h
 
 **Changing the marker invalidates existing runbooks.** Any alerting or monitoring that matched on the old marker will stop matching. The troubleshooting documentation names the new marker and must be updated before the adapter is deployed.
 
-**Maintenance obligation.** Every new failure path must use `AdapterDiagnostics`. A bare `LOG.error` that bypasses the contract is a defect.
+**Maintenance obligation.** Every new failure path must use `AdapterDiagnostics`. A bare `LOG.error` that bypasses the contract is a defect. This is now enforced mechanically: `DiagnosticContractTest` scans the adapter sources at build time and fails if any `LOG.error` or `LOG.warn` call lacks the marker or passes a `Throwable` directly to SLF4J instead of serialising it through `AdapterDiagnostics`.
 
 **Dependency-free.** The contract adds no runtime dependency beyond SLF4J and stays within the Java 11 API level. This is required for an ADK adapter bundle that must load in the CPI OSGi runtime.
