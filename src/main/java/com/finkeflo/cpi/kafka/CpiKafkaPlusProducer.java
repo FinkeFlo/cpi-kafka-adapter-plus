@@ -422,9 +422,12 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
                 ProducerBatchHelper.setResponseHeadersAndBody(in, topic, batchMode, result);
                 recordSendSuccess();
             } catch (Exception e) {
-                tracingHelper.traceError(exchange, e,
-                        java.util.Collections.singletonMap("topic", topic));
-                handleSendFailure(e);
+                Map<String, String> ctx = new java.util.LinkedHashMap<>();
+                ctx.put("topic", topic);
+                ctx.put("batchMode", batchMode);
+                ctx.put("recordCount", String.valueOf(records.size()));
+                tracingHelper.traceError(exchange, e, ctx);
+                handleSendFailure(e, "producer.batch.send", ctx);
                 throw sendFailure("Failed to send batch to", topic, e);
             }
         }
@@ -514,7 +517,7 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
             ctx.put("topicHash", topicHash != null ? topicHash : "(not yet computed)");
             ctx.put("transactionV2Enabled", String.valueOf(endpoint.isTransactionV2Enabled()));
             tracingHelper.traceError(in.getExchange(), e, ctx);
-            handleTxnSendFailure(e);
+            handleTxnSendFailure(e, ctx);
             throw sendFailure("Failed to send transactional batch to", topic, e);
         } finally {
             if (txnProducer != null) {
@@ -624,9 +627,11 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
             LOG.debug("[CPI-KAFKA-PLUS-DIAG] Message sent to topic '{}' partition {} offset {}",
                     metadata.topic(), metadata.partition(), metadata.offset());
         } catch (Exception e) {
-            tracingHelper.traceError(exchange, e,
-                    java.util.Collections.singletonMap("topic", topic));
-            handleSendFailure(e);
+            Map<String, String> ctx = new java.util.LinkedHashMap<>();
+            ctx.put("topic", topic);
+            ctx.put("sendMode", "SINGLE");
+            tracingHelper.traceError(exchange, e, ctx);
+            handleSendFailure(e, "producer.single.send", ctx);
             throw sendFailure("Failed to send message to", topic, e);
         }
     }
@@ -721,7 +726,7 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
         }
     }
 
-    private void recordSendSuccess() {
+    void recordSendSuccess() {
         boolean wasRecovering = consecutiveSendFailures > 0;
         consecutiveSendFailures = 0;
         if (wasRecovering) {
@@ -731,18 +736,45 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
         }
     }
 
-    private void handleSendFailure(Exception e) {
+    /**
+     * Records a failure of the shared, non-transactional producer.
+     *
+     * <p>The failure is <b>always</b> logged at ERROR. It previously was not: logging happened only
+     * when the cause matched a three-entry "fatal" allow-list or after
+     * {@code MAX_CONSECUTIVE_SEND_FAILURES} <i>consecutive</i> failures. A failure that was neither
+     * on the allow-list nor consecutive — because successful sends in between reset the counter via
+     * {@link #recordSendSuccess()} — produced no log line at all, which is how a production incident
+     * could occur repeatedly while this adapter stayed completely silent about it.
+     *
+     * <p>The threshold now governs {@link #triggerReconnect()} only, which is what it was actually
+     * for. Both decisions are reported as fields so the log states why it did or did not reconnect.
+     *
+     * @param operation stable, greppable name of the failing activity
+     * @param context   the same key/value context handed to the Message Processing Log, so trace and
+     *                  MPL cannot drift apart
+     */
+    // Package-private so the regression test can prove that a single, first, unclassified failure
+    // still produces exactly one ERROR line.
+    void handleSendFailure(Exception e, String operation, Map<String, String> context) {
         consecutiveSendFailures++;
         tracingHelper.publishConnectionStatus(false, e);
 
         Throwable cause = KafkaErrorHelper.extractKafkaCause(e);
-        if (KafkaErrorHelper.isFatalKafkaException(cause)) {
-            LOG.error("[CPI-KAFKA-PLUS-DIAG] Fatal Kafka exception, triggering reconnect: {}",
-                    cause.getClass().getSimpleName());
-            triggerReconnect();
-        } else if (consecutiveSendFailures >= MAX_CONSECUTIVE_SEND_FAILURES) {
-            LOG.error("[CPI-KAFKA-PLUS-DIAG] {} consecutive send failures, triggering reconnect",
-                    consecutiveSendFailures);
+        boolean fatal = KafkaErrorHelper.isFatalKafkaException(cause);
+        boolean reconnect = fatal || consecutiveSendFailures >= MAX_CONSECUTIVE_SEND_FAILURES;
+
+        AdapterDiagnostics.Event event = AdapterDiagnostics.event(operation)
+                .with("producerPath", "SHARED")
+                .with("consecutiveFailures", consecutiveSendFailures)
+                .with("fatalClassification", fatal)
+                .with("reconnectTriggered", reconnect)
+                .with("thread", Thread.currentThread().getName());
+        if (context != null) {
+            context.forEach(event::with);
+        }
+        AdapterDiagnostics.error(LOG, event, e);
+
+        if (reconnect) {
             triggerReconnect();
         }
     }
@@ -765,12 +797,22 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
         }
     }
 
-    private void handleTxnSendFailure(Exception e) {
+    /**
+     * Records a failure of the transactional path. Logs the {@code Throwable} itself rather than
+     * only {@code getClass().getSimpleName()}, which discarded the message, the cause chain and the
+     * stack trace — the three things needed to tell apart a broker problem, a fencing problem and a
+     * client-side defect.
+     */
+    void handleTxnSendFailure(Exception e, Map<String, String> context) {
         consecutiveTxnSendFailures++;
-        Throwable cause = KafkaErrorHelper.extractKafkaCause(e);
-        LOG.error("[CPI-KAFKA-PLUS-DIAG] Transactional send failure ({} consecutive) for topic='{}': {}",
-                consecutiveTxnSendFailures, endpoint.getEffectiveTopic(),
-                cause != null ? cause.getClass().getSimpleName() : e.getMessage());
+        AdapterDiagnostics.Event event = AdapterDiagnostics.event("producer.transactional.batch.send")
+                .with("producerPath", "TRANSACTIONAL")
+                .with("consecutiveFailures", consecutiveTxnSendFailures)
+                .with("thread", Thread.currentThread().getName());
+        if (context != null) {
+            context.forEach(event::with);
+        }
+        AdapterDiagnostics.error(LOG, event, e);
     }
 
     /**

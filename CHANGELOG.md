@@ -8,7 +8,12 @@ and the project follows [Semantic Versioning](https://semver.org/). See
 iFlow compatibility.
 
 ## [Unreleased]
+### Fixed
+- Producer send failures are now always logged at ERROR, with the full cause chain and stack trace serialised into the message text. Previously a failure was logged only when its cause matched a three-entry "fatal" allow-list, or after three *consecutive* failures; an unclassified exception with successful sends in between reset the counter and produced no log line at all. Analysis of a production tenant trace found five send failures across three topics and eighteen minutes for which the adapter emitted exactly zero log lines. The consecutive-failure threshold now governs only whether the producer reconnects — which is what it was for — and both that decision and the classification are reported as fields (`fatalClassification`, `reconnectTriggered`, `consecutiveFailures`).
+- Transactional send failures now log the throwable itself instead of only `getClass().getSimpleName()`, which discarded the message, the cause chain and the stack trace.
+
 ### Added
+- New internal `AdapterDiagnostics` helper producing single-line, greppable `key=value` diagnostics under one marker. It serialises the throwable — cause chain, suppressed exceptions and stack frames — into the message text, because the CPI tenant trace appender discards the `Throwable` argument of a log call and keeps only the rendered message. It also centralises the SLF4J call itself: `log.error(text, throwable)` would treat a `{}` occurring inside an exception message as a placeholder and silently drop the stack trace.
 - New docs page `docs/features/kafka-headers.md` listing all consumer, producer, and DLQ Kafka headers with descriptions, types, and conditions.
 
 ### Changed
