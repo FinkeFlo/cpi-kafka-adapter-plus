@@ -46,6 +46,13 @@ import org.apache.kafka.common.serialization.ByteArraySerializer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.lang.management.ManagementFactory;
+import java.lang.management.MemoryMXBean;
+import java.lang.management.MemoryUsage;
+import java.lang.management.RuntimeMXBean;
+import java.lang.management.ThreadInfo;
+import java.lang.management.ThreadMXBean;
+
 import com.finkeflo.cpi.kafka.KafkaErrorHelper.Classification;
 import com.finkeflo.cpi.kafka.ProducerBatchHelper.ProducerPath;
 
@@ -177,6 +184,11 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
     // ─────────────────────────────────────────────────────────────────────────────
     private static final int NODE_FAULT_ESCALATION_COUNT = 5;
     private static final long NODE_FAULT_ESCALATION_WINDOW_MS = 20 * 60 * 1000L;
+    // c6b: Thread dump caps — AdapterDiagnostics truncates at 8K chars; stay well under.
+    // Prefer BLOCKED/WAITING threads (informative for monitor issues) over RUNNABLE.
+    private static final int THREAD_DUMP_MAX_THREADS = 20;
+    private static final int THREAD_DUMP_MAX_FRAMES = 10;
+    private static final int THREAD_DUMP_MAX_CHARS = 5000;
     /** Lock for atomic escalation decisions. The incident involved 5 threads — volatile++ would race. */
     private final Object nodeFaultLock = new Object();
     /** Fault identity = exceptionClass + ":" + errorCode. Keyed to make "same fault" claim true. */
@@ -1083,29 +1095,178 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
         }
 
         if (shouldEscalate) {
-            // Guard against endpoint.getEffectiveTopic() throwing on failure path
-            String topic;
-            try {
-                topic = endpoint.getEffectiveTopic();
-            } catch (Exception e) {
-                topic = "<unavailable>";
+            emitNodeFaultEscalation(exceptionClass, errorCode, classification, count);
+        }
+    }
+
+    /**
+     * Emits the node-fault escalation diagnostic with JVM state (c6) and optionally a thread
+     * dump (c6b) when diagnosticsLevel=FULL.
+     *
+     * <p>The JVM state is cheap and always-on. The thread dump is expensive and opt-in.
+     */
+    private void emitNodeFaultEscalation(String exceptionClass, CpiKafkaPlusErrorCode errorCode,
+                                          Classification classification, int count) {
+        // Guard against endpoint.getEffectiveTopic() throwing on failure path
+        String topic;
+        try {
+            topic = endpoint.getEffectiveTopic();
+        } catch (Exception e) {
+            topic = "<unavailable>";
+        }
+
+        AdapterDiagnostics.Event event = AdapterDiagnostics.event("producer.node.fault.escalation")
+                .with("faultClass", exceptionClass)
+                .with("errorCode", errorCode.code())
+                .with("classification", classification)
+                .with("countInWindow", count)
+                .with("windowMinutes", NODE_FAULT_ESCALATION_WINDOW_MS / 60_000)
+                .with("producerPath", ProducerPath.SHARED)
+                .withOptional("clientId", resolvedClientId)
+                .withOptional("topic", topic)
+                .with("thread", Thread.currentThread().getName())
+                .with("advice", "The same fault has recurred " + count + " times within "
+                        + (NODE_FAULT_ESCALATION_WINDOW_MS / 60_000) + " minutes on this JVM despite "
+                        + "mitigation. This indicates a node-level problem. The node address is available "
+                        + "in the trace record's second-to-last #-separated field.");
+
+        // c6: Lightweight JVM state — always-on, cheap
+        addJvmState(event);
+
+        // c6b: Thread dump — expensive, opt-in at FULL level only
+        boolean diagnosticsFull = false;
+        try {
+            diagnosticsFull = endpoint.isDiagnosticsLevelFull();
+        } catch (Exception e) {
+            // Ignore - just don't emit dump
+        }
+
+        if (diagnosticsFull) {
+            addThreadDump(event);
+        }
+
+        AdapterDiagnostics.error(LOG, event, null);
+    }
+
+    /**
+     * c6: Adds lightweight JVM state to the escalation event.
+     *
+     * <p>Uses java.lang.management APIs which are available in Java 11 without extra dependencies.
+     * Fully guarded so a failure here can never displace the diagnostic it is attached to.
+     */
+    private void addJvmState(AdapterDiagnostics.Event event) {
+        try {
+            RuntimeMXBean runtime = ManagementFactory.getRuntimeMXBean();
+            ThreadMXBean threads = ManagementFactory.getThreadMXBean();
+            MemoryMXBean memory = ManagementFactory.getMemoryMXBean();
+            MemoryUsage heap = memory.getHeapMemoryUsage();
+
+            event.with("jvmUptimeMs", runtime.getUptime())
+                 .with("jvmThreadCount", threads.getThreadCount())
+                 .with("jvmPeakThreadCount", threads.getPeakThreadCount())
+                 .with("jvmHeapUsedMB", heap.getUsed() / (1024 * 1024))
+                 .with("jvmHeapMaxMB", heap.getMax() / (1024 * 1024))
+                 .with("jvmAvailableProcessors", Runtime.getRuntime().availableProcessors());
+        } catch (Exception e) {
+            // Management APIs can throw or be restricted in locked-down containers
+            event.with("jvmStateUnavailable", true)
+                 .with("jvmStateError", e.getClass().getSimpleName());
+        }
+    }
+
+    /**
+     * c6b: Adds a bounded thread dump to the escalation event.
+     *
+     * <p>Only called when diagnosticsLevel=FULL. The dump includes lock and monitor information
+     * (the entire point — this is what settles monitor-ownership questions). Output is bounded
+     * hard: max 20 threads, max 10 frames per thread, max 5000 chars total. BLOCKED and WAITING
+     * threads are preferred over RUNNABLE (they are the informative ones for deadlock/contention).
+     *
+     * <p>Fully guarded so a failure here can never displace the diagnostic it is attached to.
+     */
+    private void addThreadDump(AdapterDiagnostics.Event event) {
+        try {
+            ThreadMXBean threads = ManagementFactory.getThreadMXBean();
+
+            // Check if monitor/synchronizer info is supported before requesting it
+            boolean monitorSupported = threads.isObjectMonitorUsageSupported();
+            boolean syncSupported = threads.isSynchronizerUsageSupported();
+
+            ThreadInfo[] allThreads = threads.dumpAllThreads(monitorSupported, syncSupported);
+            if (allThreads == null || allThreads.length == 0) {
+                event.with("threadDumpUnavailable", true);
+                return;
             }
 
-            AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("producer.node.fault.escalation")
-                    .with("faultClass", exceptionClass)
-                    .with("errorCode", errorCode.code())
-                    .with("classification", classification)
-                    .with("countInWindow", count)
-                    .with("windowMinutes", NODE_FAULT_ESCALATION_WINDOW_MS / 60_000)
-                    .with("producerPath", ProducerPath.SHARED)
-                    .withOptional("clientId", resolvedClientId)
-                    .withOptional("topic", topic)
-                    .with("thread", Thread.currentThread().getName())
-                    .with("advice", "The same fault has recurred " + count + " times within "
-                            + (NODE_FAULT_ESCALATION_WINDOW_MS / 60_000) + " minutes on this JVM despite "
-                            + "mitigation. This indicates a node-level problem. The node address is available "
-                            + "in the trace record's second-to-last #-separated field."),
-                    null); // No throwable - the original failure is already logged
+            // Sort: BLOCKED first, then WAITING, then others — these are the informative ones
+            java.util.List<ThreadInfo> sorted = new java.util.ArrayList<>(java.util.Arrays.asList(allThreads));
+            sorted.sort((a, b) -> {
+                int aPriority = threadStatePriority(a.getThreadState());
+                int bPriority = threadStatePriority(b.getThreadState());
+                return Integer.compare(aPriority, bPriority);
+            });
+
+            StringBuilder dump = new StringBuilder();
+            int threadCount = 0;
+            boolean truncated = false;
+
+            for (ThreadInfo ti : sorted) {
+                if (threadCount >= THREAD_DUMP_MAX_THREADS) {
+                    truncated = true;
+                    break;
+                }
+                if (dump.length() >= THREAD_DUMP_MAX_CHARS) {
+                    truncated = true;
+                    break;
+                }
+
+                dump.append("\n[").append(ti.getThreadName()).append("] ")
+                    .append(ti.getThreadState());
+
+                if (ti.getLockName() != null) {
+                    dump.append(" on ").append(ti.getLockName());
+                }
+                if (ti.getLockOwnerName() != null) {
+                    dump.append(" owned by [").append(ti.getLockOwnerName()).append("]");
+                }
+
+                StackTraceElement[] stack = ti.getStackTrace();
+                int frameCount = Math.min(stack.length, THREAD_DUMP_MAX_FRAMES);
+                for (int i = 0; i < frameCount; i++) {
+                    dump.append("\n  at ").append(stack[i]);
+                    if (dump.length() >= THREAD_DUMP_MAX_CHARS) {
+                        truncated = true;
+                        break;
+                    }
+                }
+                if (stack.length > THREAD_DUMP_MAX_FRAMES) {
+                    dump.append("\n  ... ").append(stack.length - THREAD_DUMP_MAX_FRAMES).append(" more");
+                }
+
+                threadCount++;
+            }
+
+            event.with("threadDump", dump.toString())
+                 .with("threadDumpThreads", threadCount)
+                 .with("threadDumpTruncated", truncated)
+                 .with("threadDumpTotalThreads", allThreads.length)
+                 .with("threadDumpMonitorInfoSupported", monitorSupported)
+                 .with("threadDumpSyncInfoSupported", syncSupported);
+
+        } catch (Exception e) {
+            // Thread dump can fail in restricted environments
+            event.with("threadDumpUnavailable", true)
+                 .with("threadDumpError", e.getClass().getSimpleName());
+        }
+    }
+
+    /** Returns priority for thread state sorting: lower = more informative for contention analysis. */
+    private int threadStatePriority(Thread.State state) {
+        switch (state) {
+            case BLOCKED: return 0;      // Highest priority - waiting for monitor
+            case WAITING: return 1;      // High - in Object.wait() or similar
+            case TIMED_WAITING: return 2; // Medium - in sleep/wait with timeout
+            default: return 3;           // RUNNABLE, NEW, TERMINATED
         }
     }
 
