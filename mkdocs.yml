@@ -64,6 +64,7 @@ nav:
       - Authentication: security/authentication.md
   - Architecture Decisions:
       - "ADR 0001: Transactional Concurrency": adrs/0001-transactional-producer-concurrency.md
+      - "ADR 0002: Diagnostic Logging Contract": adrs/0002-diagnostic-logging-contract.md
   - FAQ: faq.md
   - Troubleshooting: troubleshooting.md
   - Changelog: changelog.md
