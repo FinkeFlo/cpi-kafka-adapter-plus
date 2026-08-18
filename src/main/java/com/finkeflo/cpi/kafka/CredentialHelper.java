@@ -133,7 +133,9 @@ public final class CredentialHelper {
             LOG.debug("Successfully resolved credentials for alias '{}'", alias);
             return new UserCredentials(username, password);
         } catch (Exception e) {
-            LOG.error("[CPI-KAFKA-PLUS-DIAG] Failed to retrieve credentials for alias '{}': {}", alias, e.getMessage(), e);
+            AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("credential.retrieval.failed")
+                    .with("errorCode", CpiKafkaPlusErrorCode.KP_SEC_001.code())
+                    .with("alias", alias), e);
             throw new RuntimeException("Failed to retrieve credentials: " + e.getMessage(), e);
         }
     }
@@ -187,7 +189,9 @@ public final class CredentialHelper {
             LOG.debug("SSLContext created for keystore alias '{}'", keystoreAlias);
             return sslContext;
         } catch (Exception e) {
-            LOG.error("[CPI-KAFKA-PLUS-DIAG] Failed to get SSLContext for alias '{}': {}", keystoreAlias, e.getMessage(), e);
+            AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("ssl.context.init.failed")
+                    .with("errorCode", CpiKafkaPlusErrorCode.KP_SEC_001.code())
+                    .with("keystoreAlias", keystoreAlias), e);
             throw new RuntimeException("Failed to get SSLContext: " + e.getMessage(), e);
         }
     }

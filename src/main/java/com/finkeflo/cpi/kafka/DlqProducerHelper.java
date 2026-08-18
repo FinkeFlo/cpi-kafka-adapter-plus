@@ -67,7 +67,9 @@ public final class DlqProducerHelper implements Closeable {
                             new ByteArraySerializer(), new ByteArraySerializer()));
             LOG.debug("[CPI-KAFKA-PLUS-DIAG] DLQ producer created OK for topic='{}'", dlqTopic);
         } catch (Exception e) {
-            LOG.error("[CPI-KAFKA-PLUS-DIAG] DLQ producer creation FAILED for topic='{}': {}", dlqTopic, e.getMessage(), e);
+            AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("dlq.producer.init.failed")
+                    .with("errorCode", CpiKafkaPlusErrorCode.fromProducerInitFailure(e).code())
+                    .with("dlqTopic", dlqTopic), e);
             throw (e instanceof RuntimeException) ? (RuntimeException) e : new RuntimeException(e);
         }
     }
@@ -135,8 +137,11 @@ public final class DlqProducerHelper implements Closeable {
             LOG.debug("[CPI-KAFKA-PLUS-DIAG] DLQ send OK for offset={} partition={}",
                     record.offset(), record.partition());
         } catch (Exception e) {
-            LOG.error("[CPI-KAFKA-PLUS-DIAG] DLQ send FAILED for offset={} partition={}: {}",
-                    record.offset(), record.partition(), e.getMessage(), e);
+            AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("dlq.send.failed")
+                    .with("errorCode", CpiKafkaPlusErrorCode.KP_DLQ_001.code())
+                    .with("dlqTopic", dlqTopic)
+                    .with("offset", record.offset())
+                    .with("partition", record.partition()), e);
             throw new RuntimeException("Failed to send record to DLQ topic '" + dlqTopic + "'", e);
         }
     }
@@ -198,8 +203,11 @@ public final class DlqProducerHelper implements Closeable {
             LOG.debug("[CPI-KAFKA-PLUS-DIAG] DLQ deser-failure send OK for offset={} partition={}",
                     offset, tp.partition());
         } catch (Exception e) {
-            LOG.error("[CPI-KAFKA-PLUS-DIAG] DLQ deser-failure send FAILED for offset={} partition={}: {}",
-                    offset, tp.partition(), e.getMessage(), e);
+            AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("dlq.send.failed")
+                    .with("dlqTopic", dlqTopic)
+                    .with("offset", String.valueOf(offset))
+                    .with("partition", String.valueOf(tp.partition()))
+                    .with("reason", "poison-pill record could not be written to the DLQ"), e);
             throw new RuntimeException("Failed to send poison-pill record to DLQ topic '" + dlqTopic + "'", e);
         }
     }
@@ -210,7 +218,11 @@ public final class DlqProducerHelper implements Closeable {
         try {
             producer.close(Duration.ofSeconds(5));
         } catch (Exception e) {
-            LOG.warn("Error closing DLQ producer: {}", e.getMessage(), e);
+            // A close failure can mean records were never flushed, so it must be visible. WARN is
+            // not: only ERROR reaches the CPI tenant trace file.
+            AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("dlq.producer.close.failed")
+                    .with("dlqTopic", dlqTopic)
+                    .with("consequence", "buffered DLQ records may not have been flushed"), e);
         }
     }
 

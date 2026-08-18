@@ -113,8 +113,10 @@ public class AvroDeserializerHelper implements Closeable {
         } catch (RuntimeException e) {
             throw e;
         } catch (Exception e) {
-            LOG.error("[CPI-KAFKA-PLUS-DIAG] Avro deserialization failed for topic '{}' schemaId={}: {}",
-                    topic, schemaId, e.getMessage(), e);
+            AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("avro.deserialization.failed")
+                    .with("errorCode", CpiKafkaPlusErrorCode.KP_SR_001.code())
+                    .with("topic", topic)
+                    .with("schemaId", schemaId), e);
             throw new RuntimeException("Avro deserialization failed: " + e.getMessage(), e);
         }
     }

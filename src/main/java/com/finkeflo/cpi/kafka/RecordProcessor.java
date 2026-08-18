@@ -292,8 +292,11 @@ final class RecordProcessor {
             LOG.debug("[CPI-KAFKA-PLUS-DIAG] processOneBatch: formatted OK, bodyLength={}",
                     body != null ? body.length() : 0);
         } catch (Throwable t) {
-            LOG.error("[CPI-KAFKA-PLUS-DIAG] processOneBatch: formatBatch FAILED: {} ({})",
-                    t.getMessage(), t.getClass().getName(), t);
+            int partition = !batch.isEmpty() ? batch.get(0).partition() : -1;
+            AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("batch.format.failed")
+                    .with("errorCode", CpiKafkaPlusErrorCode.fromThrowable(t).code())
+                    .with("partition", partition)
+                    .with("batchSize", batch.size()), t);
             if (dlqHelper != null) {
                 LOG.info("[CPI-KAFKA-PLUS-DIAG] processOneBatch: formatBatch failed, retrying batch records individually for poison-pill isolation");
                 return processRecordsIndividually(kafkaConsumer, batch, commitAfterSuccess);
@@ -319,8 +322,11 @@ final class RecordProcessor {
             }
             return batch.size();
         } catch (Exception e) {
-            LOG.error("[CPI-KAFKA-PLUS-DIAG] processOneBatch: EXCEPTION during processing (partition {}): {}",
-                    batch.get(0).partition(), e.getMessage(), e);
+            int partition = !batch.isEmpty() ? batch.get(0).partition() : -1;
+            AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("batch.processing.failed")
+                    .with("errorCode", CpiKafkaPlusErrorCode.fromThrowable(e).code())
+                    .with("partition", partition)
+                    .with("batchSize", batch.size()), e);
             if (dlqHelper != null) {
                 LOG.info("[CPI-KAFKA-PLUS-DIAG] processOneBatch: DLQ enabled, retrying batch records individually");
                 return processRecordsIndividually(kafkaConsumer, batch, commitAfterSuccess);
