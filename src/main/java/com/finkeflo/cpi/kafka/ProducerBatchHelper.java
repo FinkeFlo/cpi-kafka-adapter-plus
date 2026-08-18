@@ -104,7 +104,8 @@ public final class ProducerBatchHelper {
 
         List<Future<RecordMetadata>> futures = sendRecordsAsync(
                 producer, records, topic, fallbackKey, partition, timestamp,
-                message, headerAdder, valueSerializer, keySerializer, sendGuard, deadlineMs);
+                message, headerAdder, valueSerializer, keySerializer, sendGuard, deadlineMs,
+                startMs);
 
         // No producer.flush() here: flush() waits on the sender thread with no timeout of its own,
         // so a dead sender thread would block before any future could be evaluated. With
@@ -123,8 +124,16 @@ public final class ProducerBatchHelper {
             } catch (ProducerSendGuard.SendStalledException e) {
                 throw e;
             } catch (Exception e) {
+                AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("producer.batch.record.await")
+                        .with("phase", "AWAIT_FUTURE")
+                        .with("topic", topic)
+                        .with("recordIndex", i)
+                        .with("batchSize", futures.size())
+                        .with("elapsedMs", System.currentTimeMillis() - startMs)
+                        .with("thread", Thread.currentThread().getName()), e);
                 throw new RuntimeException(
-                        "Batch send failed at record index " + i + ": " + e.getMessage(), e);
+                        "Batch send failed at record index " + i + " (phase=AWAIT_FUTURE): "
+                                + e.getMessage(), e);
             }
 
             if (i == 0) {
@@ -164,11 +173,16 @@ public final class ProducerBatchHelper {
             ByteSerializer valueSerializer,
             ByteSerializer keySerializer,
             ProducerSendGuard sendGuard,
-            long deadlineMs) {
+            long deadlineMs,
+            long batchStartMs) {
 
         List<Future<RecordMetadata>> futures = new ArrayList<>(records.size());
+        // One allowance for the whole batch, so the per-record limit cannot be multiplied by the
+        // record count.
+        MonitorFaultRetry.Budget batchBudget = new MonitorFaultRetry.Budget();
 
         for (int i = 0; i < records.size(); i++) {
+            final int recordIndex = i;
             BatchRecord record = records.get(i);
 
             String keyStr = record.getKey();
@@ -206,15 +220,23 @@ public final class ProducerBatchHelper {
             }
 
             try {
-                futures.add(producer.send(pr));
+                futures.add(MonitorFaultRetry.execute(
+                        () -> producer.send(pr), batchBudget, deadlineMs, topic, recordIndex));
             } catch (Exception e) {
-                LOG.warn("[CPI-KAFKA-PLUS-DIAG] Batch send() failed at index {}, "
-                        + "draining {} buffered records: {}", i, futures.size(), e.getMessage());
+                AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("producer.batch.record.send")
+                        .with("phase", "SYNC_SEND")
+                        .with("topic", topic)
+                        .with("recordIndex", i)
+                        .with("batchSize", records.size())
+                        .with("bufferedRecords", futures.size())
+                        .with("elapsedMs", System.currentTimeMillis() - batchStartMs)
+                        .with("thread", Thread.currentThread().getName()), e);
                 // Bounded drain instead of flush(): flush() has no timeout and would hang here if
                 // the sender thread is what caused this failure in the first place.
                 sendGuard.awaitAllQuietly(futures, deadlineMs);
                 throw new RuntimeException(
-                        "Batch send failed at record index " + i + ": " + e.getMessage(), e);
+                        "Batch send failed at record index " + i + " (phase=SYNC_SEND): "
+                                + e.getMessage(), e);
             }
         }
 

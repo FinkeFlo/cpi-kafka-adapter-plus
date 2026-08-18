@@ -102,6 +102,86 @@ final class KafkaErrorHelper {
     }
 
     /**
+     * Returns true when the cause chain contains the signature of KAFKA-10902, a defect in the Kafka
+     * client that is still open and unfixed and is present in the version this adapter embeds.
+     *
+     * <p>The mechanism, verified in the bytecode of the shipped {@code kafka-clients} jar:
+     * {@code ProducerMetadata.awaitUpdate} is declared {@code synchronized} and hands {@code this}
+     * to {@code SystemTime.waitObject}, which enters the monitor of that same object a second time
+     * and then calls {@code Object.wait()}. The wait therefore happens at monitor recursion depth 2,
+     * and under conditions the JDK does not guarantee the thread can lose ownership and
+     * {@code Object.wait()} throws.
+     *
+     * <p>Two properties make this identifiable from the exception alone:
+     *
+     * <ul>
+     *   <li>{@code Object.wait()} is the only construct that produces the bare message
+     *       {@code "current thread is not owner"}. {@code ReentrantLock} and the other
+     *       {@code java.util.concurrent} locks throw {@link IllegalMonitorStateException} with a
+     *       {@code null} message, so they cannot be confused with it.</li>
+     *   <li>This adapter contains no {@code wait}, {@code notify} or {@code synchronized} block on
+     *       the send path, so an occurrence originates inside the Kafka client.</li>
+     * </ul>
+     *
+     * <p>When frames are available they must confirm a Kafka origin; a match without frames is
+     * accepted, since a repeatedly thrown exception can be optimised down to none.
+     *
+     * @see #isTransientMetadataMonitorFaultRetryable(Throwable) for why acting on this is safe
+     */
+    static boolean isMetadataMonitorFault(Throwable t) {
+        Throwable cur = t;
+        int depth = 0;
+        while (cur != null && depth < 10) {
+            if (cur instanceof IllegalMonitorStateException
+                    && cur.getMessage() != null
+                    && cur.getMessage().contains(MONITOR_FAULT_MESSAGE)) {
+                return hasKafkaOriginOrNoFrames(cur);
+            }
+            if (cur.getCause() == cur) {
+                break;
+            }
+            cur = cur.getCause();
+            depth++;
+        }
+        return false;
+    }
+
+    /** The exact text {@code Object.wait()} uses when the calling thread does not own the monitor. */
+    private static final String MONITOR_FAULT_MESSAGE = "current thread is not owner";
+
+    private static boolean hasKafkaOriginOrNoFrames(Throwable t) {
+        StackTraceElement[] frames = t.getStackTrace();
+        if (frames == null || frames.length == 0) {
+            return true;
+        }
+        for (StackTraceElement frame : frames) {
+            if (frame.getClassName().startsWith("org.apache.kafka")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Returns true when a {@link #isMetadataMonitorFault} failure raised by a <em>synchronous</em>
+     * {@code KafkaProducer.send(...)} call may be retried without any risk of producing a duplicate.
+     *
+     * <p>This is not a judgement call. {@code KafkaProducer.doSend()} calls
+     * {@code waitOnMetadata(...)} <b>before</b> {@code accumulator.append(...)}. If
+     * {@code waitOnMetadata} throws synchronously, the record was never appended to the accumulator,
+     * was never assigned a sequence number and was never handed to the sender thread — so there is
+     * nothing that could be sent twice. The guarantee comes from the ordering of those two calls and
+     * holds independently of idempotence, which is additionally enabled.
+     *
+     * <p>The restriction to the synchronous throw matters: the same exception surfacing from
+     * {@code Future.get()} would mean the record had already been accepted, and retrying it could
+     * duplicate. Callers must therefore only use this at the {@code send(...)} call site.
+     */
+    static boolean isTransientMetadataMonitorFaultRetryable(Throwable synchronousSendFailure) {
+        return isMetadataMonitorFault(synchronousSendFailure);
+    }
+
+    /**
      * Renders a throwable and its cause chain as a compact one-line {@code SimpleName: message}
      * sequence joined by {@code " <- "}. Intended for exception messages that operators read in the
      * CPI Message Processing Log, where only the message text of the outermost exception is shown.
