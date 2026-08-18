@@ -86,15 +86,17 @@ public final class ProducerBatchHelper {
     /**
      * Send all records asynchronously, then evaluate their futures against one shared deadline.
      *
-     * @param producer     Kafka producer instance
-     * @param records      parsed batch records
-     * @param topic        target topic
-     * @param fallbackKey  fallback key from kafka.KEY header (may be null)
-     * @param partition    partition from kafka.PARTITION_KEY header (may be null)
-     * @param timestamp    timestamp from kafka.OVERRIDE_TIMESTAMP header (may be null)
-     * @param message      exchange message for adding record headers
-     * @param headerAdder  function to add exchange headers to each ProducerRecord
-     * @param sendGuard    bounds the wait for the send results of this batch
+     * @param producer      Kafka producer instance
+     * @param records       parsed batch records
+     * @param topic         target topic
+     * @param fallbackKey   fallback key from kafka.KEY header (may be null)
+     * @param partition     partition from kafka.PARTITION_KEY header (may be null)
+     * @param timestamp     timestamp from kafka.OVERRIDE_TIMESTAMP header (may be null)
+     * @param message       exchange message for adding record headers
+     * @param headerAdder   function to add exchange headers to each ProducerRecord
+     * @param sendGuard     bounds the wait for the send results of this batch
+     * @param producerPath  identifies whether this is the shared or transactional path (c2)
+     * @param clientId      the Kafka client.id for correlation with broker-side logs (c3)
      * @return BatchSendResult with offsets and timing
      */
     public static BatchSendResult sendBatch(
@@ -108,7 +110,9 @@ public final class ProducerBatchHelper {
             RecordHeaderAdder headerAdder,
             ByteSerializer valueSerializer,
             ByteSerializer keySerializer,
-            ProducerSendGuard sendGuard) throws Exception {
+            ProducerSendGuard sendGuard,
+            ProducerPath producerPath,
+            String clientId) throws Exception {
 
         long startMs = System.currentTimeMillis();
         // One deadline for the whole batch: waiting per record would multiply the budget by the
@@ -118,7 +122,7 @@ public final class ProducerBatchHelper {
         List<Future<RecordMetadata>> futures = sendRecordsAsync(
                 producer, records, topic, fallbackKey, partition, timestamp,
                 message, headerAdder, valueSerializer, keySerializer, sendGuard, deadlineMs,
-                startMs);
+                startMs, producerPath, clientId);
 
         // No producer.flush() here: flush() waits on the sender thread with no timeout of its own,
         // so a dead sender thread would block before any future could be evaluated. With
@@ -138,6 +142,8 @@ public final class ProducerBatchHelper {
                 throw e;
             } catch (Exception e) {
                 AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("producer.batch.record.await")
+                        .with("producerPath", producerPath)
+                        .withOptional("clientId", clientId)
                         .with("phase", "AWAIT_FUTURE")
                         .with("topic", topic)
                         .with("recordIndex", i)
@@ -187,7 +193,9 @@ public final class ProducerBatchHelper {
             ByteSerializer keySerializer,
             ProducerSendGuard sendGuard,
             long deadlineMs,
-            long batchStartMs) {
+            long batchStartMs,
+            ProducerPath producerPath,
+            String clientId) {
 
         List<Future<RecordMetadata>> futures = new ArrayList<>(records.size());
         // One allowance for the whole batch, so the per-record limit cannot be multiplied by the
@@ -237,6 +245,8 @@ public final class ProducerBatchHelper {
                         () -> producer.send(pr), batchBudget, deadlineMs, topic, recordIndex));
             } catch (Exception e) {
                 AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("producer.batch.record.send")
+                        .with("producerPath", producerPath)
+                        .withOptional("clientId", clientId)
                         .with("phase", "SYNC_SEND")
                         .with("topic", topic)
                         .with("recordIndex", i)

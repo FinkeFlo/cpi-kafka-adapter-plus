@@ -46,6 +46,9 @@ import org.apache.kafka.common.serialization.ByteArraySerializer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.finkeflo.cpi.kafka.KafkaErrorHelper.Classification;
+import com.finkeflo.cpi.kafka.ProducerBatchHelper.ProducerPath;
+
 /**
  * Kafka Producer - sends messages from CPI IFlow to Kafka.
  * Receiver direction in CPI terminology (CPI receives from IFlow, sends to external system).
@@ -132,6 +135,48 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
      * inconclusive <em>connectivity</em> failures; cleared as soon as a probe succeeds.
      */
     private volatile Throwable lastProbeFailure = null;
+
+    /**
+     * Kafka client.id captured after the producer is built, for correlation with broker-side logs.
+     * Stable across restarts as long as the endpoint adapterInstanceID is stable.
+     */
+    private volatile String resolvedClientId;
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // c7: Success heartbeat state — matches consumer's logEmitCycleHeartbeat pattern
+    // ─────────────────────────────────────────────────────────────────────────────
+    /** Heartbeat interval: one line per 5 minutes, emitted immediately on state change. */
+    private static final long HEARTBEAT_INTERVAL_MS = 5 * 60 * 1000L;
+    private volatile long lastHeartbeatMs = 0L;
+    private volatile boolean lastHeartbeatHealthy = false;
+    private volatile long sendsSinceLastHeartbeat = 0L;
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // c4: Slow metadata warn threshold — avoids log noise on the success path while
+    // still surfacing pathological fetches. 1 second is well above normal (<50ms)
+    // but below the timeout that would cause a hard failure (max.block.ms).
+    // ─────────────────────────────────────────────────────────────────────────────
+    private static final long SLOW_METADATA_THRESHOLD_MS = 1000L;
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // e4: Rebuild storm guard — prevents rebuilding on every record of a failing batch.
+    // If a rebuild fails or the producer re-fails immediately, back off before retrying.
+    // ─────────────────────────────────────────────────────────────────────────────
+    /** Minimum interval between producer rebuild attempts. */
+    private static final long REBUILD_BACKOFF_MS = 30_000L;
+    private volatile long lastRebuildAttemptMs = 0L;
+    private volatile int rebuildAttemptsSinceSuccess = 0;
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // e4b: Node-level fault escalation — if the same fault recurs more than N times
+    // within T minutes despite mitigation, escalate to make the node problem visible.
+    // Thresholds: 5 occurrences in 20 minutes (observed incident was 5 in 18 min).
+    // ─────────────────────────────────────────────────────────────────────────────
+    private static final int NODE_FAULT_ESCALATION_COUNT = 5;
+    private static final long NODE_FAULT_ESCALATION_WINDOW_MS = 20 * 60 * 1000L;
+    private volatile long nodeFaultWindowStartMs = 0L;
+    private volatile int nodeFaultCountInWindow = 0;
+    private volatile boolean nodeFaultEscalated = false;
 
     public CpiKafkaPlusProducer(CpiKafkaPlusEndpoint endpoint) {
         super(endpoint);
@@ -316,6 +361,12 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
             kafkaProducer = BundleBackedClassLoader.withBundleClassLoader(getClass(),
                     () -> new KafkaProducer<>(props,
                             new ByteArraySerializer(), new ByteArraySerializer()));
+
+            // c3: Capture the resolved client.id for diagnostic correlation with broker-side logs.
+            // This is stable across producer rebuilds as long as the endpoint adapterInstanceID
+            // is stable, which is the case in CPI — the ID is assigned at iFlow deployment time.
+            resolvedClientId = (String) props.get(org.apache.kafka.clients.producer.ProducerConfig.CLIENT_ID_CONFIG);
+
             return true;
         } catch (Throwable e) {
             logInitFailure("KafkaProducer", e);
@@ -436,7 +487,8 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
             try {
                 ProducerBatchHelper.BatchSendResult result = ProducerBatchHelper.sendBatch(
                         kafkaProducer, records, topic, fallbackKey, partition, timestamp,
-                        in, this::addRecordHeaders, valueSerializer, null, sendGuard);
+                        in, this::addRecordHeaders, valueSerializer, null, sendGuard,
+                        ProducerPath.SHARED, resolvedClientId);
 
                 ProducerBatchHelper.setResponseHeadersAndBody(in, topic, batchMode, result);
                 recordSendSuccess();
@@ -513,7 +565,8 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
 
             ProducerBatchHelper.BatchSendResult result = ProducerBatchHelper.sendBatch(
                     txnProducer, records, topic, fallbackKey, partition, timestamp,
-                    in, this::addRecordHeaders, valueSerializer, null, sendGuard);
+                    in, this::addRecordHeaders, valueSerializer, null, sendGuard,
+                    ProducerPath.TRANSACTIONAL, transactionalId);
 
             txnProducer.commitTransaction();
 
@@ -774,6 +827,13 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
         if (prewarmedTopics.size() >= VERIFIED_TOPICS_CACHE_LIMIT || !prewarmedTopics.add(topic)) {
             return;
         }
+
+        // c4: Measure the metadata fetch duration. This is the exact place the KAFKA-10902 incident
+        // happened (IllegalMonitorStateException inside ProducerMetadata.awaitUpdate). Tracking
+        // the duration makes a slow or blocking metadata fetch visible before it turns into a hard
+        // failure. On failure we always emit; on success we only emit if the wait exceeded the
+        // threshold (respects the log volume budget while still surfacing pathological fetches).
+        long metadataStartMs = System.currentTimeMillis();
         try {
             // A short retry deadline on purpose: the monitor fault throws immediately and is worth
             // retrying, while a genuine metadata timeout has already consumed max.block.ms and must
@@ -782,10 +842,22 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
                     new MonitorFaultRetry.Budget(),
                     System.currentTimeMillis() + PREWARM_RETRY_WINDOW_MS,
                     topic, -1);
+
+            long metadataWaitMs = System.currentTimeMillis() - metadataStartMs;
+            // Only log slow pre-warms to avoid log noise on the success path.
+            if (metadataWaitMs > SLOW_METADATA_THRESHOLD_MS) {
+                LOG.error("[CPI-KAFKA-PLUS-DIAG] producer.metadata.prewarm: outcome=SLOW, "
+                        + "topic={}, metadataWaitMs={}, clientId={}, producerPath=SHARED, thread={}",
+                        topic, metadataWaitMs, resolvedClientId, Thread.currentThread().getName());
+            }
         } catch (Exception e) {
+            long metadataWaitMs = System.currentTimeMillis() - metadataStartMs;
             AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("producer.metadata.prewarm")
                     .with("outcome", "FAILED")
                     .with("topic", topic)
+                    .with("metadataWaitMs", metadataWaitMs)
+                    .with("producerPath", ProducerPath.SHARED)
+                    .withOptional("clientId", resolvedClientId)
                     .with("thread", Thread.currentThread().getName()), e);
         }
     }
@@ -797,6 +869,39 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
             tracingHelper.publishConnectionStatus(true, null);
             LOG.info("[CPI-KAFKA-PLUS-DIAG] Send recovered after previous failures for topic='{}'",
                     endpoint.getEffectiveTopic());
+        }
+        // e4: Reset rebuild tracking on success
+        rebuildAttemptsSinceSuccess = 0;
+
+        // c7: Track for the periodic success heartbeat
+        sendsSinceLastHeartbeat++;
+        maybeLogSuccessHeartbeat();
+    }
+
+    /**
+     * c7: Periodic success heartbeat for the SHARED producer path.
+     *
+     * <p>Without a baseline, "no errors" and "nothing ran" look identical in the trace. This
+     * method emits a low-volume success line so a healthy producer is provably alive. It matches
+     * the throttling approach used for the consumer's emit-cycle heartbeat: one line per 5 minutes,
+     * emitted immediately on a state change (healthy→unhealthy or first success).
+     *
+     * <p>Called from {@link #recordSendSuccess()}, so only successful sends trigger it.
+     */
+    private void maybeLogSuccessHeartbeat() {
+        long now = System.currentTimeMillis();
+        boolean healthy = true;
+        boolean stateChanged = !lastHeartbeatHealthy && healthy;
+        boolean intervalElapsed = (now - lastHeartbeatMs) >= HEARTBEAT_INTERVAL_MS;
+
+        if (stateChanged || intervalElapsed) {
+            LOG.error("[CPI-KAFKA-PLUS-DIAG] producer.heartbeat: status=HEALTHY, producerPath=SHARED, "
+                    + "clientId={}, sendsSinceLastHeartbeat={}, topic={}, thread={}",
+                    resolvedClientId, sendsSinceLastHeartbeat, endpoint.getEffectiveTopic(),
+                    Thread.currentThread().getName());
+            lastHeartbeatMs = now;
+            lastHeartbeatHealthy = healthy;
+            sendsSinceLastHeartbeat = 0;
         }
     }
 
@@ -823,23 +928,126 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
         consecutiveSendFailures++;
         tracingHelper.publishConnectionStatus(false, e);
 
-        Throwable cause = KafkaErrorHelper.extractKafkaCause(e);
-        boolean fatal = KafkaErrorHelper.isFatalKafkaException(cause);
-        boolean reconnect = fatal || consecutiveSendFailures >= MAX_CONSECUTIVE_SEND_FAILURES;
+        // e4: Use classification API instead of the deprecated isFatalKafkaException
+        Classification classification = KafkaErrorHelper.classify(e);
+        CpiKafkaPlusErrorCode errorCode = CpiKafkaPlusErrorCode.fromThrowable(e);
+
+        // e4: Rebuild decision driven by classification:
+        // - FATAL_PRODUCER_UNUSABLE / UNKNOWN_FATAL justify a rebuild
+        // - RETRIABLE / FATAL_DATA_ERROR do not (a record that is too large will be exactly
+        //   as too large on a fresh producer, and rebuilding on it would be a self-inflicted
+        //   outage under a poison message)
+        boolean classificationJustifiesRebuild =
+                classification == Classification.FATAL_PRODUCER_UNUSABLE
+                || classification == Classification.UNKNOWN_FATAL;
+
+        // e4: Guard against rebuild storm - don't rebuild on every record of a failing batch
+        long now = System.currentTimeMillis();
+        boolean rebuildBackoffElapsed = (now - lastRebuildAttemptMs) >= REBUILD_BACKOFF_MS;
+        boolean shouldRebuild = classificationJustifiesRebuild && rebuildBackoffElapsed;
 
         AdapterDiagnostics.Event event = AdapterDiagnostics.event(operation)
-                .with("producerPath", "SHARED")
+                .with("producerPath", ProducerPath.SHARED)
+                .withOptional("clientId", resolvedClientId)
+                .with("classification", classification)
+                .with("errorCode", errorCode.code())
                 .with("consecutiveFailures", consecutiveSendFailures)
-                .with("fatalClassification", fatal)
-                .with("reconnectTriggered", reconnect)
+                .with("rebuildJustified", classificationJustifiesRebuild)
+                .with("rebuildBackoffElapsed", rebuildBackoffElapsed)
+                .with("rebuildTriggered", shouldRebuild)
                 .with("thread", Thread.currentThread().getName());
         if (context != null) {
             context.forEach(event::with);
         }
         AdapterDiagnostics.error(LOG, event, e);
 
-        if (reconnect) {
+        // e4b: Check for node-level fault escalation
+        checkNodeFaultEscalation(classification, errorCode);
+
+        if (shouldRebuild) {
+            triggerReconnectWithMeasurement();
+        }
+    }
+
+    /**
+     * e4b: Escalate loudly when the same fault recurs more than N times within T minutes
+     * on this JVM despite mitigation. This indicates a node-level problem that requires
+     * operator attention.
+     *
+     * <p>Thresholds: 5 occurrences in 20 minutes. The observed incident was 5 in 18 minutes
+     * across a whole worker node. We use 5 and 20 rather than 5 and 18 to avoid escalating
+     * on a single retryable blip that happens to cross a window boundary.
+     */
+    private void checkNodeFaultEscalation(Classification classification, CpiKafkaPlusErrorCode errorCode) {
+        // Only track producer-unusable or unknown faults (not retriable or data errors)
+        if (classification != Classification.FATAL_PRODUCER_UNUSABLE
+                && classification != Classification.UNKNOWN_FATAL) {
+            return;
+        }
+
+        long now = System.currentTimeMillis();
+
+        // Reset window if it has expired
+        if ((now - nodeFaultWindowStartMs) > NODE_FAULT_ESCALATION_WINDOW_MS) {
+            nodeFaultWindowStartMs = now;
+            nodeFaultCountInWindow = 0;
+            nodeFaultEscalated = false;
+        }
+
+        nodeFaultCountInWindow++;
+
+        if (nodeFaultCountInWindow >= NODE_FAULT_ESCALATION_COUNT && !nodeFaultEscalated) {
+            nodeFaultEscalated = true;
+            LOG.error("[CPI-KAFKA-PLUS-DIAG] producer.node.fault.escalation: "
+                    + "THE SAME FAULT HAS RECURRED {} TIMES WITHIN {} MINUTES ON THIS JVM DESPITE MITIGATION. "
+                    + "This indicates a node-level problem requiring operator attention. "
+                    + "The node address is available in the trace record's second-to-last #-separated field. "
+                    + "classification={}, errorCode={}, clientId={}, topic={}, thread={}",
+                    nodeFaultCountInWindow, NODE_FAULT_ESCALATION_WINDOW_MS / 60_000,
+                    classification, errorCode.code(), resolvedClientId,
+                    endpoint.getEffectiveTopic(), Thread.currentThread().getName());
+        }
+    }
+
+    /**
+     * e4: Triggers a producer rebuild and measures/logs the outcome.
+     *
+     * <p>The reason this method exists (instead of just calling {@link #triggerReconnect()})
+     * is that we currently rebuild and then have no idea whether it helped. This method emits
+     * whether the rebuild succeeded, how long it took, and whether the producer is now usable.
+     */
+    private void triggerReconnectWithMeasurement() {
+        lastRebuildAttemptMs = System.currentTimeMillis();
+        rebuildAttemptsSinceSuccess++;
+
+        long rebuildStartMs = System.currentTimeMillis();
+        boolean rebuildSucceeded = false;
+        Exception rebuildException = null;
+
+        try {
             triggerReconnect();
+            // If triggerReconnect didn't throw, check if producer is now usable
+            rebuildSucceeded = (kafkaProducer != null);
+        } catch (Exception e) {
+            rebuildException = e;
+        }
+
+        long rebuildDurationMs = System.currentTimeMillis() - rebuildStartMs;
+
+        if (rebuildSucceeded) {
+            LOG.error("[CPI-KAFKA-PLUS-DIAG] producer.rebuild.outcome: status=SUCCESS, "
+                    + "durationMs={}, attemptsSinceLastSuccess={}, clientId={}, producerPath=SHARED, thread={}",
+                    rebuildDurationMs, rebuildAttemptsSinceSuccess, resolvedClientId,
+                    Thread.currentThread().getName());
+        } else {
+            AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("producer.rebuild.outcome")
+                    .with("status", "FAILED")
+                    .with("durationMs", rebuildDurationMs)
+                    .with("attemptsSinceLastSuccess", rebuildAttemptsSinceSuccess)
+                    .with("producerPath", ProducerPath.SHARED)
+                    .withOptional("clientId", resolvedClientId)
+                    .with("thread", Thread.currentThread().getName()),
+                    rebuildException != null ? rebuildException : new RuntimeException("Producer still null after rebuild"));
         }
     }
 
@@ -869,8 +1077,13 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
      */
     void handleTxnSendFailure(Exception e, Map<String, String> context) {
         consecutiveTxnSendFailures++;
+        Classification classification = KafkaErrorHelper.classify(e);
+        CpiKafkaPlusErrorCode errorCode = CpiKafkaPlusErrorCode.fromThrowable(e);
+
         AdapterDiagnostics.Event event = AdapterDiagnostics.event("producer.transactional.batch.send")
-                .with("producerPath", "TRANSACTIONAL")
+                .with("producerPath", ProducerPath.TRANSACTIONAL)
+                .with("classification", classification)
+                .with("errorCode", errorCode.code())
                 .with("consecutiveFailures", consecutiveTxnSendFailures)
                 .with("thread", Thread.currentThread().getName());
         if (context != null) {
