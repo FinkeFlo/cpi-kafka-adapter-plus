@@ -111,8 +111,14 @@ public final class ProducerConfigFactory {
         // Security - reuse same logic as consumer
         SecurityConfigHelper.configureSecurityProperties(props, endpoint);
 
-        // Note: transaction.two.phase.commit.enable is set in CpiKafkaPlusProducer.sendTransactionalBatch
-        // where the transactional producer is created, not here. See e6 comment there for details.
+        // transaction.two.phase.commit.enable is the KIP-939 two-phase-commit switch; its client
+        // default is already false. It does NOT control Transaction Protocol V2 (KIP-890) —
+        // TransactionManager derives that solely from the broker's finalized "transaction.version"
+        // feature. Setting it explicitly to false only pins the safe default and guarantees that
+        // 2PC (which requires broker support plus a TWO_PHASE_COMMIT ACL) is never negotiated.
+        if (!endpoint.isTransactionV2Enabled()) {
+            props.put(ProducerConfig.TRANSACTION_TWO_PHASE_COMMIT_ENABLE_CONFIG, false);
+        }
 
         return props;
     }

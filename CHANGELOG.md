@@ -58,6 +58,16 @@ iFlow compatibility.
 - Added setup script and documentation for local hook and commit-template activation in CONTRIBUTING.md.
 - Enforce `REVIEW_REQUIRED` and `CODEOWNER_REVIEW` on main branch protection; disallow force push and branch deletion.
 
+## [1.2.5] - 2026-08-17
+### Fixed
+- Transactional producers no longer request Kafka two-phase commit (KIP-939). In 1.2.4 the default `transactionV2Enabled=true` was written straight into `transaction.two.phase.commit.enable`, so transactional producers asked the broker for 2PC — a mode that requires explicit broker support plus a `TWO_PHASE_COMMIT` ACL and makes transactions non-expiring. The adapter now only ever pins the config to `false` and never enables 2PC.
+
+### Changed
+- `transaction.two.phase.commit.enable=false` is applied in `ProducerConfigFactory.buildProducerProperties()` for **all** producers (regular and transactional) when `transactionV2Enabled=false`, instead of only in the transactional path.
+
+### Note
+- `transactionV2Enabled` cannot actually switch off Kafka Transaction Protocol V2 (KIP-890): the client derives V2 usage exclusively from the broker's finalized `transaction.version` feature, and `transaction.two.phase.commit.enable` (default `false`) is an unrelated KIP-939 switch. Do not rely on this parameter as a workaround for `IllegalMonitorStateException`; that issue is still under investigation.
+
 ## [1.2.4] - 2026-08-17
 ### Added
 - New adapter parameter `transactionV2Enabled` (default `true`) to disable Kafka Transaction Protocol V2 (KIP-890). Set to `false` as a workaround for `IllegalMonitorStateException` in Kafka 4.x clients when a transactional producer is fenced during `initTransactions()`. V1 behavior (Kafka ≤ 3.x compatible) is stable and avoids the race condition in the `TransactionManager` sender thread.
