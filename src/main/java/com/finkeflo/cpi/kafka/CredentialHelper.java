@@ -116,14 +116,14 @@ public final class CredentialHelper {
             SecureStoreService secureStoreService = ITApiFactory.getService(SecureStoreService.class, null);
 
             if (secureStoreService == null) {
-                LOG.warn("SecureStoreService not available - not running on CPI?");
+                LOG.warn("[CPI-KAFKA-PLUS-DIAG] SecureStoreService not available - not running on CPI?");
                 return null;
             }
 
             UserCredential userCredential = secureStoreService.getUserCredential(alias);
 
             if (userCredential == null) {
-                LOG.warn("No credential found for alias '{}'", alias);
+                LOG.warn("[CPI-KAFKA-PLUS-DIAG] No credential found for alias '{}'", alias);
                 return null;
             }
 
@@ -133,7 +133,7 @@ public final class CredentialHelper {
             LOG.debug("Successfully resolved credentials for alias '{}'", alias);
             return new UserCredentials(username, password);
         } catch (Exception e) {
-            LOG.error("Failed to retrieve credentials for alias '{}': {}", alias, e.getMessage(), e);
+            LOG.error("[CPI-KAFKA-PLUS-DIAG] Failed to retrieve credentials for alias '{}': {}", alias, e.getMessage(), e);
             throw new RuntimeException("Failed to retrieve credentials: " + e.getMessage(), e);
         }
     }
@@ -174,7 +174,7 @@ public final class CredentialHelper {
             KeystoreService keystoreService = ITApiFactory.getService(KeystoreService.class, null);
 
             if (keystoreService == null) {
-                LOG.warn("KeystoreService not available - not running on CPI?");
+                LOG.warn("[CPI-KAFKA-PLUS-DIAG] KeystoreService not available - not running on CPI?");
                 return null;
             }
 
@@ -187,7 +187,7 @@ public final class CredentialHelper {
             LOG.debug("SSLContext created for keystore alias '{}'", keystoreAlias);
             return sslContext;
         } catch (Exception e) {
-            LOG.error("Failed to get SSLContext for alias '{}': {}", keystoreAlias, e.getMessage(), e);
+            LOG.error("[CPI-KAFKA-PLUS-DIAG] Failed to get SSLContext for alias '{}': {}", keystoreAlias, e.getMessage(), e);
             throw new RuntimeException("Failed to get SSLContext: " + e.getMessage(), e);
         }
     }

@@ -174,8 +174,12 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
         try {
             doStartInternal();
         } catch (Exception e) {
-            LOG.error("[CPI-KAFKA-PLUS] Adapter failed to start (topic='{}'): {}",
-                    endpoint.getEffectiveTopic(), e.getMessage(), e);
+            // Previously the only lines in the adapter carrying a second, competing
+            // marker — and among the most valuable ones there are.
+            AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("consumer.start.failed")
+                    .with("topic", endpoint.getEffectiveTopic())
+                    .with("bootstrapServers", endpoint.getBootstrapServers())
+                    .with("securityProtocol", endpoint.getSecurityProtocol()), e);
             throw e;
         }
     }
@@ -494,14 +498,14 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
 
     private void logInitFailure(String component, Throwable e) {
         consecutiveInitFailures++;
-        String topStack = describeTopStack(e, 6);
-        if (consecutiveInitFailures >= KafkaErrorHelper.INIT_FAILURE_ESCALATION_THRESHOLD) {
-            LOG.error("[CPI-KAFKA-PLUS-DIAG] ensureInitialized: FAILED to create {} ({} consecutive failures) exClass={} exMsg='{}' topStack={}",
-                    component, consecutiveInitFailures, e.getClass().getName(), e.getMessage(), topStack);
-        } else {
-            LOG.error("[CPI-KAFKA-PLUS-DIAG] ensureInitialized: FAILED to create {} (attempt {}) exClass={} exMsg='{}' topStack={}",
-                    component, consecutiveInitFailures, e.getClass().getName(), e.getMessage(), topStack);
-        }
+        // The full cause chain and stack frames go into the message text, because the CPI tenant
+        // trace appender discards the Throwable argument and keeps only the rendered message.
+        AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("consumer.init.failed")
+                .with("component", component)
+                .with("consecutiveFailures", consecutiveInitFailures)
+                .with("bootstrapServers", endpoint.getBootstrapServers())
+                .with("securityProtocol", endpoint.getSecurityProtocol())
+                .with("thread", Thread.currentThread().getName()), e);
         reportConnectionError(KafkaErrorHelper.wrapIfError(e));
     }
 

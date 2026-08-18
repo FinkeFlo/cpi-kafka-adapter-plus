@@ -338,11 +338,11 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
         String effectiveTopic = getEffectiveTopic();
         if (effectiveTopic == null || effectiveTopic.trim().isEmpty()) {
             throw new IllegalArgumentException(
-                    "[CPI-KAFKA-PLUS] Topic is not configured. Please set the target topic in the adapter Connection tab.");
+                    "[CPI-KAFKA-PLUS-DIAG] Topic is not configured. Please set the target topic in the adapter Connection tab.");
         }
         if (!effectiveTopic.equals(effectiveTopic.trim())) {
             throw new IllegalArgumentException(
-                    "[CPI-KAFKA-PLUS] Topic name '" + effectiveTopic + "' contains leading or trailing whitespace. "
+                    "[CPI-KAFKA-PLUS-DIAG] Topic name '" + effectiveTopic + "' contains leading or trailing whitespace. "
                     + "Please remove any spaces around the topic name in the adapter Connection tab.");
         }
         if (schemaRegistryEnabled

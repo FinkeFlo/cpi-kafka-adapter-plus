@@ -144,8 +144,12 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
         try {
             doStartInternal();
         } catch (Exception e) {
-            LOG.error("[CPI-KAFKA-PLUS] Adapter failed to start (topic='{}'): {}",
-                    endpoint.getEffectiveTopic(), e.getMessage(), e);
+            // Previously the only lines in the adapter carrying a second, competing
+            // marker — and among the most valuable ones there are.
+            AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("producer.start.failed")
+                    .with("topic", endpoint.getEffectiveTopic())
+                    .with("bootstrapServers", endpoint.getBootstrapServers())
+                    .with("securityProtocol", endpoint.getSecurityProtocol()), e);
             throw e;
         }
     }
@@ -349,13 +353,15 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
 
     private void logInitFailure(String component, Throwable e) {
         consecutiveInitFailures++;
-        if (consecutiveInitFailures >= KafkaErrorHelper.INIT_FAILURE_ESCALATION_THRESHOLD) {
-            LOG.error("[CPI-KAFKA-PLUS-DIAG] ensureInitialized: FAILED to create {} ({} consecutive failures): {}",
-                    component, consecutiveInitFailures, e.getMessage(), e);
-        } else {
-            LOG.warn("[CPI-KAFKA-PLUS-DIAG] ensureInitialized: FAILED to create {} (attempt {}): {}",
-                    component, consecutiveInitFailures, e.getMessage(), e);
-        }
+        // Always ERROR. The first nine attempts used to be WARN, which does not reach the CPI
+        // tenant trace file — so the most common real failure class (credentials, TLS, unreachable
+        // broker) produced nothing visible until the tenth attempt, if it ever got there.
+        AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("producer.init.failed")
+                .with("component", component)
+                .with("consecutiveFailures", consecutiveInitFailures)
+                .with("bootstrapServers", endpoint.getBootstrapServers())
+                .with("securityProtocol", endpoint.getSecurityProtocol())
+                .with("thread", Thread.currentThread().getName()), e);
         tracingHelper.publishConnectionStatus(false, KafkaErrorHelper.wrapIfError(e));
     }
 
@@ -439,6 +445,7 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
                 ctx.put("topic", topic);
                 ctx.put("batchMode", batchMode);
                 ctx.put("recordCount", String.valueOf(records.size()));
+                CorrelationHelper.addTo(ctx, exchange);
                 tracingHelper.traceError(exchange, e, ctx);
                 handleSendFailure(e, "producer.batch.send", ctx);
                 throw sendFailure("Failed to send batch to", topic, e);
@@ -529,6 +536,7 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
             ctx.put("slotId", String.valueOf(slotId));
             ctx.put("topicHash", topicHash != null ? topicHash : "(not yet computed)");
             ctx.put("transactionV2Enabled", String.valueOf(endpoint.isTransactionV2Enabled()));
+            CorrelationHelper.addTo(ctx, in.getExchange());
             tracingHelper.traceError(in.getExchange(), e, ctx);
             handleTxnSendFailure(e, ctx);
             throw sendFailure("Failed to send transactional batch to", topic, e);
@@ -643,6 +651,7 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
             Map<String, String> ctx = new java.util.LinkedHashMap<>();
             ctx.put("topic", topic);
             ctx.put("sendMode", "SINGLE");
+            CorrelationHelper.addTo(ctx, exchange);
             tracingHelper.traceError(exchange, e, ctx);
             handleSendFailure(e, "producer.single.send", ctx);
             throw sendFailure("Failed to send message to", topic, e);
