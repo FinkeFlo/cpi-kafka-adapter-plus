@@ -65,4 +65,5 @@ nav:
   - Architecture Decisions:
       - "ADR 0001: Transactional Concurrency": adrs/0001-transactional-producer-concurrency.md
   - FAQ: faq.md
+  - Troubleshooting: troubleshooting.md
   - Changelog: changelog.md
