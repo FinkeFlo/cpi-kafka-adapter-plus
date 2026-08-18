@@ -292,8 +292,11 @@ final class RecordProcessor {
             LOG.debug("[CPI-KAFKA-PLUS-DIAG] processOneBatch: formatted OK, bodyLength={}",
                     body != null ? body.length() : 0);
         } catch (Throwable t) {
-            LOG.error("[CPI-KAFKA-PLUS-DIAG] processOneBatch: formatBatch FAILED: {} ({})",
-                    t.getMessage(), t.getClass().getName(), t);
+            int partition = !batch.isEmpty() ? batch.get(0).partition() : -1;
+            AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("batch.format.failed")
+                    .with("errorCode", CpiKafkaPlusErrorCode.fromThrowable(t).code())
+                    .with("partition", partition)
+                    .with("batchSize", batch.size()), t);
             if (dlqHelper != null) {
                 LOG.info("[CPI-KAFKA-PLUS-DIAG] processOneBatch: formatBatch failed, retrying batch records individually for poison-pill isolation");
                 return processRecordsIndividually(kafkaConsumer, batch, commitAfterSuccess);
@@ -319,8 +322,11 @@ final class RecordProcessor {
             }
             return batch.size();
         } catch (Exception e) {
-            LOG.error("[CPI-KAFKA-PLUS-DIAG] processOneBatch: EXCEPTION during processing (partition {}): {}",
-                    batch.get(0).partition(), e.getMessage(), e);
+            int partition = !batch.isEmpty() ? batch.get(0).partition() : -1;
+            AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("batch.processing.failed")
+                    .with("errorCode", CpiKafkaPlusErrorCode.fromThrowable(e).code())
+                    .with("partition", partition)
+                    .with("batchSize", batch.size()), e);
             if (dlqHelper != null) {
                 LOG.info("[CPI-KAFKA-PLUS-DIAG] processOneBatch: DLQ enabled, retrying batch records individually");
                 return processRecordsIndividually(kafkaConsumer, batch, commitAfterSuccess);
@@ -499,6 +505,21 @@ final class RecordProcessor {
             errorType = permanentError ? "PERMANENT" : "TRANSIENT";
         }
 
+        // f2: Trace the error for consumer/sender direction before routing to DLQ or exception handler
+        Exchange traceExchange = callback.createExchange();
+        java.util.Map<String, String> context = new java.util.LinkedHashMap<>();
+        context.put("topic", record.topic());
+        context.put("partition", String.valueOf(record.partition()));
+        context.put("offset", String.valueOf(record.offset()));
+        context.put("retryAttempts", String.valueOf(actualRetries));
+        context.put("errorType", errorType != null ? errorType : "UNKNOWN");
+        tracingHelper.traceError(traceExchange, lastError, context, true);
+
+        // f1/f4/f5: Report failure with structured fields and attachment
+        // Derive error code from the exception using the central taxonomy
+        String errorCode = CpiKafkaPlusErrorCode.fromThrowable(lastError).code();
+        tracingHelper.reportFailure(traceExchange, lastError, errorCode, context, true);
+
         if (dlqHelper != null) {
             try {
                 dlqHelper.sendToDlq(record, lastError, actualRetries, errorType);
@@ -541,6 +562,20 @@ final class RecordProcessor {
                                               ConsumerRecord<byte[], byte[]> record,
                                               Exception cause,
                                               boolean commitAfterSuccess) {
+        // f2: Trace the deserialization failure for consumer/sender direction
+        Exchange traceExchange = callback.createExchange();
+        java.util.Map<String, String> context = new java.util.LinkedHashMap<>();
+        context.put("topic", record.topic());
+        context.put("partition", String.valueOf(record.partition()));
+        context.put("offset", String.valueOf(record.offset()));
+        context.put("failureType", "DESERIALIZATION");
+        tracingHelper.traceError(traceExchange, cause, context, true);
+
+        // f1/f4/f5: Report failure with structured fields and attachment
+        // Deserialization failures map to KP_PROD_004 (serialization_failed) via the central taxonomy
+        String errorCode = CpiKafkaPlusErrorCode.fromThrowable(cause).code();
+        tracingHelper.reportFailure(traceExchange, cause, errorCode, context, true);
+
         if (dlqHelper == null) {
             throw cause instanceof RuntimeException
                     ? (RuntimeException) cause
@@ -858,11 +893,31 @@ final class RecordProcessor {
             mplExchange.getIn().setHeader("SAP_Sender", record.topic());
             tracingHelper.traceInbound(mplExchange, value);
             mplExchange.setProperty(Exchange.ROUTE_STOP, Boolean.TRUE);
-            mplExchange.setException(new RuntimeException(errorMsg));
+            RuntimeException validationException = new RuntimeException(errorMsg);
+            mplExchange.setException(validationException);
+
+            // f2: Call traceError for the consumer/sender direction (SENDER_OUTBOUND_FAULT)
+            java.util.Map<String, String> context = new java.util.LinkedHashMap<>();
+            context.put("topic", record.topic());
+            context.put("partition", String.valueOf(record.partition()));
+            context.put("offset", String.valueOf(record.offset()));
+            context.put("validationError", validationError);
+            tracingHelper.traceError(mplExchange, validationException, context, true);
+
+            // f1/f4/f5: Report failure with structured fields and attachment
+            // JSON schema validation failures have a dedicated error code
+            String errorCode = CpiKafkaPlusErrorCode.fromJsonSchemaValidationFailure(validationException).code();
+            tracingHelper.reportFailure(mplExchange, validationException,
+                    errorCode, context, true);
+
             callback.processExchange(mplExchange);
         } catch (Exception e) {
-            LOG.debug("[CPI-KAFKA-PLUS-DIAG] reportValidationErrorToMpl failed for offset={}: {}",
-                    record.offset(), e.getMessage());
+            // b4: Swallowed error now logged at ERROR, not DEBUG — only ERROR reaches tenant trace
+            AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("consumer.mpl.report.failed")
+                    .with("topic", record.topic())
+                    .with("partition", record.partition())
+                    .with("offset", record.offset())
+                    .with("validationError", validationError), e);
         }
     }
 }

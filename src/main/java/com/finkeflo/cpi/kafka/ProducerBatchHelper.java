@@ -45,6 +45,19 @@ public final class ProducerBatchHelper {
     private ProducerBatchHelper() {}
 
     /**
+     * Producer path identifier for diagnostics. Every diagnostic line from the producer path must
+     * include this tag so the first question in any investigation ("which path was in play?") is
+     * answered immediately.
+     */
+    public enum ProducerPath {
+        /** The shared, non-transactional producer reused across exchanges. */
+        SHARED,
+        /** A per-transaction, short-lived producer created for exactly-once batches. */
+        TRANSACTIONAL
+    }
+
+
+    /**
      * Result of a batch send operation.
      */
     public static final class BatchSendResult {
@@ -73,15 +86,17 @@ public final class ProducerBatchHelper {
     /**
      * Send all records asynchronously, then evaluate their futures against one shared deadline.
      *
-     * @param producer     Kafka producer instance
-     * @param records      parsed batch records
-     * @param topic        target topic
-     * @param fallbackKey  fallback key from kafka.KEY header (may be null)
-     * @param partition    partition from kafka.PARTITION_KEY header (may be null)
-     * @param timestamp    timestamp from kafka.OVERRIDE_TIMESTAMP header (may be null)
-     * @param message      exchange message for adding record headers
-     * @param headerAdder  function to add exchange headers to each ProducerRecord
-     * @param sendGuard    bounds the wait for the send results of this batch
+     * @param producer      Kafka producer instance
+     * @param records       parsed batch records
+     * @param topic         target topic
+     * @param fallbackKey   fallback key from kafka.KEY header (may be null)
+     * @param partition     partition from kafka.PARTITION_KEY header (may be null)
+     * @param timestamp     timestamp from kafka.OVERRIDE_TIMESTAMP header (may be null)
+     * @param message       exchange message for adding record headers
+     * @param headerAdder   function to add exchange headers to each ProducerRecord
+     * @param sendGuard     bounds the wait for the send results of this batch
+     * @param producerPath  identifies whether this is the shared or transactional path (c2)
+     * @param clientId      the Kafka client.id for correlation with broker-side logs (c3)
      * @return BatchSendResult with offsets and timing
      */
     public static BatchSendResult sendBatch(
@@ -95,7 +110,9 @@ public final class ProducerBatchHelper {
             RecordHeaderAdder headerAdder,
             ByteSerializer valueSerializer,
             ByteSerializer keySerializer,
-            ProducerSendGuard sendGuard) throws Exception {
+            ProducerSendGuard sendGuard,
+            ProducerPath producerPath,
+            String clientId) throws Exception {
 
         long startMs = System.currentTimeMillis();
         // One deadline for the whole batch: waiting per record would multiply the budget by the
@@ -104,7 +121,8 @@ public final class ProducerBatchHelper {
 
         List<Future<RecordMetadata>> futures = sendRecordsAsync(
                 producer, records, topic, fallbackKey, partition, timestamp,
-                message, headerAdder, valueSerializer, keySerializer, sendGuard, deadlineMs);
+                message, headerAdder, valueSerializer, keySerializer, sendGuard, deadlineMs,
+                startMs, producerPath, clientId);
 
         // No producer.flush() here: flush() waits on the sender thread with no timeout of its own,
         // so a dead sender thread would block before any future could be evaluated. With
@@ -123,8 +141,18 @@ public final class ProducerBatchHelper {
             } catch (ProducerSendGuard.SendStalledException e) {
                 throw e;
             } catch (Exception e) {
+                AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("producer.batch.record.await")
+                        .with("producerPath", producerPath)
+                        .withOptional("clientId", clientId)
+                        .with("phase", "AWAIT_FUTURE")
+                        .with("topic", topic)
+                        .with("recordIndex", i)
+                        .with("batchSize", futures.size())
+                        .with("elapsedMs", System.currentTimeMillis() - startMs)
+                        .with("thread", Thread.currentThread().getName()), e);
                 throw new RuntimeException(
-                        "Batch send failed at record index " + i + ": " + e.getMessage(), e);
+                        "Batch send failed at record index " + i + " (phase=AWAIT_FUTURE): "
+                                + e.getMessage(), e);
             }
 
             if (i == 0) {
@@ -164,11 +192,18 @@ public final class ProducerBatchHelper {
             ByteSerializer valueSerializer,
             ByteSerializer keySerializer,
             ProducerSendGuard sendGuard,
-            long deadlineMs) {
+            long deadlineMs,
+            long batchStartMs,
+            ProducerPath producerPath,
+            String clientId) {
 
         List<Future<RecordMetadata>> futures = new ArrayList<>(records.size());
+        // One allowance for the whole batch, so the per-record limit cannot be multiplied by the
+        // record count.
+        MonitorFaultRetry.Budget batchBudget = new MonitorFaultRetry.Budget();
 
         for (int i = 0; i < records.size(); i++) {
+            final int recordIndex = i;
             BatchRecord record = records.get(i);
 
             String keyStr = record.getKey();
@@ -206,15 +241,25 @@ public final class ProducerBatchHelper {
             }
 
             try {
-                futures.add(producer.send(pr));
+                futures.add(MonitorFaultRetry.execute(
+                        () -> producer.send(pr), batchBudget, deadlineMs, topic, recordIndex));
             } catch (Exception e) {
-                LOG.warn("[CPI-KAFKA-PLUS-DIAG] Batch send() failed at index {}, "
-                        + "draining {} buffered records: {}", i, futures.size(), e.getMessage());
+                AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("producer.batch.record.send")
+                        .with("producerPath", producerPath)
+                        .withOptional("clientId", clientId)
+                        .with("phase", "SYNC_SEND")
+                        .with("topic", topic)
+                        .with("recordIndex", i)
+                        .with("batchSize", records.size())
+                        .with("bufferedRecords", futures.size())
+                        .with("elapsedMs", System.currentTimeMillis() - batchStartMs)
+                        .with("thread", Thread.currentThread().getName()), e);
                 // Bounded drain instead of flush(): flush() has no timeout and would hang here if
                 // the sender thread is what caused this failure in the first place.
                 sendGuard.awaitAllQuietly(futures, deadlineMs);
                 throw new RuntimeException(
-                        "Batch send failed at record index " + i + ": " + e.getMessage(), e);
+                        "Batch send failed at record index " + i + " (phase=SYNC_SEND): "
+                                + e.getMessage(), e);
             }
         }
 

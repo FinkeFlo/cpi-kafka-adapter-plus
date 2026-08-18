@@ -119,8 +119,9 @@ public class AvroSerializerHelper implements Closeable {
                     && e.getMessage().startsWith("Avro serialization failed:")) {
                 throw (RuntimeException) e;
             }
-            LOG.error("[CPI-KAFKA-PLUS-DIAG] Avro serialization failed for topic '{}': {}",
-                    topic, e.getMessage(), e);
+            AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("avro.serialization.failed")
+                    .with("errorCode", CpiKafkaPlusErrorCode.KP_SR_001.code())
+                    .with("topic", topic), e);
             throw new RuntimeException("Avro serialization failed: " + e.getMessage(), e);
         }
     }

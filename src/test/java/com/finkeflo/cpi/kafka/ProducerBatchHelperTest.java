@@ -45,6 +45,8 @@ import org.apache.kafka.common.metrics.KafkaMetric;
 import org.junit.Assert;
 import org.junit.Test;
 
+import com.finkeflo.cpi.kafka.ProducerBatchHelper.ProducerPath;
+
 public class ProducerBatchHelperTest {
 
     private static final long SHORT_BUDGET_MS = 150L;
@@ -63,7 +65,8 @@ public class ProducerBatchHelperTest {
                 producer,
                 Arrays.asList(new BatchRecord("k1", "v1"), new BatchRecord("k2", "v2")),
                 "orders", null, null, null, null, null, null, null,
-                ProducerSendGuard.of(SHORT_BUDGET_MS, "SASL_SSL"));
+                ProducerSendGuard.of(SHORT_BUDGET_MS, "SASL_SSL"),
+                ProducerPath.SHARED, "test-client-id");
 
         Assert.assertEquals(2, producer.sentRecords.size());
         Assert.assertEquals("sendBatch must not call KafkaProducer.flush()", 0, producer.flushCount);
@@ -82,7 +85,8 @@ public class ProducerBatchHelperTest {
                     producer,
                     Collections.singletonList(new BatchRecord("k1", "v1")),
                     "orders", null, null, null, null, null, null, null,
-                    ProducerSendGuard.of(SHORT_BUDGET_MS, "PLAINTEXT"));
+                    ProducerSendGuard.of(SHORT_BUDGET_MS, "PLAINTEXT"),
+                    ProducerPath.SHARED, "test-client-id");
             Assert.fail("Expected the stalled future to be reported directly");
         } catch (ProducerSendGuard.SendStalledException e) {
             Assert.assertTrue(e.getMessage(), e.getMessage().contains("record index 0"));
@@ -104,7 +108,8 @@ public class ProducerBatchHelperTest {
                             new BatchRecord("k2", "v2"),
                             new BatchRecord("k3", "v3")),
                     "orders", null, null, null, null, null, null, null,
-                    ProducerSendGuard.of(SHORT_BUDGET_MS, "PLAINTEXT"));
+                    ProducerSendGuard.of(SHORT_BUDGET_MS, "PLAINTEXT"),
+                    ProducerPath.SHARED, "test-client-id");
             Assert.fail("Expected send() failure");
         } catch (RuntimeException e) {
             Assert.assertTrue(e.getMessage(), e.getMessage().contains("record index 2"));

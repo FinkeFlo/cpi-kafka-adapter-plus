@@ -60,7 +60,7 @@ public final class SecurityConfigHelper {
 
         String alias = endpoint.getCredentialAlias();
         if (alias == null || alias.isEmpty()) {
-            LOG.error("SASL configured but no credential alias specified. Kafka will fail to connect.");
+            LOG.error("[CPI-KAFKA-PLUS-DIAG] SASL configured but no credential alias specified. Kafka will fail to connect.");
             return;
         }
 
@@ -72,11 +72,11 @@ public final class SecurityConfigHelper {
                 props.put("sasl.jaas.config", jaasConfig);
                 LOG.info("SASL credentials resolved for alias '{}'", alias);
             } else {
-                LOG.error("SASL configured but no credentials resolved for alias '{}'. " +
+                LOG.error("[CPI-KAFKA-PLUS-DIAG] SASL configured but no credentials resolved for alias '{}'. " +
                         "Kafka will fail to connect.", alias);
             }
         } catch (Exception e) {
-            LOG.error("Could not resolve SASL credentials from Secure Store alias '{}': {}. " +
+            LOG.error("[CPI-KAFKA-PLUS-DIAG] Could not resolve SASL credentials from Secure Store alias '{}': {}. " +
                     "Kafka client will likely fail to connect.", alias, e.getMessage());
         }
     }
@@ -117,11 +117,11 @@ public final class SecurityConfigHelper {
                 props.put("sasl.jaas.config", jaasConfig);
                 LOG.info("DLQ SASL credentials resolved for alias '{}'", alias);
             } else {
-                LOG.error("DLQ credential alias '{}' configured but no credentials resolved. " +
+                LOG.error("[CPI-KAFKA-PLUS-DIAG] DLQ credential alias '{}' configured but no credentials resolved. " +
                         "DLQ producer will fail to connect.", alias);
             }
         } catch (Exception e) {
-            LOG.warn("Could not resolve DLQ credentials from Secure Store alias '{}': {}",
+            LOG.warn("[CPI-KAFKA-PLUS-DIAG] Could not resolve DLQ credentials from Secure Store alias '{}': {}",
                     alias, e.getMessage());
         }
     }

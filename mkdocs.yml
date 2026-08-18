@@ -64,5 +64,9 @@ nav:
       - Authentication: security/authentication.md
   - Architecture Decisions:
       - "ADR 0001: Transactional Concurrency": adrs/0001-transactional-producer-concurrency.md
+      - "ADR 0002: JDK-only Schema Registry Client": adrs/0002-confluent-client-ersetzen.md
+      - "ADR 0003: Unpacked kafka-clients": adrs/0003-kafka-clients-unpack.md
+      - "ADR 0004: Diagnostic Logging Contract": adrs/0004-diagnostic-logging-contract.md
   - FAQ: faq.md
+  - Troubleshooting: troubleshooting.md
   - Changelog: changelog.md

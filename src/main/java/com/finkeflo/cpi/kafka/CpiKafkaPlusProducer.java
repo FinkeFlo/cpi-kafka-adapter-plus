@@ -46,6 +46,16 @@ import org.apache.kafka.common.serialization.ByteArraySerializer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.lang.management.ManagementFactory;
+import java.lang.management.MemoryMXBean;
+import java.lang.management.MemoryUsage;
+import java.lang.management.RuntimeMXBean;
+import java.lang.management.ThreadInfo;
+import java.lang.management.ThreadMXBean;
+
+import com.finkeflo.cpi.kafka.KafkaErrorHelper.Classification;
+import com.finkeflo.cpi.kafka.ProducerBatchHelper.ProducerPath;
+
 /**
  * Kafka Producer - sends messages from CPI IFlow to Kafka.
  * Receiver direction in CPI terminology (CPI receives from IFlow, sends to external system).
@@ -70,6 +80,12 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
      */
     private static final int VERIFIED_TOPICS_CACHE_LIMIT = 256;
     /**
+     * Window in which a failed metadata pre-warm may be retried. Short on purpose: the KAFKA-10902
+     * monitor fault throws immediately and is worth another attempt, whereas a genuine metadata
+     * timeout has already spent {@code max.block.ms} and must not be multiplied.
+     */
+    private static final long PREWARM_RETRY_WINDOW_MS = 5_000L;
+    /**
      * How often a reported-missing topic is re-checked before the send is failed, and how long to
      * wait between attempts. {@code createTopics} returns as soon as the controller has accepted the
      * request, so a topic can legitimately be absent from broker metadata for a moment afterwards —
@@ -91,6 +107,18 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
      * take effect until the IFlow is redeployed.
      */
     private final java.util.Set<String> verifiedTopics =
+            java.util.Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap<String, Boolean>());
+    /**
+     * Topics whose metadata this producer instance has already tried to fetch up front. Cleared
+     * whenever the producer is replaced, because a new client starts with an empty metadata cache.
+     */
+    private final java.util.Set<String> prewarmedTopics =
+            java.util.Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap<String, Boolean>());
+    /**
+     * Topics currently being pre-warmed. Keeps concurrent sender threads from issuing duplicate
+     * metadata fetches for the same topic while still allowing retries after a failed attempt.
+     */
+    private final java.util.Set<String> prewarmingTopics =
             java.util.Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap<String, Boolean>());
     private KafkaProducer<byte[], byte[]> kafkaProducer;
     private AvroSerializerHelper avroHelper;
@@ -121,6 +149,60 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
      */
     private volatile Throwable lastProbeFailure = null;
 
+    /**
+     * Kafka client.id captured after the producer is built, for correlation with broker-side logs.
+     * Stable across restarts as long as the endpoint adapterInstanceID is stable.
+     */
+    private volatile String resolvedClientId;
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // c7: Success heartbeat state — matches consumer's logEmitCycleHeartbeat pattern
+    // ─────────────────────────────────────────────────────────────────────────────
+    /** Heartbeat interval: one line per 5 minutes, emitted immediately on state change. */
+    private static final long HEARTBEAT_INTERVAL_MS = 5 * 60 * 1000L;
+    private volatile long lastHeartbeatMs = 0L;
+    private volatile boolean lastHeartbeatHealthy = false;
+    private volatile long sendsSinceLastHeartbeat = 0L;
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // c4: Slow metadata warn threshold — avoids log noise on the success path while
+    // still surfacing pathological fetches. 1 second is well above normal (<50ms)
+    // but below the timeout that would cause a hard failure (max.block.ms).
+    // ─────────────────────────────────────────────────────────────────────────────
+    private static final long SLOW_METADATA_THRESHOLD_MS = 1000L;
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // e4: Rebuild storm guard — prevents rebuilding on every record of a failing batch.
+    // If a rebuild fails or the producer re-fails immediately, back off before retrying.
+    // ─────────────────────────────────────────────────────────────────────────────
+    /** Minimum interval between producer rebuild attempts. */
+    private static final long REBUILD_BACKOFF_MS = 30_000L;
+    private volatile long lastRebuildAttemptMs = 0L;
+    private volatile int rebuildAttemptsSinceSuccess = 0;
+    /** Tracks whether a rebuild is pending effect confirmation from the next send. */
+    private volatile boolean pendingRebuildEffect = false;
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // e4b: Node-level fault escalation — if the same fault (keyed by exception class +
+    // error code) recurs more than N times within T minutes despite mitigation, escalate
+    // to make the node problem visible.
+    // Thresholds: 5 occurrences in 20 minutes (observed incident was 5 in 18 min).
+    // ─────────────────────────────────────────────────────────────────────────────
+    private static final int NODE_FAULT_ESCALATION_COUNT = 5;
+    private static final long NODE_FAULT_ESCALATION_WINDOW_MS = 20 * 60 * 1000L;
+    // c6b: Thread dump caps — AdapterDiagnostics truncates at 8K chars; stay well under.
+    // Prefer BLOCKED/WAITING threads (informative for monitor issues) over RUNNABLE.
+    private static final int THREAD_DUMP_MAX_THREADS = 20;
+    private static final int THREAD_DUMP_MAX_FRAMES = 10;
+    private static final int THREAD_DUMP_MAX_CHARS = 5000;
+    /** Lock for atomic escalation decisions. The incident involved 5 threads — volatile++ would race. */
+    private final Object nodeFaultLock = new Object();
+    /** Fault identity = exceptionClass + ":" + errorCode. Keyed to make "same fault" claim true. */
+    private String nodeFaultIdentity = null;
+    private long nodeFaultWindowStartMs = 0L;
+    private int nodeFaultCountInWindow = 0;
+    private boolean nodeFaultEscalated = false;
+
     public CpiKafkaPlusProducer(CpiKafkaPlusEndpoint endpoint) {
         super(endpoint);
         this.endpoint = endpoint;
@@ -132,8 +214,12 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
         try {
             doStartInternal();
         } catch (Exception e) {
-            LOG.error("[CPI-KAFKA-PLUS] Adapter failed to start (topic='{}'): {}",
-                    endpoint.getEffectiveTopic(), e.getMessage(), e);
+            // Previously the only lines in the adapter carrying a second, competing
+            // marker — and among the most valuable ones there are.
+            AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("producer.start.failed")
+                    .with("topic", endpoint.getEffectiveTopic())
+                    .with("bootstrapServers", endpoint.getBootstrapServers())
+                    .with("securityProtocol", endpoint.getSecurityProtocol()), e);
             throw e;
         }
     }
@@ -300,6 +386,12 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
             kafkaProducer = BundleBackedClassLoader.withBundleClassLoader(getClass(),
                     () -> new KafkaProducer<>(props,
                             new ByteArraySerializer(), new ByteArraySerializer()));
+
+            // c3: Capture the resolved client.id for diagnostic correlation with broker-side logs.
+            // This is stable across producer rebuilds as long as the endpoint adapterInstanceID
+            // is stable, which is the case in CPI — the ID is assigned at iFlow deployment time.
+            resolvedClientId = (String) props.get(org.apache.kafka.clients.producer.ProducerConfig.CLIENT_ID_CONFIG);
+
             return true;
         } catch (Throwable e) {
             logInitFailure("KafkaProducer", e);
@@ -337,13 +429,15 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
 
     private void logInitFailure(String component, Throwable e) {
         consecutiveInitFailures++;
-        if (consecutiveInitFailures >= KafkaErrorHelper.INIT_FAILURE_ESCALATION_THRESHOLD) {
-            LOG.error("[CPI-KAFKA-PLUS-DIAG] ensureInitialized: FAILED to create {} ({} consecutive failures): {}",
-                    component, consecutiveInitFailures, e.getMessage(), e);
-        } else {
-            LOG.warn("[CPI-KAFKA-PLUS-DIAG] ensureInitialized: FAILED to create {} (attempt {}): {}",
-                    component, consecutiveInitFailures, e.getMessage(), e);
-        }
+        // Always ERROR. The first nine attempts used to be WARN, which does not reach the CPI
+        // tenant trace file — so the most common real failure class (credentials, TLS, unreachable
+        // broker) produced nothing visible until the tenth attempt, if it ever got there.
+        AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("producer.init.failed")
+                .with("component", component)
+                .with("consecutiveFailures", consecutiveInitFailures)
+                .with("bootstrapServers", endpoint.getBootstrapServers())
+                .with("securityProtocol", endpoint.getSecurityProtocol())
+                .with("thread", Thread.currentThread().getName()), e);
         tracingHelper.publishConnectionStatus(false, KafkaErrorHelper.wrapIfError(e));
     }
 
@@ -385,6 +479,7 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
         // cause. Cached per topic, so this costs one AdminClient round trip per topic, not per
         // message.
         assertTopicExists(topic);
+        prewarmTopicMetadata(topic);
 
         if (!"NONE".equalsIgnoreCase(batchMode)) {
             processBatch(exchange, in, topic, batchMode);
@@ -417,14 +512,19 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
             try {
                 ProducerBatchHelper.BatchSendResult result = ProducerBatchHelper.sendBatch(
                         kafkaProducer, records, topic, fallbackKey, partition, timestamp,
-                        in, this::addRecordHeaders, valueSerializer, null, sendGuard);
+                        in, this::addRecordHeaders, valueSerializer, null, sendGuard,
+                        ProducerPath.SHARED, resolvedClientId);
 
                 ProducerBatchHelper.setResponseHeadersAndBody(in, topic, batchMode, result);
                 recordSendSuccess();
             } catch (Exception e) {
-                tracingHelper.traceError(exchange, e,
-                        java.util.Collections.singletonMap("topic", topic));
-                handleSendFailure(e);
+                Map<String, String> ctx = new java.util.LinkedHashMap<>();
+                ctx.put("topic", topic);
+                ctx.put("batchMode", batchMode);
+                ctx.put("recordCount", String.valueOf(records.size()));
+                CorrelationHelper.addTo(ctx, exchange);
+                tracingHelper.traceError(exchange, e, ctx);
+                handleSendFailure(e, "producer.batch.send", ctx);
                 throw sendFailure("Failed to send batch to", topic, e);
             }
         }
@@ -472,11 +572,24 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
             java.util.Properties props = ProducerConfigFactory.buildProducerProperties(endpoint);
             props.put(org.apache.kafka.clients.producer.ProducerConfig.TRANSACTIONAL_ID_CONFIG, transactionalId);
 
-            // transaction.two.phase.commit.enable controls Kafka Transaction Protocol V2 (KIP-890),
-            // introduced in Kafka 4.x. Confluent Cloud supports V2, but certain Kafka 4.x client
-            // versions have a bug in the TransactionManager that causes IllegalMonitorStateException
-            // when V2 is active. Set transactionV2Enabled=false in the adapter UI to force V1
-            // (the Kafka 3.x protocol) as a workaround until the upstream client bug is fixed.
+            // TODO [tech-debt] The UI option "transactionV2Enabled" and its mapping to
+            //   transaction.two.phase.commit.enable are retained for backward compatibility
+            //   with existing iFlow channel configurations.
+            //   1. WHY: The option name misleadingly references "V2", which sounds like KIP-890
+            //      (Transaction Protocol V2, broker-side, negotiated automatically). In fact,
+            //      transaction.two.phase.commit.enable controls KIP-939 (Two-Phase Commit),
+            //      a client-side opt-in for distributed transactions. Verified against
+            //      kafka-clients 4.3.1 javap output and KIP-939 documentation.
+            //   2. TRIGGERS: Any iFlow with transactionV2Enabled set (default=true since the
+            //      option was added) will pass that value straight through to the producer.
+            //   3. REMOVE: After a major version bump with a migration guide, or when the
+            //      repository owner's in-flight branch (fix/kafka-kip890-non-transactional)
+            //      lands and changes the default.
+            //
+            // Empirical note: setting transactionV2Enabled=false (i.e., config=false) was an
+            // effective workaround for IllegalMonitorStateException observed in certain Kafka
+            // 4.x client versions, apparently due to a bug in the TransactionManager under
+            // the 2PC protocol path. This observation is kept for diagnostic context.
             props.put(org.apache.kafka.clients.producer.ProducerConfig.TRANSACTION_TWO_PHASE_COMMIT_ENABLE_CONFIG,
                     endpoint.isTransactionV2Enabled());
 
@@ -490,7 +603,8 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
 
             ProducerBatchHelper.BatchSendResult result = ProducerBatchHelper.sendBatch(
                     txnProducer, records, topic, fallbackKey, partition, timestamp,
-                    in, this::addRecordHeaders, valueSerializer, null, sendGuard);
+                    in, this::addRecordHeaders, valueSerializer, null, sendGuard,
+                    ProducerPath.TRANSACTIONAL, transactionalId);
 
             txnProducer.commitTransaction();
 
@@ -513,8 +627,9 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
             ctx.put("slotId", String.valueOf(slotId));
             ctx.put("topicHash", topicHash != null ? topicHash : "(not yet computed)");
             ctx.put("transactionV2Enabled", String.valueOf(endpoint.isTransactionV2Enabled()));
+            CorrelationHelper.addTo(ctx, in.getExchange());
             tracingHelper.traceError(in.getExchange(), e, ctx);
-            handleTxnSendFailure(e);
+            handleTxnSendFailure(e, ctx);
             throw sendFailure("Failed to send transactional batch to", topic, e);
         } finally {
             if (txnProducer != null) {
@@ -605,8 +720,14 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
 
         // Send synchronously to ensure delivery before IFlow continues
         try {
-            Future<RecordMetadata> future = kafkaProducer.send(record);
-            RecordMetadata metadata = sendGuard.await(future, sendGuard.newDeadline(),
+            long deadlineMs = sendGuard.newDeadline();
+            Future<RecordMetadata> future = MonitorFaultRetry.execute(
+                    () -> kafkaProducer.send(record),
+                    new MonitorFaultRetry.Budget(),
+                    deadlineMs,
+                    topic,
+                    0);
+            RecordMetadata metadata = sendGuard.await(future, deadlineMs,
                     "Send to topic '" + topic + "'");
 
             in.setHeader("SAP_Receiver", metadata.topic());
@@ -624,9 +745,12 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
             LOG.debug("[CPI-KAFKA-PLUS-DIAG] Message sent to topic '{}' partition {} offset {}",
                     metadata.topic(), metadata.partition(), metadata.offset());
         } catch (Exception e) {
-            tracingHelper.traceError(exchange, e,
-                    java.util.Collections.singletonMap("topic", topic));
-            handleSendFailure(e);
+            Map<String, String> ctx = new java.util.LinkedHashMap<>();
+            ctx.put("topic", topic);
+            ctx.put("sendMode", "SINGLE");
+            CorrelationHelper.addTo(ctx, exchange);
+            tracingHelper.traceError(exchange, e, ctx);
+            handleSendFailure(e, "producer.single.send", ctx);
             throw sendFailure("Failed to send message to", topic, e);
         }
     }
@@ -721,29 +845,522 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
         }
     }
 
-    private void recordSendSuccess() {
-        boolean wasRecovering = consecutiveSendFailures > 0;
-        consecutiveSendFailures = 0;
-        if (wasRecovering) {
-            tracingHelper.publishConnectionStatus(true, null);
-            LOG.info("[CPI-KAFKA-PLUS-DIAG] Send recovered after previous failures for topic='{}'",
-                    endpoint.getEffectiveTopic());
+    /**
+     * Fetches the metadata for a topic once per producer instance, before any record is submitted.
+     *
+     * <p>This is the preventive half of the KAFKA-10902 mitigation. {@code waitOnMetadata()} only
+     * blocks in {@code ProducerMetadata.awaitUpdate()} — the method carrying the monitor defect —
+     * when the topic's partition count is not in the client's cache. Fetching it here means the
+     * subsequent {@code send(...)} finds it present and never enters that path. Together with the
+     * raised {@code metadata.max.idle.ms} (see {@link ProducerConfigFactory}), which stops an idle
+     * topic from being evicted again, the vulnerable construct is left out of the hot path entirely
+     * rather than merely being retried when it fails.
+     *
+     * <p>Doing it here rather than at producer creation covers dynamically resolved topics as well,
+     * and it is done before any record exists, so a failure costs nothing and a retry is free.
+     *
+     * <p>Never fails the exchange. If the fetch does not succeed, the send path performs it anyway
+     * and reports a far more precise error than this method could.
+     */
+    private void prewarmTopicMetadata(String topic) {
+        if (kafkaProducer == null || topic == null || topic.isEmpty()) {
+            return;
+        }
+        // Bounded like verifiedTopics, so a flow with unbounded dynamic topics cannot grow this set
+        // without limit. Beyond the limit the pre-warm is simply skipped; the send path still works.
+        if (prewarmedTopics.contains(topic)
+                || prewarmedTopics.size() >= VERIFIED_TOPICS_CACHE_LIMIT
+                || !prewarmingTopics.add(topic)) {
+            return;
+        }
+
+        // c4: Measure the metadata fetch duration. This is the exact place the KAFKA-10902 incident
+        // happened (IllegalMonitorStateException inside ProducerMetadata.awaitUpdate). Tracking
+        // the duration makes a slow or blocking metadata fetch visible before it turns into a hard
+        // failure. On failure we always emit; on success we only emit if the wait exceeded the
+        // threshold (respects the log volume budget while still surfacing pathological fetches).
+        long metadataStartMs = System.currentTimeMillis();
+        try {
+            // Another thread may have completed the pre-warm between the first read and our in-flight
+            // marker acquisition. Re-check before doing the fetch.
+            if (prewarmedTopics.contains(topic)) {
+                return;
+            }
+            // A short retry deadline on purpose: the monitor fault throws immediately and is worth
+            // retrying, while a genuine metadata timeout has already consumed max.block.ms and must
+            // not be multiplied by retrying it.
+            MonitorFaultRetry.execute(() -> kafkaProducer.partitionsFor(topic),
+                    new MonitorFaultRetry.Budget(),
+                    System.currentTimeMillis() + PREWARM_RETRY_WINDOW_MS,
+                    topic, -1);
+
+            if (prewarmedTopics.size() < VERIFIED_TOPICS_CACHE_LIMIT) {
+                prewarmedTopics.add(topic);
+            }
+
+            long metadataWaitMs = System.currentTimeMillis() - metadataStartMs;
+            // Only log slow pre-warms to avoid log noise on the success path.
+            if (metadataWaitMs > SLOW_METADATA_THRESHOLD_MS) {
+                LOG.error("[CPI-KAFKA-PLUS-DIAG] producer.metadata.prewarm: outcome=SLOW, "
+                        + "topic={}, metadataWaitMs={}, clientId={}, producerPath=SHARED, thread={}",
+                        topic, metadataWaitMs, resolvedClientId, Thread.currentThread().getName());
+            }
+        } catch (Exception e) {
+            long metadataWaitMs = System.currentTimeMillis() - metadataStartMs;
+            AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("producer.metadata.prewarm")
+                    .with("outcome", "FAILED")
+                    .with("topic", topic)
+                    .with("metadataWaitMs", metadataWaitMs)
+                    .with("producerPath", ProducerPath.SHARED)
+                    .withOptional("clientId", resolvedClientId)
+                    .with("thread", Thread.currentThread().getName()), e);
+        } finally {
+            prewarmingTopics.remove(topic);
         }
     }
 
-    private void handleSendFailure(Exception e) {
+    void recordSendSuccess() {
+        boolean wasRecovering = consecutiveSendFailures > 0;
+        consecutiveSendFailures = 0;
+
+        // e4: Emit rebuild effect if this is the first success after a rebuild
+        if (pendingRebuildEffect) {
+            pendingRebuildEffect = false;
+            // Guard topic access on what is essentially a success path that follows a failure
+            String topic;
+            try {
+                topic = endpoint.getEffectiveTopic();
+            } catch (Exception e) {
+                topic = "<unavailable>";
+            }
+            AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("producer.rebuild.effect")
+                    .with("outcome", "RECOVERED")
+                    .with("producerPath", ProducerPath.SHARED)
+                    .withOptional("clientId", resolvedClientId)
+                    .withOptional("topic", topic)
+                    .with("thread", Thread.currentThread().getName()), null);
+        }
+
+        if (wasRecovering) {
+            tracingHelper.publishConnectionStatus(true, null);
+            // Guard topic access — recovery logging is on a path that follows failures
+            String topic;
+            try {
+                topic = endpoint.getEffectiveTopic();
+            } catch (Exception e) {
+                topic = "<unavailable>";
+            }
+            AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("producer.send.recovered")
+                    .with("producerPath", ProducerPath.SHARED)
+                    .withOptional("clientId", resolvedClientId)
+                    .withOptional("topic", topic)
+                    .with("thread", Thread.currentThread().getName()), null);
+        }
+        // e4: Reset rebuild tracking on success
+        rebuildAttemptsSinceSuccess = 0;
+
+        // c7: Track for the periodic success heartbeat
+        sendsSinceLastHeartbeat++;
+        maybeLogSuccessHeartbeat();
+    }
+
+    /**
+     * c7: Periodic success heartbeat for the SHARED producer path.
+     *
+     * <p>Without a baseline, "no errors" and "nothing ran" look identical in the trace. This
+     * method emits a low-volume success line so a healthy producer is provably alive. It matches
+     * the throttling approach used for the consumer's emit-cycle heartbeat: one line per 5 minutes,
+     * emitted immediately on a state change (healthy→unhealthy or first success).
+     *
+     * <p>Called from {@link #recordSendSuccess()}, so only successful sends trigger it.
+     */
+    private void maybeLogSuccessHeartbeat() {
+        long now = System.currentTimeMillis();
+        boolean healthy = true;
+        boolean stateChanged = !lastHeartbeatHealthy && healthy;
+        boolean intervalElapsed = (now - lastHeartbeatMs) >= HEARTBEAT_INTERVAL_MS;
+
+        if (stateChanged || intervalElapsed) {
+            // Guard topic access even on success path for consistency
+            String topic;
+            try {
+                topic = endpoint.getEffectiveTopic();
+            } catch (Exception e) {
+                topic = "<unavailable>";
+            }
+            AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("producer.heartbeat")
+                    .with("status", "HEALTHY")
+                    .with("producerPath", ProducerPath.SHARED)
+                    .withOptional("clientId", resolvedClientId)
+                    .with("sendsSinceLastHeartbeat", sendsSinceLastHeartbeat)
+                    .withOptional("topic", topic)
+                    .with("thread", Thread.currentThread().getName()), null);
+            lastHeartbeatMs = now;
+            lastHeartbeatHealthy = healthy;
+            sendsSinceLastHeartbeat = 0;
+        }
+    }
+
+    /**
+     * Records a failure of the shared, non-transactional producer.
+     *
+     * <p>The failure is <b>always</b> logged at ERROR. It previously was not: logging happened only
+     * when the cause matched a three-entry "fatal" allow-list or after
+     * {@code MAX_CONSECUTIVE_SEND_FAILURES} <i>consecutive</i> failures. A failure that was neither
+     * on the allow-list nor consecutive — because successful sends in between reset the counter via
+     * {@link #recordSendSuccess()} — produced no log line at all, which is how a production incident
+     * could occur repeatedly while this adapter stayed completely silent about it.
+     *
+     * <p>The threshold now governs {@link #triggerReconnect()} only, which is what it was actually
+     * for. Both decisions are reported as fields so the log states why it did or did not reconnect.
+     *
+     * @param operation stable, greppable name of the failing activity
+     * @param context   the same key/value context handed to the Message Processing Log, so trace and
+     *                  MPL cannot drift apart
+     */
+    // Package-private so the regression test can prove that a single, first, unclassified failure
+    // still produces exactly one ERROR line.
+    void handleSendFailure(Exception e, String operation, Map<String, String> context) {
         consecutiveSendFailures++;
         tracingHelper.publishConnectionStatus(false, e);
 
-        Throwable cause = KafkaErrorHelper.extractKafkaCause(e);
-        if (KafkaErrorHelper.isFatalKafkaException(cause)) {
-            LOG.error("[CPI-KAFKA-PLUS-DIAG] Fatal Kafka exception, triggering reconnect: {}",
-                    cause.getClass().getSimpleName());
+        // e4: Use classification API instead of the deprecated isFatalKafkaException
+        Classification classification = KafkaErrorHelper.classify(e);
+        CpiKafkaPlusErrorCode errorCode = CpiKafkaPlusErrorCode.fromThrowable(e);
+
+        // e4: Rebuild decision driven by classification:
+        // - FATAL_PRODUCER_UNUSABLE / UNKNOWN_FATAL justify a rebuild
+        // - RETRIABLE / FATAL_DATA_ERROR do not (a record that is too large will be exactly
+        //   as too large on a fresh producer, and rebuilding on it would be a self-inflicted
+        //   outage under a poison message)
+        boolean classificationJustifiesRebuild =
+                classification == Classification.FATAL_PRODUCER_UNUSABLE
+                || classification == Classification.UNKNOWN_FATAL;
+
+        // e4: Guard against rebuild storm - don't rebuild on every record of a failing batch
+        long now = System.currentTimeMillis();
+        boolean rebuildBackoffElapsed = (now - lastRebuildAttemptMs) >= REBUILD_BACKOFF_MS;
+        boolean shouldRebuild = classificationJustifiesRebuild && rebuildBackoffElapsed;
+
+        AdapterDiagnostics.Event event = AdapterDiagnostics.event(operation)
+                .with("producerPath", ProducerPath.SHARED)
+                .withOptional("clientId", resolvedClientId)
+                .with("classification", classification)
+                .with("errorCode", errorCode.code())
+                .with("consecutiveFailures", consecutiveSendFailures)
+                .with("rebuildJustified", classificationJustifiesRebuild)
+                .with("rebuildBackoffElapsed", rebuildBackoffElapsed)
+                .with("rebuildTriggered", shouldRebuild)
+                .with("thread", Thread.currentThread().getName());
+        if (context != null) {
+            context.forEach(event::with);
+        }
+        AdapterDiagnostics.error(LOG, event, e);
+
+        // e4b: Check for node-level fault escalation
+        checkNodeFaultEscalation(classification, errorCode, e);
+
+        if (shouldRebuild) {
+            triggerReconnectWithMeasurement();
+        }
+    }
+
+    /**
+     * e4b: Escalate loudly when the same fault recurs more than N times within T minutes
+     * on this JVM despite mitigation. This indicates a node-level problem that requires
+     * operator attention.
+     *
+     * <p>Fault identity is keyed by relevant root-cause class + error code, so wrapper
+     * exceptions (e.g. RuntimeException) do not collapse different faults into one identity.
+     * Five different faults will not escalate; five occurrences of the same fault will.
+     *
+     * <p>Thresholds: 5 occurrences in 20 minutes. The observed incident was 5 in 18 minutes
+     * across a whole worker node. We use 5 and 20 rather than 5 and 18 to avoid escalating
+     * on a single retryable blip that happens to cross a window boundary.
+     *
+     * <p>The window reset, increment and escalation decision are synchronized because the
+     * incident involved 5 concurrent threads — volatile++ races under exactly that load.
+     */
+    private void checkNodeFaultEscalation(Classification classification, CpiKafkaPlusErrorCode errorCode,
+                                           Throwable cause) {
+        // Only track producer-unusable or unknown faults (not retriable or data errors)
+        if (classification != Classification.FATAL_PRODUCER_UNUSABLE
+                && classification != Classification.UNKNOWN_FATAL) {
+            return;
+        }
+
+        // Fault identity = relevant root-cause class + errorCode
+        Throwable relevantCause = resolveNodeFaultIdentityCause(cause);
+        String relevantCauseClass = (relevantCause != null) ? relevantCause.getClass().getName() : "unknown";
+        String currentFaultIdentity = relevantCauseClass + ":" + errorCode.code();
+
+        boolean shouldEscalate = false;
+        int count = 0;
+
+        synchronized (nodeFaultLock) {
+            long now = System.currentTimeMillis();
+
+            // Reset window if expired OR if a different fault is seen (start fresh tracking)
+            boolean windowExpired = (now - nodeFaultWindowStartMs) > NODE_FAULT_ESCALATION_WINDOW_MS;
+            boolean differentFault = nodeFaultIdentity != null && !nodeFaultIdentity.equals(currentFaultIdentity);
+
+            if (windowExpired || differentFault) {
+                nodeFaultWindowStartMs = now;
+                nodeFaultCountInWindow = 0;
+                nodeFaultEscalated = false;
+                nodeFaultIdentity = currentFaultIdentity;
+            }
+
+            nodeFaultCountInWindow++;
+            count = nodeFaultCountInWindow;
+
+            if (count >= NODE_FAULT_ESCALATION_COUNT && !nodeFaultEscalated) {
+                nodeFaultEscalated = true;
+                shouldEscalate = true;
+            }
+        }
+
+        if (shouldEscalate) {
+            emitNodeFaultEscalation(relevantCauseClass, errorCode, classification, count);
+        }
+    }
+
+    /**
+     * Resolves the relevant cause for node-fault identity, skipping wrapper exceptions where
+     * possible so that escalation groups by actual root cause.
+     */
+    private Throwable resolveNodeFaultIdentityCause(Throwable cause) {
+        if (cause == null) {
+            return null;
+        }
+        if (cause instanceof Exception) {
+            return KafkaErrorHelper.extractKafkaCause((Exception) cause);
+        }
+
+        Throwable current = cause;
+        while (current.getCause() != null && current.getCause() != current) {
+            current = current.getCause();
+        }
+        return current;
+    }
+
+    /**
+     * Emits the node-fault escalation diagnostic with JVM state (c6) and optionally a thread
+     * dump (c6b) when diagnosticsLevel=FULL.
+     *
+     * <p>The JVM state is cheap and always-on. The thread dump is expensive and opt-in.
+     */
+    private void emitNodeFaultEscalation(String exceptionClass, CpiKafkaPlusErrorCode errorCode,
+                                          Classification classification, int count) {
+        // Guard against endpoint.getEffectiveTopic() throwing on failure path
+        String topic;
+        try {
+            topic = endpoint.getEffectiveTopic();
+        } catch (Exception e) {
+            topic = "<unavailable>";
+        }
+
+        AdapterDiagnostics.Event event = AdapterDiagnostics.event("producer.node.fault.escalation")
+                .with("faultClass", exceptionClass)
+                .with("errorCode", errorCode.code())
+                .with("classification", classification)
+                .with("countInWindow", count)
+                .with("windowMinutes", NODE_FAULT_ESCALATION_WINDOW_MS / 60_000)
+                .with("producerPath", ProducerPath.SHARED)
+                .withOptional("clientId", resolvedClientId)
+                .withOptional("topic", topic)
+                .with("thread", Thread.currentThread().getName())
+                .with("advice", "The same fault has recurred " + count + " times within "
+                        + (NODE_FAULT_ESCALATION_WINDOW_MS / 60_000) + " minutes on this JVM despite "
+                        + "mitigation. This indicates a node-level problem. The node address is available "
+                        + "in the trace record's second-to-last #-separated field.");
+
+        // c6: Lightweight JVM state — always-on, cheap
+        addJvmState(event);
+
+        // c6b: Thread dump — expensive, opt-in at FULL level only
+        boolean diagnosticsFull = false;
+        try {
+            diagnosticsFull = endpoint.isDiagnosticsLevelFull();
+        } catch (Exception e) {
+            // Ignore - just don't emit dump
+        }
+
+        if (diagnosticsFull) {
+            addThreadDump(event);
+        }
+
+        AdapterDiagnostics.error(LOG, event, null);
+    }
+
+    /**
+     * c6: Adds lightweight JVM state to the escalation event.
+     *
+     * <p>Uses java.lang.management APIs which are available in Java 11 without extra dependencies.
+     * Fully guarded so a failure here can never displace the diagnostic it is attached to.
+     */
+    private void addJvmState(AdapterDiagnostics.Event event) {
+        try {
+            RuntimeMXBean runtime = ManagementFactory.getRuntimeMXBean();
+            ThreadMXBean threads = ManagementFactory.getThreadMXBean();
+            MemoryMXBean memory = ManagementFactory.getMemoryMXBean();
+            MemoryUsage heap = memory.getHeapMemoryUsage();
+
+            event.with("jvmUptimeMs", runtime.getUptime())
+                 .with("jvmThreadCount", threads.getThreadCount())
+                 .with("jvmPeakThreadCount", threads.getPeakThreadCount())
+                 .with("jvmHeapUsedMB", heap.getUsed() / (1024 * 1024))
+                 .with("jvmHeapMaxMB", heap.getMax() / (1024 * 1024))
+                 .with("jvmAvailableProcessors", Runtime.getRuntime().availableProcessors());
+        } catch (Exception e) {
+            // Management APIs can throw or be restricted in locked-down containers
+            event.with("jvmStateUnavailable", true)
+                 .with("jvmStateError", e.getClass().getSimpleName());
+        }
+    }
+
+    /**
+     * c6b: Adds a bounded thread dump to the escalation event.
+     *
+     * <p>Only called when diagnosticsLevel=FULL. The dump includes lock and monitor information
+     * (the entire point — this is what settles monitor-ownership questions). Output is bounded
+     * hard: max 20 threads, max 10 frames per thread, max 5000 chars total. BLOCKED and WAITING
+     * threads are preferred over RUNNABLE (they are the informative ones for deadlock/contention).
+     *
+     * <p>Fully guarded so a failure here can never displace the diagnostic it is attached to.
+     */
+    private void addThreadDump(AdapterDiagnostics.Event event) {
+        try {
+            ThreadMXBean threads = ManagementFactory.getThreadMXBean();
+
+            // Check if monitor/synchronizer info is supported before requesting it
+            boolean monitorSupported = threads.isObjectMonitorUsageSupported();
+            boolean syncSupported = threads.isSynchronizerUsageSupported();
+
+            ThreadInfo[] allThreads = threads.dumpAllThreads(monitorSupported, syncSupported);
+            if (allThreads == null || allThreads.length == 0) {
+                event.with("threadDumpUnavailable", true);
+                return;
+            }
+
+            // Sort: BLOCKED first, then WAITING, then others — these are the informative ones
+            java.util.List<ThreadInfo> sorted = new java.util.ArrayList<>(java.util.Arrays.asList(allThreads));
+            sorted.sort((a, b) -> {
+                int aPriority = threadStatePriority(a.getThreadState());
+                int bPriority = threadStatePriority(b.getThreadState());
+                return Integer.compare(aPriority, bPriority);
+            });
+
+            StringBuilder dump = new StringBuilder();
+            int threadCount = 0;
+            boolean truncated = false;
+
+            for (ThreadInfo ti : sorted) {
+                if (threadCount >= THREAD_DUMP_MAX_THREADS) {
+                    truncated = true;
+                    break;
+                }
+                if (dump.length() >= THREAD_DUMP_MAX_CHARS) {
+                    truncated = true;
+                    break;
+                }
+
+                dump.append("\n[").append(ti.getThreadName()).append("] ")
+                    .append(ti.getThreadState());
+
+                if (ti.getLockName() != null) {
+                    dump.append(" on ").append(ti.getLockName());
+                }
+                if (ti.getLockOwnerName() != null) {
+                    dump.append(" owned by [").append(ti.getLockOwnerName()).append("]");
+                }
+
+                StackTraceElement[] stack = ti.getStackTrace();
+                int frameCount = Math.min(stack.length, THREAD_DUMP_MAX_FRAMES);
+                for (int i = 0; i < frameCount; i++) {
+                    dump.append("\n  at ").append(stack[i]);
+                    if (dump.length() >= THREAD_DUMP_MAX_CHARS) {
+                        truncated = true;
+                        break;
+                    }
+                }
+                if (stack.length > THREAD_DUMP_MAX_FRAMES) {
+                    dump.append("\n  ... ").append(stack.length - THREAD_DUMP_MAX_FRAMES).append(" more");
+                }
+
+                threadCount++;
+            }
+
+            event.with("threadDump", dump.toString())
+                 .with("threadDumpThreads", threadCount)
+                 .with("threadDumpTruncated", truncated)
+                 .with("threadDumpTotalThreads", allThreads.length)
+                 .with("threadDumpMonitorInfoSupported", monitorSupported)
+                 .with("threadDumpSyncInfoSupported", syncSupported);
+
+        } catch (Exception e) {
+            // Thread dump can fail in restricted environments
+            event.with("threadDumpUnavailable", true)
+                 .with("threadDumpError", e.getClass().getSimpleName());
+        }
+    }
+
+    /** Returns priority for thread state sorting: lower = more informative for contention analysis. */
+    private int threadStatePriority(Thread.State state) {
+        switch (state) {
+            case BLOCKED: return 0;      // Highest priority - waiting for monitor
+            case WAITING: return 1;      // High - in Object.wait() or similar
+            case TIMED_WAITING: return 2; // Medium - in sleep/wait with timeout
+            default: return 3;           // RUNNABLE, NEW, TERMINATED
+        }
+    }
+
+    /**
+     * e4: Triggers a producer rebuild and measures/logs the outcome.
+     *
+     * <p>The reason this method exists (instead of just calling {@link #triggerReconnect()})
+     * is that we currently rebuild and then have no idea whether it helped.
+     *
+     * <p>This method emits {@code producerRecreated=true/false} and the duration. Whether the
+     * rebuild actually <i>helped</i> is determined by the next send: if that succeeds,
+     * {@link #recordSendSuccess()} emits {@code producer.rebuild.effect} with {@code outcome=RECOVERED}.
+     * If it fails, the diagnosis is that rebuilding did not help — which is visible from the
+     * failure line immediately following the rebuild line.
+     */
+    private void triggerReconnectWithMeasurement() {
+        lastRebuildAttemptMs = System.currentTimeMillis();
+        rebuildAttemptsSinceSuccess++;
+        pendingRebuildEffect = true; // Track whether next send shows recovery
+
+        long rebuildStartMs = System.currentTimeMillis();
+        boolean producerRecreated = false;
+        Exception rebuildException = null;
+
+        try {
             triggerReconnect();
-        } else if (consecutiveSendFailures >= MAX_CONSECUTIVE_SEND_FAILURES) {
-            LOG.error("[CPI-KAFKA-PLUS-DIAG] {} consecutive send failures, triggering reconnect",
-                    consecutiveSendFailures);
-            triggerReconnect();
+            // A non-null producer only means it was constructed, not that it works
+            producerRecreated = (kafkaProducer != null);
+        } catch (Exception e) {
+            rebuildException = e;
+        }
+
+        long rebuildDurationMs = System.currentTimeMillis() - rebuildStartMs;
+
+        // Route both success and failure through AdapterDiagnostics for consistent format
+        AdapterDiagnostics.Event event = AdapterDiagnostics.event("producer.rebuild.outcome")
+                .with("producerRecreated", producerRecreated)
+                .with("durationMs", rebuildDurationMs)
+                .with("attemptsSinceLastSuccess", rebuildAttemptsSinceSuccess)
+                .with("producerPath", ProducerPath.SHARED)
+                .withOptional("clientId", resolvedClientId)
+                .with("thread", Thread.currentThread().getName());
+
+        if (rebuildException != null) {
+            AdapterDiagnostics.error(LOG, event.with("rebuildException", rebuildException.getClass().getSimpleName()),
+                    rebuildException);
+        } else {
+            // No throwable - just log the outcome. Next send will close the loop.
+            AdapterDiagnostics.error(LOG, event, null);
         }
     }
 
@@ -760,17 +1377,42 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
         boolean wasRecovering = consecutiveTxnSendFailures > 0;
         consecutiveTxnSendFailures = 0;
         if (wasRecovering) {
-            LOG.info("[CPI-KAFKA-PLUS-DIAG] Transactional send recovered after previous failures for topic='{}'",
-                    endpoint.getEffectiveTopic());
+            // Recovery after failure is a low-volume, high-value event that justifies ERROR.
+            // INFO does not reach the CPI tenant trace file, so recovery would be invisible.
+            String topic;
+            try {
+                topic = endpoint.getEffectiveTopic();
+            } catch (Exception e) {
+                topic = "<unavailable>";
+            }
+            AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("producer.transactional.send.recovered")
+                    .with("producerPath", ProducerPath.TRANSACTIONAL)
+                    .withOptional("topic", topic)
+                    .with("thread", Thread.currentThread().getName()), null);
         }
     }
 
-    private void handleTxnSendFailure(Exception e) {
+    /**
+     * Records a failure of the transactional path. Logs the {@code Throwable} itself rather than
+     * only {@code getClass().getSimpleName()}, which discarded the message, the cause chain and the
+     * stack trace — the three things needed to tell apart a broker problem, a fencing problem and a
+     * client-side defect.
+     */
+    void handleTxnSendFailure(Exception e, Map<String, String> context) {
         consecutiveTxnSendFailures++;
-        Throwable cause = KafkaErrorHelper.extractKafkaCause(e);
-        LOG.error("[CPI-KAFKA-PLUS-DIAG] Transactional send failure ({} consecutive) for topic='{}': {}",
-                consecutiveTxnSendFailures, endpoint.getEffectiveTopic(),
-                cause != null ? cause.getClass().getSimpleName() : e.getMessage());
+        Classification classification = KafkaErrorHelper.classify(e);
+        CpiKafkaPlusErrorCode errorCode = CpiKafkaPlusErrorCode.fromThrowable(e);
+
+        AdapterDiagnostics.Event event = AdapterDiagnostics.event("producer.transactional.batch.send")
+                .with("producerPath", ProducerPath.TRANSACTIONAL)
+                .with("classification", classification)
+                .with("errorCode", errorCode.code())
+                .with("consecutiveFailures", consecutiveTxnSendFailures)
+                .with("thread", Thread.currentThread().getName());
+        if (context != null) {
+            context.forEach(event::with);
+        }
+        AdapterDiagnostics.error(LOG, event, e);
     }
 
     /**
@@ -1108,6 +1750,10 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
                 LOG.warn("[CPI-KAFKA-PLUS-DIAG] Error closing Kafka producer: {}", e.getMessage());
             }
             kafkaProducer = null;
+            // A replacement client starts with an empty metadata cache, so the pre-warm has to
+            // happen again for every topic.
+            prewarmedTopics.clear();
+            prewarmingTopics.clear();
         }
         if (avroHelper != null) {
             try {

@@ -187,6 +187,12 @@ For detailed security setup, see [Authentication](security/authentication.md).
 | `producerBatchSizeKb` | `1024` | Kafka producer internal batch size in KB (UI label: "Producer Batch Size (KB)"). Controls how many records the client buffers before sending to the broker. |
 | `bufferMemoryKb` | `32768` | Total memory for producer buffering in KB. |
 
+**Diagnostics**
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `diagnosticsLevel` | `STANDARD` | Diagnostic output level. `STANDARD` (default) is fully diagnostic on its own: every failure produces one structured ERROR line with the complete serialised cause chain. `FULL` adds exactly one thing, a bounded thread dump (at most 20 threads, 10 frames each, with lock owners) attached to the node-fault escalation that fires when the same fault recurs 5 times in 20 minutes. Leave this on `STANDARD` unless you are actively investigating such a fault. |
+
 ### Message Handling
 
 | Parameter | Default | Description |

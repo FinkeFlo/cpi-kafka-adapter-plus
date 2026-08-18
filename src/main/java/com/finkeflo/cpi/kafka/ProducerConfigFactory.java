@@ -32,6 +32,14 @@ public final class ProducerConfigFactory {
 
     private static final Logger LOG = LoggerFactory.getLogger(ProducerConfigFactory.class);
 
+    /**
+     * How long the client keeps the metadata of an idle topic, in milliseconds. One hour, well above
+     * the interval of any realistic integration flow, so that producing to a topic never has to
+     * block on a metadata fetch just because the flow was quiet for a while. See the reasoning at
+     * the usage site.
+     */
+    static final long METADATA_MAX_IDLE_MS = 3_600_000L;
+
     private ProducerConfigFactory() {
         // static utility class
     }
@@ -77,6 +85,21 @@ public final class ProducerConfigFactory {
         // AdminClient topic probe in CpiKafkaPlusProducer cannot give a definitive answer.
         props.put(ProducerConfig.MAX_BLOCK_MS_CONFIG, (long) Math.min(30000, deliveryMs));
 
+        // metadata.max.idle.ms — the client default of 5 minutes forgets the metadata of a topic
+        // that has not been produced to for that long, and the next send then has to fetch it
+        // again. That fetch is not a background refresh: KafkaProducer.waitOnMetadata() blocks the
+        // calling thread in ProducerMetadata.awaitUpdate(), which is the method carrying the
+        // KAFKA-10902 monitor defect (see MonitorFaultRetry). An integration flow that produces
+        // less often than every five minutes would therefore enter that vulnerable path on
+        // *every* message.
+        //
+        // Raising the idle window keeps the topic in the cache, so the send path finds the metadata
+        // present and returns without ever calling awaitUpdate(). Freshness is unaffected: it is
+        // governed by metadata.max.age.ms (5 min by default), whose refresh happens on the client's
+        // own network thread and does not block senders. The cost is holding on to the metadata of
+        // an idle topic, which is a few entries.
+        props.put(ProducerConfig.METADATA_MAX_IDLE_CONFIG, METADATA_MAX_IDLE_MS);
+
         // client.id — auto-generated from adapter instance ID
         String adapterInstanceId = endpoint.getCamelContext() != null
                 ? endpoint.getCamelContext().getGlobalOption("adapterInstanceID") : null;
@@ -87,6 +110,9 @@ public final class ProducerConfigFactory {
 
         // Security - reuse same logic as consumer
         SecurityConfigHelper.configureSecurityProperties(props, endpoint);
+
+        // Note: transaction.two.phase.commit.enable is set in CpiKafkaPlusProducer.sendTransactionalBatch
+        // where the transactional producer is created, not here. See e6 comment there for details.
 
         return props;
     }

@@ -69,6 +69,12 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
      */
     private static final long POLL_DRAIN_TIMEOUT_MS = 15_000L;
 
+    /**
+     * Minimum gap between two emit-cycle heartbeat lines. Chosen so a silent consumer is still
+     * noticeable within a few minutes while the line can no longer dominate the tenant log.
+     */
+    private static final long HEARTBEAT_INTERVAL_MS = 300_000L;
+
     private final CpiKafkaPlusEndpoint endpoint;
     private KafkaConsumer<byte[], byte[]> kafkaConsumer;
     private int consecutivePollFailures = 0;
@@ -82,6 +88,14 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
     private int consecutiveInitFailures = 0;
     /** Zeitpunkt des letzten Emit-Zyklus (ms). 0 = noch nie emittiert. */
     private long lastEmitTimeMs = 0L;
+    /**
+     * Throttle state for the emit-cycle heartbeat. The heartbeat is logged at ERROR because only
+     * ERROR reaches the CPI tenant trace file, but it fires once per poll cycle. Unthrottled it
+     * accounted for the entire log volume this adapter writes into a shared tenant while carrying
+     * no information beyond "still alive". 0 = not yet logged.
+     */
+    private long lastHeartbeatMs = 0L;
+    private boolean lastHeartbeatInitialized = false;
     private ConsumerCircuitBreaker circuitBreaker;
     private RecordProcessor recordProcessor;
     private volatile boolean stoppedByErrorPolicy = false;
@@ -132,6 +146,18 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
 
         @Override
         public void handleException(String message, Exchange exchange, Exception e) {
+            // f2: Call traceError for consumer failures before delegating to the exception handler
+            java.util.Map<String, String> context = new java.util.LinkedHashMap<>();
+            context.put("topic", endpoint.getEffectiveTopic());
+            context.put("groupId", endpoint.getGroupId());
+            context.put("message", message);
+            tracingHelper.traceError(exchange, e, context, true);
+
+            // f1/f4/f5: Report failure with structured fields and attachment
+            // Derive error code from the exception using the central taxonomy
+            String errorCode = CpiKafkaPlusErrorCode.fromThrowable(e).code();
+            tracingHelper.reportFailure(exchange, e, errorCode, context, true);
+
             getExceptionHandler().handleException(message, exchange, e);
         }
 
@@ -160,8 +186,12 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
         try {
             doStartInternal();
         } catch (Exception e) {
-            LOG.error("[CPI-KAFKA-PLUS] Adapter failed to start (topic='{}'): {}",
-                    endpoint.getEffectiveTopic(), e.getMessage(), e);
+            // Previously the only lines in the adapter carrying a second, competing
+            // marker — and among the most valuable ones there are.
+            AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("consumer.start.failed")
+                    .with("topic", endpoint.getEffectiveTopic())
+                    .with("bootstrapServers", endpoint.getBootstrapServers())
+                    .with("securityProtocol", endpoint.getSecurityProtocol()), e);
             throw e;
         }
     }
@@ -480,14 +510,14 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
 
     private void logInitFailure(String component, Throwable e) {
         consecutiveInitFailures++;
-        String topStack = describeTopStack(e, 6);
-        if (consecutiveInitFailures >= KafkaErrorHelper.INIT_FAILURE_ESCALATION_THRESHOLD) {
-            LOG.error("[CPI-KAFKA-PLUS-DIAG] ensureInitialized: FAILED to create {} ({} consecutive failures) exClass={} exMsg='{}' topStack={}",
-                    component, consecutiveInitFailures, e.getClass().getName(), e.getMessage(), topStack);
-        } else {
-            LOG.error("[CPI-KAFKA-PLUS-DIAG] ensureInitialized: FAILED to create {} (attempt {}) exClass={} exMsg='{}' topStack={}",
-                    component, consecutiveInitFailures, e.getClass().getName(), e.getMessage(), topStack);
-        }
+        // The full cause chain and stack frames go into the message text, because the CPI tenant
+        // trace appender discards the Throwable argument and keeps only the rendered message.
+        AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("consumer.init.failed")
+                .with("component", component)
+                .with("consecutiveFailures", consecutiveInitFailures)
+                .with("bootstrapServers", endpoint.getBootstrapServers())
+                .with("securityProtocol", endpoint.getSecurityProtocol())
+                .with("thread", Thread.currentThread().getName()), e);
         reportConnectionError(KafkaErrorHelper.wrapIfError(e));
     }
 
@@ -551,9 +581,37 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
      * (Drain-Schleife). Aus {@code poll()} extrahiert, damit {@code poll()}
      * zwischen Emit-Zyklus und Keep-Alive-Poll dispatchen kann.
      */
+    /**
+     * Emits the "consumer is alive" heartbeat that operators rely on to tell a running consumer
+     * from a stalled one.
+     *
+     * <p>Logged at ERROR on purpose: the CPI tenant trace file only receives ERROR, so DEBUG or
+     * INFO would make the heartbeat invisible in production. It is therefore throttled instead of
+     * downgraded — unthrottled it fired once per poll cycle and produced every single log line
+     * this adapter contributed to a shared tenant, while no actual failure was ever logged.
+     *
+     * <p>A change of {@code initialized} is always reported immediately, so a state transition is
+     * never swallowed by the throttle. The full per-cycle detail stays available at DEBUG for
+     * local runs, where the tenant appender does not apply.
+     */
+    private void logEmitCycleHeartbeat() {
+        long now = System.currentTimeMillis();
+        boolean stateChanged = lastHeartbeatMs == 0L || initialized != lastHeartbeatInitialized;
+        if (stateChanged || now - lastHeartbeatMs >= HEARTBEAT_INTERVAL_MS) {
+            long suppressedForMs = lastHeartbeatMs == 0L ? 0L : now - lastHeartbeatMs;
+            LOG.error("[CPI-KAFKA-PLUS-DIAG] runEmitCycle: alive topic='{}' initialized={} reason={} sinceLastHeartbeatMs={}",
+                    endpoint.getEffectiveTopic(), initialized,
+                    stateChanged ? "STATE_CHANGE" : "INTERVAL", suppressedForMs);
+            lastHeartbeatMs = now;
+            lastHeartbeatInitialized = initialized;
+        } else if (LOG.isDebugEnabled()) {
+            LOG.debug("[CPI-KAFKA-PLUS-DIAG] runEmitCycle: emit cycle started for topic='{}' initialized={}",
+                    endpoint.getEffectiveTopic(), initialized);
+        }
+    }
+
     private int runEmitCycle() throws Exception {
-        LOG.error("[CPI-KAFKA-PLUS-DIAG] runEmitCycle: emit cycle started for topic='{}' initialized={}",
-                endpoint.getEffectiveTopic(), initialized);
+        logEmitCycleHeartbeat();
         boolean isBatchComplete = "BATCH_COMPLETE".equalsIgnoreCase(endpoint.getCommitStrategy());
         // Re-commit any offsets whose commit was skipped in a previous cycle because a
         // rebalance was in progress. By now poll() (in the previous keepalive/emit call) has

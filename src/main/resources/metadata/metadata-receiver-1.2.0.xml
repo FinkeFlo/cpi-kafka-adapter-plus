@@ -217,6 +217,16 @@
                     <ErrorMessage>Please enter a positive number in KB (e.g. 32768 for 32 MB)</ErrorMessage>
                 </AttributeReference>
             </AttributeGroup>
+            <AttributeGroup id="diagnostics">
+                <Name xsi:type="xs:string" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">Diagnostics</Name>
+                <GuiLabels guid="a2000006-0000-0000-0000-000000000030">
+                    <Label language="EN">Diagnostics</Label>
+                </GuiLabels>
+                <AttributeReference>
+                    <ReferenceName>diagnosticsLevel</ReferenceName>
+                    <description>Diagnostic output level. STANDARD (default) is fully diagnostic on its own: every failure produces one structured ERROR line with the complete serialised cause chain. FULL adds exactly one thing, a bounded thread dump (at most 20 threads, 10 frames each, with lock owners) attached to the node-fault escalation that fires when the same fault recurs 5 times in 20 minutes. That dump is the only evidence that can settle a monitor-ownership question. Leave this on STANDARD unless you are actively investigating such a fault.</description>
+                </AttributeReference>
+            </AttributeGroup>
         </Tab>
 
         <!-- ===== Tab: Message Handling ===== -->
@@ -860,6 +870,22 @@
         <Length/>
         <isparameterized>true</isparameterized>
         <GuiLabels guid="b1000003-0000-0000-0000-000000000102"><Label language="EN">Min Backlog to Drain</Label></GuiLabels>
+    </AttributeMetadata>
+
+    <!-- Diagnostics -->
+    <AttributeMetadata>
+        <Name>diagnosticsLevel</Name>
+        <Usage>false</Usage>
+        <DataType>xsd:string</DataType>
+        <Default>STANDARD</Default>
+        <Length/>
+        <isparameterized>true</isparameterized>
+        <GuiLabels guid="b1000009-0000-0000-0000-000000000001"><Label language="EN">Diagnostics Level</Label></GuiLabels>
+        <FixedValues>
+            <Sort>false</Sort>
+            <FixedValue><Value>STANDARD</Value><GuiLabels guid="b1000009-0000-0000-0000-000000000011"><Label language="EN">Standard (Default)</Label></GuiLabels></FixedValue>
+            <FixedValue><Value>FULL</Value><GuiLabels guid="b1000009-0000-0000-0000-000000000012"><Label language="EN">Full (Verbose)</Label></GuiLabels></FixedValue>
+        </FixedValues>
     </AttributeMetadata>
 
 </ComponentMetadata>

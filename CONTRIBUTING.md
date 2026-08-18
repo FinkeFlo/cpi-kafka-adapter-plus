@@ -118,14 +118,16 @@ When writing documentation, creating test cases, or providing placeholder data, 
 
 1. **English Only**
    To ensure the codebase is accessible to international developers, **all code, variables, inline comments, JavaDocs, and commit messages must be strictly in English**.
-2. **Java 11 bytecode target.**
-   `maven.compiler.source`/`target` are `11` (`pom.xml`), so the bytecode carries class-file
+2. **Java 11 bytecode target — enforced by the compiler.**
+   `maven.compiler.release` is `11` (`pom.xml`), so the bytecode carries class-file
    version 55 and the CPI runtime must be Java 11 or newer — which it is, since the adapter
    loads there. Do not raise the target without checking the runtime first.
-   Beyond that, **keep to Java 11 APIs and language level**: `source`/`target` are used rather
-   than `--release`, so the compiler links against the **JDK 17** class library and will happily
-   accept a Java 17-only API (`String.formatted`, records, sealed types, …) that then fails at
-   runtime with `NoSuchMethodError`. The compiler will *not* warn you.
+   Because `release` (and not `source`/`target`) is used, javac links against the **Java 11**
+   API signatures: a Java 12+ API such as `String.formatted`, records or sealed types is a
+   **compile error**, not a runtime `NoSuchMethodError` on the tenant. Do not replace `release`
+   with `source`/`target` — that silently removes this guard.
+   The `compile-jgss-stubs` execution deliberately overrides this with `release` 8 for its own
+   sources; see the comment there.
 3. 4-space indentation, UTF-8, LF line endings (see `.editorconfig`).
 4. No wildcard imports — explicit imports, Java stdlib first, then third-party.
 5. Utility/helper classes are `final` with a `private` constructor.

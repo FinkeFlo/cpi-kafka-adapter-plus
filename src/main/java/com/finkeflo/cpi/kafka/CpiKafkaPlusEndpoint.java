@@ -316,6 +316,14 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
             description = "Serialize message values using Avro (requires Schema Registry)")
     private boolean avroValueSerialization = true;
 
+    // --- Diagnostics ---
+    @UriParam(label = "processing", defaultValue = "STANDARD",
+            description = "Diagnostic output level. STANDARD (default): every failure gets one structured ERROR line "
+                    + "with the full serialised cause chain — sufficient to root-cause most production incidents. "
+                    + "FULL: adds expensive/verbose extras (success baselines, JVM/thread state, per-record detail) "
+                    + "for deep investigation. Use FULL only when actively debugging; STANDARD is the normal operational mode.")
+    private String diagnosticsLevel = "STANDARD";
+
     public CpiKafkaPlusEndpoint() {
         this.component = null;
     }
@@ -338,11 +346,11 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
         String effectiveTopic = getEffectiveTopic();
         if (effectiveTopic == null || effectiveTopic.trim().isEmpty()) {
             throw new IllegalArgumentException(
-                    "[CPI-KAFKA-PLUS] Topic is not configured. Please set the target topic in the adapter Connection tab.");
+                    "[CPI-KAFKA-PLUS-DIAG] Topic is not configured. Please set the target topic in the adapter Connection tab.");
         }
         if (!effectiveTopic.equals(effectiveTopic.trim())) {
             throw new IllegalArgumentException(
-                    "[CPI-KAFKA-PLUS] Topic name '" + effectiveTopic + "' contains leading or trailing whitespace. "
+                    "[CPI-KAFKA-PLUS-DIAG] Topic name '" + effectiveTopic + "' contains leading or trailing whitespace. "
                     + "Please remove any spaces around the topic name in the adapter Connection tab.");
         }
         if (schemaRegistryEnabled
@@ -363,6 +371,14 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
             throw new IllegalArgumentException(
                     "Security protocol " + securityProtocol
                     + " requires SASL authentication but no credentialAlias is configured.");
+        }
+        if (diagnosticsLevel != null
+                && !diagnosticsLevel.isEmpty()
+                && !"STANDARD".equalsIgnoreCase(diagnosticsLevel)
+                && !"FULL".equalsIgnoreCase(diagnosticsLevel)) {
+            throw new IllegalArgumentException(
+                    "[CPI-KAFKA-PLUS-DIAG] Invalid diagnosticsLevel '" + diagnosticsLevel
+                    + "'. Accepted values are STANDARD (default) or FULL.");
         }
     }
 
@@ -609,4 +625,12 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
 
     public String getSubjectNameStrategy() { return subjectNameStrategy; }
     public void setSubjectNameStrategy(String subjectNameStrategy) { this.subjectNameStrategy = subjectNameStrategy; }
+
+    // --- Diagnostics Getter/Setter ---
+
+    public String getDiagnosticsLevel() { return diagnosticsLevel; }
+    public void setDiagnosticsLevel(String diagnosticsLevel) { this.diagnosticsLevel = diagnosticsLevel; }
+
+    /** True when diagnostics level is set to FULL for verbose/expensive output. */
+    public boolean isDiagnosticsLevelFull() { return "FULL".equalsIgnoreCase(diagnosticsLevel); }
 }
