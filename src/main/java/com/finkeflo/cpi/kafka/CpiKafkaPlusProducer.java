@@ -547,14 +547,24 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
             java.util.Properties props = ProducerConfigFactory.buildProducerProperties(endpoint);
             props.put(org.apache.kafka.clients.producer.ProducerConfig.TRANSACTIONAL_ID_CONFIG, transactionalId);
 
-            // e6: transaction.two.phase.commit.enable controls KIP-939 Two-Phase Commit, NOT
-            // KIP-890 (Transaction Protocol V2 is broker-side and negotiated automatically).
-            // KIP-939 2PC changes how the coordinator handles prepared transactions.
+            // TODO [tech-debt] The UI option "transactionV2Enabled" and its mapping to
+            //   transaction.two.phase.commit.enable are retained for backward compatibility
+            //   with existing iFlow channel configurations.
+            //   1. WHY: The option name misleadingly references "V2", which sounds like KIP-890
+            //      (Transaction Protocol V2, broker-side, negotiated automatically). In fact,
+            //      transaction.two.phase.commit.enable controls KIP-939 (Two-Phase Commit),
+            //      a client-side opt-in for distributed transactions. Verified against
+            //      kafka-clients 4.3.1 javap output and KIP-939 documentation.
+            //   2. TRIGGERS: Any iFlow with transactionV2Enabled set (default=true since the
+            //      option was added) will pass that value straight through to the producer.
+            //   3. REMOVE: After a major version bump with a migration guide, or when the
+            //      repository owner's in-flight branch (fix/kafka-kip890-non-transactional)
+            //      lands and changes the default.
             //
-            // transactionV2Enabled=true  → config=true  → requests 2PC from broker
-            // transactionV2Enabled=false → config=false → traditional single-phase commit
-            //
-            // WARNING: Changing the default is a compatibility concern (separate branch).
+            // Empirical note: setting transactionV2Enabled=false (i.e., config=false) was an
+            // effective workaround for IllegalMonitorStateException observed in certain Kafka
+            // 4.x client versions, apparently due to a bug in the TransactionManager under
+            // the 2PC protocol path. This observation is kept for diagnostic context.
             props.put(org.apache.kafka.clients.producer.ProducerConfig.TRANSACTION_TWO_PHASE_COMMIT_ENABLE_CONFIG,
                     endpoint.isTransactionV2Enabled());
 
