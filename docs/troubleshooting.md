@@ -238,7 +238,49 @@ If a `producer.rebuild.outcome` is followed immediately by another failure (rath
 `producer.rebuild.effect`), the rebuild did not help. Check the error code and classification on the
 subsequent failure line.
 
+## Dead-letter producer rebuild tracking
+
+The dead-letter producer heals itself the same way, and the equivalent events are
+`dlq.producer.rebuild.outcome` and `dlq.producer.rebuild.effect`. Read them the same way: an
+`outcome` line followed by `effect outcome=RECOVERED` means the record reached the dead-letter topic
+on the replacement client; `effect outcome=STILL_FAILING` means it did not, and the exception on
+that line is the one to investigate.
+
+Two fields on `dlq.send.failed` decide what to do next:
+
+| Field | Meaning |
+| --- | --- |
+| `rebuildJustified` | Whether the classification says a fresh client could help. `false` for `RETRIABLE` and `FATAL_DATA_ERROR` — a record the broker rejects will be rejected by a new client too, so no rebuild is attempted |
+| `rebuildEscalated` | `true` when the classification did *not* ask for a rebuild but three consecutive sends have failed, so one is attempted anyway. This is what stops a "retriable" verdict from becoming a permanent stall |
+| `consecutiveFailures` | Consecutive dead-letter send failures. Any value above 1 means the partition is not advancing |
+| `rebuildBackoffElapsed` | `false` means a rebuild was skipped only because one happened moments ago. A run of these is a record being redelivered, not a new fault |
+| `rebuildTriggered` | The decision all of the above produce. If this stays `false` while sends keep failing, the cause is in the record or the broker, not in the client |
+| `duplicateRisk` | `true` when the first attempt failed after the record had already been accepted (`phase=AWAIT_FUTURE`), so the retry may have written the record twice. Deduplicate on `CpiKafkaPlusDlqOriginalTopic` + `Partition` + `Offset` |
+
 ## Common situations
+
+### A consumer stops advancing and no dead-letter records appear
+
+This is the shape of a stalled consumer, and it is worth recognising because the symptom and the
+cause sit far apart. A dead-letter send is what allows the offset to be committed: if the send
+throws, nothing is committed, the same record is polled again on the next cycle, and every later
+message is stuck behind a record that can never succeed. What you observe is a partition whose
+committed offset does not move and a dead-letter topic that has stopped receiving anything — while
+the integration flow keeps producing one failed message per delivery, which looks like a *processing*
+problem rather than a *dead-letter* problem.
+
+Confirm it in this order:
+
+1. Grep the trace for `dlq.send.failed`. The line carries the original `topic`, `partition` and
+   `offset`, the serialised cause, and `consequence='offset not committed, record will be
+   reprocessed'`. The repeated offset in successive lines is the stalled one.
+2. Compare the group's committed offset with the partition's high watermark. A constant gap that
+   equals the number of deliveries since the stall began confirms it.
+3. Check whether a rebuild was attempted and what it achieved, using the fields above.
+
+Note when counting dead-letter records that the adapter partitions them by the original record key,
+so a multi-partition dead-letter topic spreads them across all partitions. Reading only partition 0
+will make records look lost that are not.
 
 ### Nothing from the adapter in the trace at all
 
