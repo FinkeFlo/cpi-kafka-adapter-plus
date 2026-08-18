@@ -22,8 +22,15 @@ package com.finkeflo.cpi.kafka;
 
 import javax.net.ssl.SSLException;
 
+import org.apache.kafka.common.errors.ApplicationRecoverableException;
 import org.apache.kafka.common.errors.AuthenticationException;
 import org.apache.kafka.common.errors.AuthorizationException;
+import org.apache.kafka.common.errors.InvalidPidMappingException;
+import org.apache.kafka.common.errors.InvalidTopicException;
+import org.apache.kafka.common.errors.OutOfOrderSequenceException;
+import org.apache.kafka.common.errors.RecordTooLargeException;
+import org.apache.kafka.common.errors.RetriableException;
+import org.apache.kafka.common.errors.SerializationException;
 import org.apache.kafka.common.errors.UnsupportedVersionException;
 
 /**
@@ -39,7 +46,15 @@ final class KafkaErrorHelper {
 
     private KafkaErrorHelper() {}
 
-    /** Three-way classification of Kafka-related exceptions. */
+    /**
+     * Three-way classification of Kafka-related exceptions.
+     *
+     * <p>Callers can recover from {@link #RETRIABLE} by simply retrying. {@link #FATAL_PRODUCER_UNUSABLE}
+     * means the producer must be rebuilt. {@link #FATAL_DATA_ERROR} is a caller-side problem (bad record,
+     * bad topic) that no producer rebuild will fix. {@link #UNKNOWN_FATAL} is for exceptions we do not
+     * recognise — the whole point of this enum is to surface "unknown" as a distinct outcome rather than
+     * silently guessing.
+     */
     enum Classification {
         RETRIABLE,
         FATAL_PRODUCER_UNUSABLE,
@@ -47,35 +62,70 @@ final class KafkaErrorHelper {
         UNKNOWN_FATAL
     }
 
-    /** Classifies a throwable by walking its entire cause chain. */
+    /**
+     * Classifies a throwable by walking its entire cause chain.
+     *
+     * <p>Order matters: data-error checks run before base-class checks so that, for example,
+     * {@link RecordTooLargeException} (which extends {@link RetriableException} in some Kafka versions)
+     * is correctly classified as {@link Classification#FATAL_DATA_ERROR}.
+     *
+     * <p>When no recognisable exception is found, returns {@link Classification#UNKNOWN_FATAL}.
+     * We deliberately do <em>not</em> return {@link Classification#FATAL_PRODUCER_UNUSABLE} for an
+     * unrecognised {@code KafkaException} — doing so would destroy the information that we do not know
+     * and would trigger unnecessary producer rebuilds on the hot path. The whole point of this
+     * classification is to surface "unknown" loudly so operators investigate, not to guess confidently.
+     */
     static Classification classify(Throwable t) {
-        if (t == null) return Classification.RETRIABLE;
-        boolean sawKafkaException = false;
+        if (t == null) return Classification.UNKNOWN_FATAL;
         Throwable current = t;
         int depth = 0;
         while (current != null && depth < MAX_CAUSE_DEPTH) {
             Classification c = classifySingle(current);
             if (c != null) return c;
-            if (current instanceof org.apache.kafka.common.KafkaException) sawKafkaException = true;
             Throwable next = current.getCause();
             if (next == current) break;
             current = next;
             depth++;
         }
-        return sawKafkaException ? Classification.FATAL_PRODUCER_UNUSABLE : Classification.UNKNOWN_FATAL;
+        return Classification.UNKNOWN_FATAL;
     }
 
+    /**
+     * Classifies a single throwable without walking its cause chain.
+     *
+     * <p>Classification order:
+     * <ol>
+     *   <li>Data errors first — these are caller-side problems that no producer rebuild will fix.</li>
+     *   <li>{@link RetriableException} — Kafka's own marker for transient failures.</li>
+     *   <li>{@link ApplicationRecoverableException} — Kafka 4.x base class for "producer must be rebuilt"
+     *       (covers {@code ProducerFencedException}, {@code InvalidPidMappingException}, etc.).</li>
+     *   <li>Leaf classes not covered by the above bases: {@link OutOfOrderSequenceException} (and its
+     *       subclass {@code UnknownProducerIdException}), {@link AuthenticationException},
+     *       {@link AuthorizationException}, {@link UnsupportedVersionException}.</li>
+     * </ol>
+     *
+     * @return the classification, or {@code null} if the throwable is not recognised
+     */
     private static Classification classifySingle(Throwable t) {
-        if (t instanceof org.apache.kafka.common.errors.RetriableException) return Classification.RETRIABLE;
-        if (t instanceof org.apache.kafka.common.errors.ProducerFencedException) return Classification.FATAL_PRODUCER_UNUSABLE;
-        if (t instanceof org.apache.kafka.common.errors.OutOfOrderSequenceException) return Classification.FATAL_PRODUCER_UNUSABLE;
-        if (t.getClass().getName().equals("org.apache.kafka.common.errors.InvalidPidMappingException")) return Classification.FATAL_PRODUCER_UNUSABLE;
+        // 1. Data errors — check before RetriableException since RecordTooLargeException can extend it
+        if (t instanceof RecordTooLargeException) return Classification.FATAL_DATA_ERROR;
+        if (t instanceof InvalidTopicException) return Classification.FATAL_DATA_ERROR;
+        if (t instanceof SerializationException) return Classification.FATAL_DATA_ERROR;
+
+        // 2. Retriable (Kafka's own marker; includes TimeoutException, NetworkException, etc.)
+        if (t instanceof RetriableException) return Classification.RETRIABLE;
+
+        // 3. ApplicationRecoverableException — Kafka 4.x base class for "producer is unusable, rebuild"
+        //    Subclasses: ProducerFencedException, InvalidPidMappingException, InvalidProducerEpochException,
+        //    FencedInstanceIdException, UnknownMemberIdException, IllegalGenerationException
+        if (t instanceof ApplicationRecoverableException) return Classification.FATAL_PRODUCER_UNUSABLE;
+
+        // 4. Leaf classes not under ApplicationRecoverableException
+        if (t instanceof OutOfOrderSequenceException) return Classification.FATAL_PRODUCER_UNUSABLE;
         if (t instanceof AuthenticationException) return Classification.FATAL_PRODUCER_UNUSABLE;
         if (t instanceof AuthorizationException) return Classification.FATAL_PRODUCER_UNUSABLE;
         if (t instanceof UnsupportedVersionException) return Classification.FATAL_PRODUCER_UNUSABLE;
-        if (t instanceof org.apache.kafka.common.errors.RecordTooLargeException) return Classification.FATAL_DATA_ERROR;
-        if (t instanceof org.apache.kafka.common.errors.InvalidTopicException) return Classification.FATAL_DATA_ERROR;
-        if (t instanceof org.apache.kafka.common.errors.SerializationException) return Classification.FATAL_DATA_ERROR;
+
         return null;
     }
 
