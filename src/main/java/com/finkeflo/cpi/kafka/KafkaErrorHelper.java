@@ -34,7 +34,50 @@ final class KafkaErrorHelper {
     /** After this many consecutive init failures, log level escalates from WARN to ERROR. */
     static final int INIT_FAILURE_ESCALATION_THRESHOLD = 10;
 
+    /** Maximum depth when walking the cause chain to avoid infinite loops. */
+    private static final int MAX_CAUSE_DEPTH = 10;
+
     private KafkaErrorHelper() {}
+
+    /** Three-way classification of Kafka-related exceptions. */
+    enum Classification {
+        RETRIABLE,
+        FATAL_PRODUCER_UNUSABLE,
+        FATAL_DATA_ERROR,
+        UNKNOWN_FATAL
+    }
+
+    /** Classifies a throwable by walking its entire cause chain. */
+    static Classification classify(Throwable t) {
+        if (t == null) return Classification.RETRIABLE;
+        boolean sawKafkaException = false;
+        Throwable current = t;
+        int depth = 0;
+        while (current != null && depth < MAX_CAUSE_DEPTH) {
+            Classification c = classifySingle(current);
+            if (c != null) return c;
+            if (current instanceof org.apache.kafka.common.KafkaException) sawKafkaException = true;
+            Throwable next = current.getCause();
+            if (next == current) break;
+            current = next;
+            depth++;
+        }
+        return sawKafkaException ? Classification.FATAL_PRODUCER_UNUSABLE : Classification.UNKNOWN_FATAL;
+    }
+
+    private static Classification classifySingle(Throwable t) {
+        if (t instanceof org.apache.kafka.common.errors.RetriableException) return Classification.RETRIABLE;
+        if (t instanceof org.apache.kafka.common.errors.ProducerFencedException) return Classification.FATAL_PRODUCER_UNUSABLE;
+        if (t instanceof org.apache.kafka.common.errors.OutOfOrderSequenceException) return Classification.FATAL_PRODUCER_UNUSABLE;
+        if (t.getClass().getName().equals("org.apache.kafka.common.errors.InvalidPidMappingException")) return Classification.FATAL_PRODUCER_UNUSABLE;
+        if (t instanceof AuthenticationException) return Classification.FATAL_PRODUCER_UNUSABLE;
+        if (t instanceof AuthorizationException) return Classification.FATAL_PRODUCER_UNUSABLE;
+        if (t instanceof UnsupportedVersionException) return Classification.FATAL_PRODUCER_UNUSABLE;
+        if (t instanceof org.apache.kafka.common.errors.RecordTooLargeException) return Classification.FATAL_DATA_ERROR;
+        if (t instanceof org.apache.kafka.common.errors.InvalidTopicException) return Classification.FATAL_DATA_ERROR;
+        if (t instanceof org.apache.kafka.common.errors.SerializationException) return Classification.FATAL_DATA_ERROR;
+        return null;
+    }
 
     /**
      * Wraps a Throwable in an Exception if it is not already one.
@@ -51,11 +94,13 @@ final class KafkaErrorHelper {
     /**
      * Returns true for Kafka exceptions that indicate a broken connection
      * which cannot recover without creating a new client instance.
+     * @deprecated Use {@link #classify(Throwable)} for three-way classification.
      */
+    @Deprecated
     static boolean isFatalKafkaException(Throwable cause) {
-        return cause instanceof AuthenticationException
-                || cause instanceof AuthorizationException
-                || cause instanceof UnsupportedVersionException;
+        if (cause == null) return false;
+        Classification c = classifySingle(cause);
+        return c == Classification.FATAL_PRODUCER_UNUSABLE;
     }
 
     /**
