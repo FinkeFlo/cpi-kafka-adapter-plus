@@ -40,27 +40,87 @@ public class AdapterTracingHelper {
     private static final int MAX_TRACE_PAYLOAD_BYTES = 25 * 1024 * 1024;
 
     private final CpiKafkaPlusEndpoint endpoint;
-    private Object adapterMessageLogFactory;
-    private boolean tracingAvailable;
+    /**
+     * Whether the ADK message-log classes exist at all. False off-platform (unit tests, local runs),
+     * where the absence is expected and must stay quiet.
+     */
+    private final boolean adkMessageLogPresent;
+    /** Guards the unavailability report so a broken binding is stated once, not per message. */
+    private final java.util.concurrent.atomic.AtomicBoolean unavailabilityReported =
+            new java.util.concurrent.atomic.AtomicBoolean();
 
     public AdapterTracingHelper(CpiKafkaPlusEndpoint endpoint) {
         this.endpoint = endpoint;
-        initTracingFactory();
+        this.adkMessageLogPresent = isAdkMessageLogPresent();
     }
 
-    private void initTracingFactory() {
+    private static boolean isAdkMessageLogPresent() {
         try {
-            String factoryClassName = "com.sap.it.api.msglog.adapter.AdapterMessageLogFactory";
-            adapterMessageLogFactory = endpoint.getCamelContext().getRegistry().lookupByName(factoryClassName);
-            tracingAvailable = (adapterMessageLogFactory != null);
-            if (tracingAvailable) {
-                LOG.debug("Adapter tracing factory initialized");
-            } else {
-                LOG.debug("Adapter tracing not available (not running on CPI)");
+            Class.forName("com.sap.it.api.ITApiFactory");
+            Class.forName("com.sap.it.api.msglog.adapter.AdapterMessageLogFactory");
+            return true;
+        } catch (Throwable notOnPlatform) {
+            return false;
+        }
+    }
+
+    /**
+     * Resolves the ADK message-log factory for one exchange.
+     *
+     * <p>This replaces a lookup that could never have worked: the factory was fetched with
+     * {@code camelContext.getRegistry().lookupByName("com.sap.it.api.msglog.adapter.AdapterMessageLogFactory")}.
+     * ADK APIs are not Camel registry beans. {@code ITApiFactory} resolves them through an OSGi
+     * Declarative Services component that binds {@code ITApiHandler} services by their {@code apiType}
+     * service property — a different mechanism entirely, with no named bean involved. The lookup
+     * therefore always returned {@code null}, tracing was permanently disabled, and the fact was
+     * reported at DEBUG, which never reaches the tenant trace file. The dead lookup is removed
+     * rather than kept as a fallback, because it cannot succeed.
+     *
+     * <p>{@code CredentialHelper} already uses the correct {@code ITApiFactory} pattern, so the
+     * mechanism is proven in this codebase.
+     *
+     * <p>Resolution happens per exchange by design: {@code getApi} takes the exchange as its context
+     * argument, so the handle cannot be cached at construction time the way the old code assumed.
+     */
+    private Object resolveMessageLogFactory(Exchange exchange) {
+        if (!adkMessageLogPresent || exchange == null) {
+            return null;
+        }
+        try {
+            Class<?> itApiFactoryClass = Class.forName("com.sap.it.api.ITApiFactory");
+            Class<?> factoryInterface =
+                    Class.forName("com.sap.it.api.msglog.adapter.AdapterMessageLogFactory");
+            Method getApi = itApiFactoryClass.getMethod("getApi", Class.class, Object.class);
+            Object factory = getApi.invoke(null, factoryInterface, exchange);
+            if (factory == null) {
+                reportUnavailableOnce("ITApiFactory.getApi returned null for AdapterMessageLogFactory", null);
             }
+            return factory;
         } catch (Exception e) {
-            LOG.debug("Adapter tracing not available: {}", e.getMessage());
-            tracingAvailable = false;
+            reportUnavailableOnce("ITApiFactory.getApi failed for AdapterMessageLogFactory", e);
+            return null;
+        }
+    }
+
+    /**
+     * Reports a dead Message Processing Log binding once, at ERROR.
+     *
+     * <p>ERROR because only ERROR reaches the CPI tenant trace file: at DEBUG — where this used to
+     * be — a broken binding is indistinguishable from a working one, which is precisely how the
+     * registry lookup above stayed broken unnoticed. Once, because the alternative is one line per
+     * message.
+     */
+    private void reportUnavailableOnce(String what, Throwable cause) {
+        if (!unavailabilityReported.compareAndSet(false, true)) {
+            return;
+        }
+        AdapterDiagnostics.Event event = AdapterDiagnostics.event("adapter.mpl.unavailable")
+                .with("detail", what)
+                .with("consequence", "no MPL traces for this endpoint");
+        if (cause != null) {
+            AdapterDiagnostics.error(LOG, event, cause);
+        } else {
+            AdapterDiagnostics.error(LOG, event);
         }
     }
 
@@ -95,17 +155,7 @@ public class AdapterTracingHelper {
      */
     public void traceError(Exchange exchange, Exception e, java.util.Map<String, String> context) {
         StringBuilder sb = new StringBuilder();
-        sb.append("ERROR: ").append(e.getClass().getName())
-          .append(": ").append(e.getMessage());
-
-        Throwable cause = e.getCause();
-        int depth = 0;
-        while (cause != null && depth < 5) {
-            sb.append("\nCaused by: ").append(cause.getClass().getName())
-              .append(": ").append(cause.getMessage());
-            cause = cause.getCause();
-            depth++;
-        }
+        sb.append("ERROR: ").append(AdapterDiagnostics.describeThrowable(e));
 
         if (!context.isEmpty()) {
             sb.append("\n\n--- Context ---");
@@ -115,28 +165,52 @@ public class AdapterTracingHelper {
         }
 
         writeTrace(exchange, sb.toString().getBytes(StandardCharsets.UTF_8),
-                "RECEIVER_OUTBOUND", "Kafka send failed");
+                "RECEIVER_INBOUND_FAULT", "Kafka send failed");
     }
 
     @SuppressWarnings("unchecked")
     private void writeTrace(Exchange exchange, byte[] traceData, String enumValue, String logMessage) {
-        if (!tracingAvailable || traceData == null || traceData.length == 0) return;
+        if (traceData == null || traceData.length == 0) {
+            return;
+        }
+        Object adapterMessageLogFactory = resolveMessageLogFactory(exchange);
+        if (adapterMessageLogFactory == null) {
+            return;
+        }
 
         try {
-            Class<?> factoryClass = adapterMessageLogFactory.getClass();
-            Method getMessageLogMethod = factoryClass.getMethod("getMessageLog",
-                    Exchange.class, String.class, String.class, String.class);
+            // Every method below is resolved on the ADK *interface*, never on the implementation
+            // class. Two reasons, both of which had already broken this code silently:
+            //
+            //  - getMethod requires an exact parameter-type match. The factory declares
+            //    getMessageLog(Object, ...), so looking it up with Exchange.class threw
+            //    NoSuchMethodException — the same defect class as the historical
+            //    setException(Exception.class) bug, and equally invisible because the failure was
+            //    swallowed at DEBUG.
+            //  - The implementation classes behind these interfaces are internal to the platform.
+            //    A Method obtained from a non-public class fails at invoke() with
+            //    IllegalAccessException even when the method itself is public.
+            Class<?> factoryInterface =
+                    Class.forName("com.sap.it.api.msglog.adapter.AdapterMessageLogFactory");
+            Class<?> messageLogInterface =
+                    Class.forName("com.sap.it.api.msglog.adapter.AdapterMessageLog");
+            Class<?> traceMessageInterface =
+                    Class.forName("com.sap.it.api.msglog.adapter.AdapterTraceMessage");
+            Class<?> traceMessageTypeClass =
+                    Class.forName("com.sap.it.api.msglog.adapter.AdapterTraceMessageType");
+
+            Method getMessageLogMethod = factoryInterface.getMethod("getMessageLog",
+                    Object.class, String.class, String.class, String.class);
 
             Object mplLog = getMessageLogMethod.invoke(adapterMessageLogFactory,
                     exchange, logMessage, COMPONENT_ID, UUID.randomUUID().toString());
 
             if (mplLog == null) return;
 
-            Method isTraceActiveMethod = mplLog.getClass().getMethod("isTraceActive");
+            Method isTraceActiveMethod = messageLogInterface.getMethod("isTraceActive");
             Boolean isActive = (Boolean) isTraceActiveMethod.invoke(mplLog);
             if (!Boolean.TRUE.equals(isActive)) return;
 
-            Class<?> traceMessageTypeClass = Class.forName("com.sap.it.api.msglog.adapter.AdapterTraceMessageType");
             Object traceType = Enum.valueOf((Class<Enum>) traceMessageTypeClass, enumValue);
 
             boolean isTruncated = traceData.length > MAX_TRACE_PAYLOAD_BYTES;
@@ -146,20 +220,21 @@ public class AdapterTracingHelper {
                 traceData = truncated;
             }
 
-            Method createTraceMethod = mplLog.getClass().getMethod("createTraceMessage",
+            Method createTraceMethod = messageLogInterface.getMethod("createTraceMessage",
                     traceMessageTypeClass, byte[].class, boolean.class);
             Object traceMessage = createTraceMethod.invoke(mplLog, traceType, traceData, isTruncated);
 
-            Method setEncodingMethod = traceMessage.getClass().getMethod("setEncoding", String.class);
+            Method setEncodingMethod = traceMessageInterface.getMethod("setEncoding", String.class);
             setEncodingMethod.invoke(traceMessage, "UTF-8");
 
-            Class<?> traceMessageInterface = Class.forName("com.sap.it.api.msglog.adapter.AdapterTraceMessage");
-            Method writeTraceMethod = mplLog.getClass().getMethod("writeTrace", traceMessageInterface);
+            Method writeTraceMethod = messageLogInterface.getMethod("writeTrace", traceMessageInterface);
             writeTraceMethod.invoke(mplLog, traceMessage);
 
             LOG.debug("Trace written for {} ({} bytes)", logMessage, traceData.length);
         } catch (Exception e) {
-            LOG.debug("Failed to write trace: {}", e.getMessage());
+            // Reported once at ERROR rather than per message at DEBUG: a broken ADK binding is
+            // invisible at DEBUG, which is how the factory lookup stayed broken unnoticed.
+            reportUnavailableOnce("writing an MPL trace failed", e);
         }
     }
 
