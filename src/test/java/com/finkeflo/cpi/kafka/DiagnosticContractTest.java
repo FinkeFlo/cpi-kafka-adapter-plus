@@ -180,6 +180,108 @@ public class DiagnosticContractTest {
                 Pattern.compile("Class\\.forName\\(\"[^\"]*Impl\"\\)").matcher(tracing).find());
     }
 
+    /**
+     * Every instrumentation entry point must have at least one caller outside the class that
+     * declares it.
+     *
+     * <p>This guards against the failure mode found in the reference adapter surveyed while
+     * planning this work: it declares a {@code registerRuntimeStatus} method with an empty body and
+     * a {@code fireChannelFailed} method with no callers at all. Both read as instrumentation in
+     * review, and both emit nothing. That is worse than no instrumentation, because it removes the
+     * incentive to add the real thing.
+     *
+     * <p>The same risk applies here. Every method listed below writes to a channel that is invisible
+     * in local tests — the Message Processing Log, the message status, the iFlow monitor — so if a
+     * refactoring drops the last call site, nothing fails and nobody finds out until the next
+     * incident produces an empty monitor entry.
+     */
+    @Test
+    public void everyInstrumentationEntryPointHasACallerOnAProductionPath() throws IOException {
+        String[] entryPoints = {
+                "traceError",
+                "reportFailure",
+                "publishConnectionStatus",
+        };
+
+        List<Path> sources = adapterSources();
+        List<String> orphans = new ArrayList<>();
+
+        for (String method : entryPoints) {
+            Pattern declaration = Pattern.compile("(?:void|boolean|[A-Za-z<>\\[\\]]+)\\s+"
+                    + Pattern.quote(method) + "\\s*\\(");
+            Pattern invocation = Pattern.compile("\\." + Pattern.quote(method) + "\\s*\\(");
+
+            String declaringFile = null;
+            for (Path p : sources) {
+                if (declaration.matcher(read(p)).find()) {
+                    declaringFile = p.getFileName().toString();
+                    break;
+                }
+            }
+
+            int externalCallers = 0;
+            for (Path p : sources) {
+                if (p.getFileName().toString().equals(declaringFile)) {
+                    continue;
+                }
+                if (invocation.matcher(read(p)).find()) {
+                    externalCallers++;
+                }
+            }
+
+            if (externalCallers == 0) {
+                orphans.add(method + (declaringFile == null
+                        ? " (no declaration found — was it renamed?)"
+                        : " (declared in " + declaringFile + ", never called from elsewhere)"));
+            }
+        }
+
+        assertTrue("Instrumentation exists but nothing invokes it, so it can never emit anything:\n"
+                        + String.join("\n", orphans)
+                        + "\nEither wire it to a real failure path or delete it. Scaffolding that "
+                        + "looks instrumented and is not is the specific trap this test exists for.",
+                orphans.isEmpty());
+    }
+
+    /**
+     * Every ADK method that is resolved reflectively must also be invoked.
+     *
+     * <p>Reflective calls escape the previous test, because the method name is a string rather than
+     * a symbol the compiler can see. They also fail more quietly than direct calls: resolving a
+     * {@code Method} and then never invoking it compiles, runs, throws nothing, and writes nothing.
+     * Four bindings in this adapter were dead for the entire life of a deployment for a closely
+     * related reason, so the resolve-without-invoke shape is worth pinning explicitly.
+     *
+     * <p>Whether the enclosing method is itself reachable is covered by the test above, which
+     * requires {@code reportFailure} and {@code traceError} to have callers.
+     */
+    @Test
+    public void everyReflectivelyResolvedAdkMethodIsAlsoInvoked() throws IOException {
+        String tracing = read(SOURCE_ROOT.resolve("AdapterTracingHelper.java"));
+
+        Matcher m = Pattern.compile(
+                "Method\\s+(\\w+)\\s*=\\s*[\\w.]+\\s*\\n?\\s*\\.?getMethod\\(\\s*\\n?\\s*\"(\\w+)\"")
+                .matcher(tracing);
+
+        List<String> resolvedNever = new ArrayList<>();
+        int resolved = 0;
+        while (m.find()) {
+            resolved++;
+            String variable = m.group(1);
+            String adkMethod = m.group(2);
+            if (!Pattern.compile(Pattern.quote(variable) + "\\s*\\.invoke\\s*\\(").matcher(tracing).find()) {
+                resolvedNever.add(adkMethod + " (resolved into '" + variable + "', never invoked)");
+            }
+        }
+
+        assertTrue("No reflective ADK lookups were found at all. Either the binding was rewritten "
+                + "or this test's pattern has drifted; both need looking at.", resolved > 0);
+
+        assertTrue("An ADK method is resolved but never invoked, which writes nothing while looking "
+                        + "correct in review:\n" + String.join("\n", resolvedNever),
+                resolvedNever.isEmpty());
+    }
+
     private static String firstLine(String statement) {
         int nl = statement.indexOf('\n');
         String head = nl < 0 ? statement : statement.substring(0, nl);
