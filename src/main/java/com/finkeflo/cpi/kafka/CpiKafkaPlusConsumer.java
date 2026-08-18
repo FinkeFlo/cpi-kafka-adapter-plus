@@ -69,6 +69,12 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
      */
     private static final long POLL_DRAIN_TIMEOUT_MS = 15_000L;
 
+    /**
+     * Minimum gap between two emit-cycle heartbeat lines. Chosen so a silent consumer is still
+     * noticeable within a few minutes while the line can no longer dominate the tenant log.
+     */
+    private static final long HEARTBEAT_INTERVAL_MS = 300_000L;
+
     private final CpiKafkaPlusEndpoint endpoint;
     private KafkaConsumer<byte[], byte[]> kafkaConsumer;
     private int consecutivePollFailures = 0;
@@ -82,6 +88,14 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
     private int consecutiveInitFailures = 0;
     /** Zeitpunkt des letzten Emit-Zyklus (ms). 0 = noch nie emittiert. */
     private long lastEmitTimeMs = 0L;
+    /**
+     * Throttle state for the emit-cycle heartbeat. The heartbeat is logged at ERROR because only
+     * ERROR reaches the CPI tenant trace file, but it fires once per poll cycle. Unthrottled it
+     * accounted for the entire log volume this adapter writes into a shared tenant while carrying
+     * no information beyond "still alive". 0 = not yet logged.
+     */
+    private long lastHeartbeatMs = 0L;
+    private boolean lastHeartbeatInitialized = false;
     private ConsumerCircuitBreaker circuitBreaker;
     private RecordProcessor recordProcessor;
     private volatile boolean stoppedByErrorPolicy = false;
@@ -551,9 +565,37 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
      * (Drain-Schleife). Aus {@code poll()} extrahiert, damit {@code poll()}
      * zwischen Emit-Zyklus und Keep-Alive-Poll dispatchen kann.
      */
+    /**
+     * Emits the "consumer is alive" heartbeat that operators rely on to tell a running consumer
+     * from a stalled one.
+     *
+     * <p>Logged at ERROR on purpose: the CPI tenant trace file only receives ERROR, so DEBUG or
+     * INFO would make the heartbeat invisible in production. It is therefore throttled instead of
+     * downgraded — unthrottled it fired once per poll cycle and produced every single log line
+     * this adapter contributed to a shared tenant, while no actual failure was ever logged.
+     *
+     * <p>A change of {@code initialized} is always reported immediately, so a state transition is
+     * never swallowed by the throttle. The full per-cycle detail stays available at DEBUG for
+     * local runs, where the tenant appender does not apply.
+     */
+    private void logEmitCycleHeartbeat() {
+        long now = System.currentTimeMillis();
+        boolean stateChanged = lastHeartbeatMs == 0L || initialized != lastHeartbeatInitialized;
+        if (stateChanged || now - lastHeartbeatMs >= HEARTBEAT_INTERVAL_MS) {
+            long suppressedForMs = lastHeartbeatMs == 0L ? 0L : now - lastHeartbeatMs;
+            LOG.error("[CPI-KAFKA-PLUS-DIAG] runEmitCycle: alive topic='{}' initialized={} reason={} sinceLastHeartbeatMs={}",
+                    endpoint.getEffectiveTopic(), initialized,
+                    stateChanged ? "STATE_CHANGE" : "INTERVAL", suppressedForMs);
+            lastHeartbeatMs = now;
+            lastHeartbeatInitialized = initialized;
+        } else if (LOG.isDebugEnabled()) {
+            LOG.debug("[CPI-KAFKA-PLUS-DIAG] runEmitCycle: emit cycle started for topic='{}' initialized={}",
+                    endpoint.getEffectiveTopic(), initialized);
+        }
+    }
+
     private int runEmitCycle() throws Exception {
-        LOG.error("[CPI-KAFKA-PLUS-DIAG] runEmitCycle: emit cycle started for topic='{}' initialized={}",
-                endpoint.getEffectiveTopic(), initialized);
+        logEmitCycleHeartbeat();
         boolean isBatchComplete = "BATCH_COMPLETE".equalsIgnoreCase(endpoint.getCommitStrategy());
         // Re-commit any offsets whose commit was skipped in a previous cycle because a
         // rebalance was in progress. By now poll() (in the previous keepalive/emit call) has
