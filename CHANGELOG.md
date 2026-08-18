@@ -12,6 +12,7 @@ iFlow compatibility.
 - New docs page `docs/features/kafka-headers.md` listing all consumer, producer, and DLQ Kafka headers with descriptions, types, and conditions.
 
 ### Changed
+- The Java 11 API level is now enforced by the compiler instead of only being documented. `pom.xml` uses `maven.compiler.release=11` rather than `maven.compiler.source`/`target`, so javac links against the Java 11 API signatures. Previously the compiler linked against the JDK 17 class library, so a Java 12+ API (for example `String.formatted`) compiled cleanly and only failed at runtime on the tenant with `NoSuchMethodError` — a gap that `CHANGELOG` 1.2.2 described but did not close. Verified: a `String.formatted` call now fails the build. Bytecode remains class-file version 55; the `compile-jgss-stubs` execution keeps its own `release` 8 override.
 - Standardized pull request quality gates: enforce Conventional Commit format for PR titles in CI, set squash merge to use PR title and body, add repository-managed local Git hooks (`commit-msg` for Conventional Commits validation, `pre-push` for fast unit tests + secret scans).
 - Added setup script and documentation for local hook and commit-template activation in CONTRIBUTING.md.
 - Enforce `REVIEW_REQUIRED` and `CODEOWNER_REVIEW` on main branch protection; disallow force push and branch deletion.
