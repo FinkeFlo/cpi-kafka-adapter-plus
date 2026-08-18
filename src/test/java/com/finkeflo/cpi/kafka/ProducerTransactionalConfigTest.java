@@ -131,8 +131,8 @@ public class ProducerTransactionalConfigTest {
 
     @Test
     public void testComputeTopicHashIsDeterministic() {
-        String hash1 = CpiKafkaPlusProducer.computeTopicHash("FRA_aspire_eXtend_IPCSDD_STOCK_AMOUNT");
-        String hash2 = CpiKafkaPlusProducer.computeTopicHash("FRA_aspire_eXtend_IPCSDD_STOCK_AMOUNT");
+        String hash1 = CpiKafkaPlusProducer.computeTopicHash("REGION_sample_app_STOCK_AMOUNT");
+        String hash2 = CpiKafkaPlusProducer.computeTopicHash("REGION_sample_app_STOCK_AMOUNT");
         Assert.assertEquals("Hash must be deterministic across calls", hash1, hash2);
         Assert.assertEquals("Hash must be exactly 8 hex characters", 8, hash1.length());
         Assert.assertTrue("Hash must contain only hex characters", hash1.matches("[0-9a-f]+"));
@@ -140,11 +140,11 @@ public class ProducerTransactionalConfigTest {
 
     @Test
     public void testComputeTopicHashDiffersForDifferentTopics() {
-        String hashStock   = CpiKafkaPlusProducer.computeTopicHash("FRA_aspire_eXtend_IPCSDD_STOCK_AMOUNT");
-        String hashDemand  = CpiKafkaPlusProducer.computeTopicHash("FRA_aspire_eXtend_IPCSDD_DEMAND_DETAIL_SAP_PRD");
-        String hashSales   = CpiKafkaPlusProducer.computeTopicHash("FRA_aspire_eXtend_IPCSDD_SALES_ORDER");
-        String hashSku     = CpiKafkaPlusProducer.computeTopicHash("FRA_aspire_eXtend_IPCSDD_SKU");
-        String hashOrder   = CpiKafkaPlusProducer.computeTopicHash("FRA_aspire_eXtend_IPCSDD_ORDER_PLAN_OUTB");
+        String hashStock   = CpiKafkaPlusProducer.computeTopicHash("REGION_sample_app_STOCK_AMOUNT");
+        String hashDemand  = CpiKafkaPlusProducer.computeTopicHash("REGION_sample_app_DEMAND_DETAIL_ERP_PRD");
+        String hashSales   = CpiKafkaPlusProducer.computeTopicHash("REGION_sample_app_SALES_ORDER");
+        String hashSku     = CpiKafkaPlusProducer.computeTopicHash("REGION_sample_app_SKU");
+        String hashOrder   = CpiKafkaPlusProducer.computeTopicHash("REGION_sample_app_ORDER_PLAN_OUTB");
 
         java.util.Set<String> hashes = new java.util.HashSet<>(
                 java.util.Arrays.asList(hashStock, hashDemand, hashSales, hashSku, hashOrder));
