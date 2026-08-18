@@ -152,6 +152,8 @@ public class CpiKafkaPlusComponentTest {
         Assert.assertEquals(1024, endpoint.getMaxPartitionFetchSizeKb());
         Assert.assertEquals(1, endpoint.getFetchMinBytes());
         Assert.assertEquals(500, endpoint.getFetchMaxWaitMs());
+        Assert.assertEquals("STANDARD", endpoint.getDiagnosticsLevel());
+        Assert.assertFalse(endpoint.isDiagnosticsLevelFull());
     }
 
     @Test
@@ -604,5 +606,87 @@ public class CpiKafkaPlusComponentTest {
         ep.setSecurityProtocol("PLAINTEXT");
         ep.setCredentialAlias(null);
         ep.validateConfiguration(); // should not throw
+    }
+
+    // --- Diagnostics Level Tests ---
+
+    @Test
+    public void testDiagnosticsLevelDefaults() {
+        CpiKafkaPlusEndpoint endpoint = new CpiKafkaPlusEndpoint();
+        Assert.assertEquals("STANDARD", endpoint.getDiagnosticsLevel());
+        Assert.assertFalse(endpoint.isDiagnosticsLevelFull());
+    }
+
+    @Test
+    public void testDiagnosticsLevelStandard() {
+        CpiKafkaPlusEndpoint endpoint = new CpiKafkaPlusEndpoint();
+        endpoint.setDiagnosticsLevel("STANDARD");
+        Assert.assertEquals("STANDARD", endpoint.getDiagnosticsLevel());
+        Assert.assertFalse(endpoint.isDiagnosticsLevelFull());
+    }
+
+    @Test
+    public void testDiagnosticsLevelFull() {
+        CpiKafkaPlusEndpoint endpoint = new CpiKafkaPlusEndpoint();
+        endpoint.setDiagnosticsLevel("FULL");
+        Assert.assertEquals("FULL", endpoint.getDiagnosticsLevel());
+        Assert.assertTrue(endpoint.isDiagnosticsLevelFull());
+    }
+
+    @Test
+    public void testDiagnosticsLevelCaseInsensitive() {
+        CpiKafkaPlusEndpoint endpoint = new CpiKafkaPlusEndpoint();
+        endpoint.setDiagnosticsLevel("full");
+        Assert.assertTrue(endpoint.isDiagnosticsLevelFull());
+        endpoint.setDiagnosticsLevel("Full");
+        Assert.assertTrue(endpoint.isDiagnosticsLevelFull());
+        endpoint.setDiagnosticsLevel("standard");
+        Assert.assertFalse(endpoint.isDiagnosticsLevelFull());
+    }
+
+    @Test
+    public void testValidateConfigurationAcceptsStandardDiagnosticsLevel() {
+        CpiKafkaPlusEndpoint ep = new CpiKafkaPlusEndpoint();
+        ep.setTopic("test-topic");
+        ep.setSecurityProtocol("PLAINTEXT");
+        ep.setDiagnosticsLevel("STANDARD");
+        ep.validateConfiguration(); // should not throw
+    }
+
+    @Test
+    public void testValidateConfigurationAcceptsFullDiagnosticsLevel() {
+        CpiKafkaPlusEndpoint ep = new CpiKafkaPlusEndpoint();
+        ep.setTopic("test-topic");
+        ep.setSecurityProtocol("PLAINTEXT");
+        ep.setDiagnosticsLevel("FULL");
+        ep.validateConfiguration(); // should not throw
+    }
+
+    @Test(expected = IllegalArgumentException.class)
+    public void testValidateConfigurationRejectsInvalidDiagnosticsLevel() {
+        CpiKafkaPlusEndpoint ep = new CpiKafkaPlusEndpoint();
+        ep.setTopic("test-topic");
+        ep.setSecurityProtocol("PLAINTEXT");
+        ep.setDiagnosticsLevel("INVALID_LEVEL");
+        ep.validateConfiguration();
+    }
+
+    @Test
+    public void testValidateConfigurationInvalidDiagnosticsLevelMessage() {
+        CpiKafkaPlusEndpoint ep = new CpiKafkaPlusEndpoint();
+        ep.setTopic("test-topic");
+        ep.setSecurityProtocol("PLAINTEXT");
+        ep.setDiagnosticsLevel("VERBOSE");
+        try {
+            ep.validateConfiguration();
+            Assert.fail("Expected IllegalArgumentException for invalid diagnosticsLevel");
+        } catch (IllegalArgumentException e) {
+            Assert.assertTrue("Error message should contain diagnostic marker",
+                    e.getMessage().contains("[CPI-KAFKA-PLUS-DIAG]"));
+            Assert.assertTrue("Error message should mention the invalid value",
+                    e.getMessage().contains("VERBOSE"));
+            Assert.assertTrue("Error message should list valid values",
+                    e.getMessage().contains("STANDARD") && e.getMessage().contains("FULL"));
+        }
     }
 }
