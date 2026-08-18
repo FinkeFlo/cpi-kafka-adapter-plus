@@ -134,12 +134,27 @@ final class AdapterDiagnostics {
 
         private void appendValue(Object value) {
             String text = value == null ? "null" : sanitize(String.valueOf(value), MAX_TOTAL_CHARS);
-            boolean needsQuotes = text.isEmpty() || text.indexOf(' ') >= 0 || text.indexOf('=') >= 0;
+            boolean needsQuotes = text.isEmpty() || text.indexOf(' ') >= 0 || text.indexOf('=') >= 0
+                    || text.indexOf('\'') >= 0;
             if (needsQuotes) {
-                sb.append('\'').append(text).append('\'');
+                sb.append('\'').append(escapeQuotes(text)).append('\'');
             } else {
                 sb.append(text);
             }
+        }
+
+        /**
+         * Doubles single quotes inside a quoted value, so that a lone {@code '} always terminates
+         * the value and {@code ''} always means a literal quote.
+         *
+         * <p>This is not hypothetical. Kafka routinely quotes identifiers in its own exception
+         * messages, and so does this adapter, so an unescaped value would produce
+         * {@code error='Failed to send to topic 'x': …'} — three quotes, no way for a reader or a
+         * parser to tell where the value ends. The runbook instructs operators to parse these
+         * lines, so an ambiguous record defeats the purpose of emitting it.
+         */
+        private static String escapeQuotes(String text) {
+            return text.indexOf('\'') < 0 ? text : text.replace("'", "''");
         }
 
         /** Renders the line, applying the overall length budget. */

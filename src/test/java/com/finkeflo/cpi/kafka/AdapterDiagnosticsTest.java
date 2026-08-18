@@ -186,6 +186,39 @@ public class AdapterDiagnosticsTest {
         Assert.assertTrue(line, line.contains(AdapterDiagnosticsTest.class.getName()));
     }
 
+    /**
+     * The production message that motivated this class quotes the topic name in single quotes, and
+     * so do Kafka's own exception messages. Without escaping, such a value produces three quotes in
+     * one field and there is no way for a reader or a parser to tell where the value ends — on the
+     * exact record class this class exists to make readable.
+     */
+    @Test
+    public void aQuoteInsideAValueCannotTerminateTheValueEarly() {
+        String line = AdapterDiagnostics.event("producer.batch.record.send")
+                .with("detail", "Failed to send batch to Kafka topic 'test-topic': boom")
+                .with("producerPath", "SHARED")
+                .render();
+
+        Assert.assertTrue("quotes inside the value must be doubled, not left bare: " + line,
+                line.contains("'Failed to send batch to Kafka topic ''test-topic'': boom'"));
+
+        // A field appended afterwards must still be parseable, which is the point of escaping.
+        Assert.assertTrue(line, line.endsWith("producerPath=SHARED"));
+
+        // Counting quotes is how a parser finds the end of a value: doubling keeps the count even.
+        long quotes = line.chars().filter(c -> c == '\'').count();
+        Assert.assertEquals("an odd number of quotes means an unterminated value: " + line,
+                0, quotes % 2);
+    }
+
+    /** A value consisting solely of a quote must still be quoted, or a field boundary is lost. */
+    @Test
+    public void aValueConsistingSolelyOfAQuoteIsStillQuoted() {
+        String line = AdapterDiagnostics.event("test").with("k", "'").with("next", "x").render();
+        Assert.assertTrue(line, line.contains("k='''"));
+        Assert.assertTrue(line, line.endsWith("next=x"));
+    }
+
     @Test
     public void errorLoggingSurvivesABraceInTheExceptionMessage() throws Exception {
         // SLF4J treats the first String as a format string. A "{}" inside an exception message —

@@ -111,7 +111,10 @@ node while overall traffic is spread evenly is a node-local problem, not a Kafka
 
 ## Reading a failure line
 
-Failure lines are flat `key=value` sequences. Values containing spaces are wrapped in single quotes.
+Failure lines are flat `key=value` sequences. A value is wrapped in single quotes if it is empty or
+contains a space, an `=` or a quote; a quote inside such a value is **doubled**. So a lone `'` always
+ends the value and `''` always means a literal quote — which matters here, because Kafka quotes topic
+names in its own exception messages and those messages end up inside `error=`.
 
 ```
 [CPI-KAFKA-PLUS-DIAG] producer.batch.record.send producerPath=SHARED phase=SYNC_SEND
@@ -283,7 +286,6 @@ Four custom header properties are attached to the failed message's MPL entry:
 | `KafkaAdapterTopic` | The target topic |
 | `KafkaAdapterProducerPath` | `SHARED` or `TRANSACTIONAL` |
 | `KafkaAdapterRetryable` | `true` if the classification was `RETRIABLE`, otherwise `false` |
-| `KafkaAdapterError` | Short exception description, so the monitor shows what failed without opening the attachment |
 
 These properties are visible in the monitor's message detail view and are searchable. They do **not**
 require MPL tracing to be enabled — they are attached via `addCustomHeaderProperty`, which works
@@ -295,12 +297,18 @@ If the adapter can obtain an MPL handle with status support (`getMessageLogWithS
 `FAILED` status event with the error code and a truncated error message. This marks the message as
 failed in the monitor, making failures visible at a glance without opening each message.
 
-### Trace attachment (when tracing is active)
+### Attachment with the full error block
 
-When MPL tracing *is* enabled (`Trace` log level in the iFlow), the adapter additionally writes a
-trace attachment containing the full error block. This is useful for detailed post-mortems, but
-since tracing is off by default and was never active in the analysed production corpus, you should
-not rely on it for routine diagnosis. Use the tenant trace file for that.
+Independently of the trace level, the adapter attaches the complete serialised error block —
+exception chain, causes and frames — to the message's monitor entry under the name
+`KafkaAdapterError`. This is the one channel that is not subject to the 8,000-character line limit
+of the tenant trace file, so when a cause chain is deep this is where to read it in full.
+
+A second trace-independent channel writes the same four facts as adapter attributes
+(`errorCode`, `topic`, `producerPath`, `retryable`) via `putAdapterAttribute`. It is redundant on
+purpose: the two APIs surface in different places in the monitor depending on tenant configuration,
+and neither had ever been verified to be visible, so the adapter writes both rather than betting on
+one.
 
 ## Diagnostics level
 
