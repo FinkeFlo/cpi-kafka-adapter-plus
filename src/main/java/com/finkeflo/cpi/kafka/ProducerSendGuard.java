@@ -101,7 +101,9 @@ final class ProducerSendGuard {
                 await(futures.get(i), deadlineMs, "Buffered record " + i);
             } catch (SendStalledException e) {
                 // b4: Upgrade to ERROR with full stack trace — swallowed send failures stayed invisible
+                // Stalled sends are timeouts → KP_PROD_002
                 AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("producer.send.stalled")
+                        .with("errorCode", CpiKafkaPlusErrorCode.KP_PROD_002.code())
                         .with("recordIndex", i)
                         .with("budgetMs", budgetMs)
                         .with("securityProtocol", securityProtocol), e);
@@ -111,7 +113,10 @@ final class ProducerSendGuard {
                 return;
             } catch (Exception e) {
                 // b4: Upgrade to ERROR with full stack trace — swallowed failures stayed invisible
+                // Derive error code from the exception using the central taxonomy
+                String errorCode = CpiKafkaPlusErrorCode.fromThrowable(e).code();
                 AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("producer.send.abort.failed")
+                        .with("errorCode", errorCode)
                         .with("recordIndex", i)
                         .with("phase", "awaitAllQuietly"), e);
             }

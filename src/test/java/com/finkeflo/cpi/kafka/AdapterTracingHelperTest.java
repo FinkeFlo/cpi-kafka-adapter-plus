@@ -379,4 +379,70 @@ public class AdapterTracingHelperTest {
         Assert.assertTrue("Binding failure should be recorded", unavailSet.contains("binding-X failed"));
         Assert.assertEquals("Same failure twice should still be just one entry", 1, unavailSet.size());
     }
+
+    // === Tests for error code mapping via CpiKafkaPlusErrorCode ===
+
+    /**
+     * Verifies that a send timeout (TimeoutException) maps to KP-PROD-002.
+     * This is the incident-relevant case — the original production incident was a timeout.
+     */
+    @Test
+    public void errorCodeMapping_sendTimeout_producesKpProd002() {
+        org.apache.kafka.common.errors.TimeoutException timeout =
+                new org.apache.kafka.common.errors.TimeoutException("Expiring 1 record(s) for topic-0");
+
+        String errorCode = CpiKafkaPlusErrorCode.fromThrowable(timeout).code();
+
+        Assert.assertEquals("KP-PROD-002", errorCode);
+    }
+
+    /**
+     * Verifies that an authentication failure (AuthenticationException) maps to KP-SEC-001.
+     */
+    @Test
+    public void errorCodeMapping_authenticationFailure_producesKpSec001() {
+        org.apache.kafka.common.errors.AuthenticationException authFail =
+                new org.apache.kafka.common.errors.SaslAuthenticationException("SASL authentication failed");
+
+        String errorCode = CpiKafkaPlusErrorCode.fromThrowable(authFail).code();
+
+        Assert.assertEquals("KP-SEC-001", errorCode);
+    }
+
+    /**
+     * Verifies that a serialization failure (SerializationException) maps to KP-PROD-004.
+     */
+    @Test
+    public void errorCodeMapping_serializationFailure_producesKpProd004() {
+        org.apache.kafka.common.errors.SerializationException serFail =
+                new org.apache.kafka.common.errors.SerializationException("Failed to serialize value");
+
+        String errorCode = CpiKafkaPlusErrorCode.fromThrowable(serFail).code();
+
+        Assert.assertEquals("KP-PROD-004", errorCode);
+    }
+
+    /**
+     * Verifies that an unclassified non-Kafka RuntimeException maps to KP-GEN-001 (unclassified).
+     */
+    @Test
+    public void errorCodeMapping_unclassifiedRuntimeException_producesKpGen001() {
+        RuntimeException generic = new RuntimeException("Something went wrong in application code");
+
+        String errorCode = CpiKafkaPlusErrorCode.fromThrowable(generic).code();
+
+        Assert.assertEquals("KP-GEN-001", errorCode);
+    }
+
+    /**
+     * Verifies that JSON schema validation failures map to KP-CFG-002.
+     */
+    @Test
+    public void errorCodeMapping_jsonSchemaValidation_producesKpCfg002() {
+        RuntimeException validationFail = new RuntimeException("JSON schema validation failed");
+
+        String errorCode = CpiKafkaPlusErrorCode.fromJsonSchemaValidationFailure(validationFail).code();
+
+        Assert.assertEquals("KP-CFG-002", errorCode);
+    }
 }

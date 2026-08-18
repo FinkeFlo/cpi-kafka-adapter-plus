@@ -240,6 +240,27 @@ public class AdapterTracingHelper {
      */
     public void reportFailure(Exchange exchange, Exception e, String errorCode,
                                Map<String, String> context, boolean fireStatusEvent) {
+        // Always emit ERROR log with errorCode — this is the primary diagnostic channel because
+        // only ERROR reaches the CPI tenant trace file, and MPL tracing is often inactive.
+        // The errorCode enables grep-based triage on the trace file.
+        Map<String, String> safeContext = context != null ? context : java.util.Collections.emptyMap();
+        String topic = safeContext.containsKey("topic")
+                ? safeContext.get("topic")
+                : getEffectiveTopicSafe();
+        AdapterDiagnostics.Event errorEvent = AdapterDiagnostics.event("adapter.failure.reported")
+                .with("topic", topic);
+        if (errorCode != null) {
+            errorEvent.with("errorCode", errorCode);
+        }
+        if (safeContext.containsKey("partition")) {
+            errorEvent.with("partition", safeContext.get("partition"));
+        }
+        if (safeContext.containsKey("offset")) {
+            errorEvent.with("offset", safeContext.get("offset"));
+        }
+        errorEvent.with("retryable", isRetryableSafe(e) ? "true" : "false");
+        AdapterDiagnostics.error(LOG, errorEvent, e);
+
         if (!adkMessageLogPresent || exchange == null) {
             return;
         }
@@ -254,19 +275,11 @@ public class AdapterTracingHelper {
         boolean useStatusVariant = fireStatusEvent;
 
         try {
-            // Null-safe context (treat null as empty)
-            Map<String, String> safeContext = context != null ? context : java.util.Collections.emptyMap();
-
             // Build the full diagnostic block for the attachment (null-safe)
             String fullDiagnostic = buildFullDiagnosticSafe(e, errorCode, safeContext);
 
             // Determine retryability (null-safe)
             String retryable = isRetryableSafe(e) ? "true" : "false";
-
-            // Extract topic from context or endpoint (lazy evaluation for endpoint)
-            String topic = safeContext.containsKey("topic")
-                    ? safeContext.get("topic")
-                    : getEffectiveTopicSafe();
 
             // Extract producerPath from context if present
             String producerPath = safeContext.get("producerPath");

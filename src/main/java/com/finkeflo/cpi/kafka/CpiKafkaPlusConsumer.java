@@ -154,7 +154,9 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
             tracingHelper.traceError(exchange, e, context, true);
 
             // f1/f4/f5: Report failure with structured fields and attachment
-            tracingHelper.reportFailure(exchange, e, "CONSUMER_EXCEPTION", context, true);
+            // Derive error code from the exception using the central taxonomy
+            String errorCode = CpiKafkaPlusErrorCode.fromThrowable(e).code();
+            tracingHelper.reportFailure(exchange, e, errorCode, context, true);
 
             getExceptionHandler().handleException(message, exchange, e);
         }

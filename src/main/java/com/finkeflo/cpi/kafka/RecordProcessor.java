@@ -510,7 +510,8 @@ final class RecordProcessor {
         tracingHelper.traceError(traceExchange, lastError, context, true);
 
         // f1/f4/f5: Report failure with structured fields and attachment
-        String errorCode = permanentError ? "CONSUMER_PERMANENT_ERROR" : "CONSUMER_RETRIES_EXHAUSTED";
+        // Derive error code from the exception using the central taxonomy
+        String errorCode = CpiKafkaPlusErrorCode.fromThrowable(lastError).code();
         tracingHelper.reportFailure(traceExchange, lastError, errorCode, context, true);
 
         if (dlqHelper != null) {
@@ -565,7 +566,9 @@ final class RecordProcessor {
         tracingHelper.traceError(traceExchange, cause, context, true);
 
         // f1/f4/f5: Report failure with structured fields and attachment
-        tracingHelper.reportFailure(traceExchange, cause, "DESERIALIZATION_FAILED", context, true);
+        // Deserialization failures map to KP_PROD_004 (serialization_failed) via the central taxonomy
+        String errorCode = CpiKafkaPlusErrorCode.fromThrowable(cause).code();
+        tracingHelper.reportFailure(traceExchange, cause, errorCode, context, true);
 
         if (dlqHelper == null) {
             throw cause instanceof RuntimeException
@@ -896,8 +899,10 @@ final class RecordProcessor {
             tracingHelper.traceError(mplExchange, validationException, context, true);
 
             // f1/f4/f5: Report failure with structured fields and attachment
+            // JSON schema validation failures have a dedicated error code
+            String errorCode = CpiKafkaPlusErrorCode.fromJsonSchemaValidationFailure(validationException).code();
             tracingHelper.reportFailure(mplExchange, validationException,
-                    "SCHEMA_VALIDATION_FAILED", context, true);
+                    errorCode, context, true);
 
             callback.processExchange(mplExchange);
         } catch (Exception e) {
