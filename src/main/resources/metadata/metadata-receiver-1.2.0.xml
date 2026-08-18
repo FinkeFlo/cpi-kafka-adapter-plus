@@ -224,7 +224,7 @@
                 </GuiLabels>
                 <AttributeReference>
                     <ReferenceName>diagnosticsLevel</ReferenceName>
-                    <description>Diagnostic output level. STANDARD (default): every failure gets one structured ERROR line with the full serialised cause chain — sufficient to root-cause most production incidents. FULL: adds expensive/verbose extras (success baselines, JVM/thread state, per-record detail) for deep investigation. Use FULL only when actively debugging.</description>
+                    <description>Diagnostic output level. STANDARD (default) is fully diagnostic on its own: every failure produces one structured ERROR line with the complete serialised cause chain. FULL adds exactly one thing, a bounded thread dump (at most 20 threads, 10 frames each, with lock owners) attached to the node-fault escalation that fires when the same fault recurs 5 times in 20 minutes. That dump is the only evidence that can settle a monitor-ownership question. Leave this on STANDARD unless you are actively investigating such a fault.</description>
                 </AttributeReference>
             </AttributeGroup>
         </Tab>

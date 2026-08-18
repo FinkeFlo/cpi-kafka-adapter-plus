@@ -282,6 +282,42 @@ public class DiagnosticContractTest {
                 resolvedNever.isEmpty());
     }
 
+    /**
+     * A configuration option must not be offered on a channel whose runtime path never reads it.
+     *
+     * <p>`diagnosticsLevel` was initially added to both the sender and the receiver metadata, but
+     * only the producer reads it. On a sender channel the operator could therefore select
+     * "Full (Verbose)" and nothing whatsoever would change — a control that lies, which is the same
+     * failure mode as instrumentation that never emits, just moved into the configuration layer
+     * where the other rules in this class cannot see it.
+     *
+     * <p>The rule is conditional rather than a flat prohibition: offering the option on the sender
+     * is fine as soon as something on the consumer path actually reads it. It fails only for the
+     * combination that misleads.
+     */
+    @Test
+    public void anOptionIsNotOfferedOnAChannelThatIgnoresIt() throws IOException {
+        String senderMetadata = read(Paths.get("src/main/resources/metadata/metadata-sender-1.2.0.xml"));
+        if (!senderMetadata.contains("diagnosticsLevel")) {
+            return;
+        }
+
+        List<String> consumerSideReaders = new ArrayList<>();
+        for (Path p : adapterSources()) {
+            String name = p.getFileName().toString();
+            boolean consumerSide = name.contains("Consumer") || name.contains("RecordProcessor");
+            if (consumerSide && read(p).contains("isDiagnosticsLevelFull")) {
+                consumerSideReaders.add(name);
+            }
+        }
+
+        assertFalse("The sender metadata offers 'diagnosticsLevel', but no consumer-side class reads "
+                        + "it, so selecting FULL on a sender channel changes nothing at all. Either "
+                        + "implement a consumer-side effect or remove the option from the sender "
+                        + "metadata and from docs/configuration.md.",
+                consumerSideReaders.isEmpty());
+    }
+
     private static String firstLine(String statement) {
         int nl = statement.indexOf('\n');
         String head = nl < 0 ? statement : statement.substring(0, nl);

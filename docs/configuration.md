@@ -65,12 +65,6 @@ For detailed security setup, see [Authentication](security/authentication.md).
 | `drainEnabled` | `false` | Poll repeatedly until the topic is empty. Ignored when `consumptionMode=STREAMING`. |
 | `minBacklogToDrain` | `0` | Minimum records in an extra drain poll required to continue draining; `0` drains until empty. |
 
-**Diagnostics**
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `diagnosticsLevel` | `STANDARD` | Diagnostic output level. `STANDARD` (default): every failure gets one structured ERROR line with the full serialised cause chain — sufficient to root-cause most production incidents. `FULL`: adds expensive/verbose extras (success baselines, JVM/thread state, per-record detail) for deep investigation. Use `FULL` only when actively debugging. |
-
 ### Message Handling
 
 **JSON Schema Validation**
@@ -197,7 +191,7 @@ For detailed security setup, see [Authentication](security/authentication.md).
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `diagnosticsLevel` | `STANDARD` | Diagnostic output level. `STANDARD` (default): every failure gets one structured ERROR line with the full serialised cause chain — sufficient to root-cause most production incidents. `FULL`: adds expensive/verbose extras (success baselines, JVM/thread state, per-record detail) for deep investigation. Use `FULL` only when actively debugging. |
+| `diagnosticsLevel` | `STANDARD` | Diagnostic output level. `STANDARD` (default) is fully diagnostic on its own: every failure produces one structured ERROR line with the complete serialised cause chain. `FULL` adds exactly one thing, a bounded thread dump (at most 20 threads, 10 frames each, with lock owners) attached to the node-fault escalation that fires when the same fault recurs 5 times in 20 minutes. Leave this on `STANDARD` unless you are actively investigating such a fault. |
 
 ### Message Handling
 

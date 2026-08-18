@@ -211,16 +211,6 @@
                     </EditCondition>
                 </AttributeReference>
             </AttributeGroup>
-            <AttributeGroup id="diagnostics">
-                <Name xsi:type="xs:string" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">Diagnostics</Name>
-                <GuiLabels guid="a1000007-0000-0000-0000-000000000030">
-                    <Label language="EN">Diagnostics</Label>
-                </GuiLabels>
-                <AttributeReference>
-                    <ReferenceName>diagnosticsLevel</ReferenceName>
-                    <description>Diagnostic output level. STANDARD (default): every failure gets one structured ERROR line with the full serialised cause chain — sufficient to root-cause most production incidents. FULL: adds expensive/verbose extras (success baselines, JVM/thread state, per-record detail) for deep investigation. Use FULL only when actively debugging.</description>
-                </AttributeReference>
-            </AttributeGroup>
         </Tab>
 
         <!-- ===== Tab: Message Handling ===== -->
@@ -958,22 +948,6 @@
         <Length/>
         <isparameterized>true</isparameterized>
         <GuiLabels guid="b1000003-0000-0000-0000-000000000102"><Label language="EN">Min Backlog to Drain</Label></GuiLabels>
-    </AttributeMetadata>
-
-    <!-- Diagnostics -->
-    <AttributeMetadata>
-        <Name>diagnosticsLevel</Name>
-        <Usage>false</Usage>
-        <DataType>xsd:string</DataType>
-        <Default>STANDARD</Default>
-        <Length/>
-        <isparameterized>true</isparameterized>
-        <GuiLabels guid="b1000009-0000-0000-0000-000000000001"><Label language="EN">Diagnostics Level</Label></GuiLabels>
-        <FixedValues>
-            <Sort>false</Sort>
-            <FixedValue><Value>STANDARD</Value><GuiLabels guid="b1000009-0000-0000-0000-000000000011"><Label language="EN">Standard (Default)</Label></GuiLabels></FixedValue>
-            <FixedValue><Value>FULL</Value><GuiLabels guid="b1000009-0000-0000-0000-000000000012"><Label language="EN">Full (Verbose)</Label></GuiLabels></FixedValue>
-        </FixedValues>
     </AttributeMetadata>
 
 </ComponentMetadata>
