@@ -571,11 +571,17 @@ public class AdapterTracingHelper {
             publishMethod.invoke(monitorService, endpoint, eventDetails);
             LOG.debug("Published connection status: {}", success ? "OK" : "ERROR");
         } catch (Exception e) {
-            // WARN, not DEBUG: a silent failure here previously masked a wrong reflection signature
+            // ERROR, not WARN: a silent failure here previously masked a wrong reflection signature
             // (setException lookup) so ERROR events were dropped for the entire deployment lifetime.
-            // Keep this visible so a future ADK API change surfaces instead of hiding.
-            LOG.warn("Could not publish connection status ({}): {}",
-                    success ? "OK" : "ERROR", e.toString());
+            // WARN does not reach the CPI tenant trace file, so the previous WARN was just as silent
+            // as the DEBUG it replaced — the intent stated above was defeated by the level. Reported
+            // once per distinct failure so a future ADK API change surfaces without one line per call.
+            if (unavailabilityReported.add("iflow monitor publishEvent failed")) {
+                AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("adapter.monitor.unavailable")
+                        .with("detail", "could not publish connection status")
+                        .with("status", success ? "OK" : "ERROR")
+                        .with("consequence", "no iFlow monitoring events for this endpoint"), e);
+            }
         }
     }
 
