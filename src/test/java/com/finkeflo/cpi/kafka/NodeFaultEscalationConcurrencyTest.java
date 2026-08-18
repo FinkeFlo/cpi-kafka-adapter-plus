@@ -114,7 +114,7 @@ public class NodeFaultEscalationConcurrencyTest {
                     // All threads wait here until all are ready, then proceed simultaneously
                     barrier.await(5, TimeUnit.SECONDS);
 
-                    // Call with the same fault (same exception class + error code)
+                    // Call with the same fault identity (same relevant root-cause class + error code)
                     checkMethod.invoke(producer, Classification.FATAL_PRODUCER_UNUSABLE,
                             CpiKafkaPlusErrorCode.KP_PROD_001,
                             new RuntimeException("simulated fault"));
@@ -179,7 +179,70 @@ public class NodeFaultEscalationConcurrencyTest {
     }
 
     /**
-     * Tests that the same fault (same exception class + error code) does escalate
+     * Tests that two different root causes wrapped in the same wrapper class do NOT count
+     * as the same fault identity.
+     */
+    @Test
+    public void differentRootCauseUnderSameWrapperDoesNotEscalate() throws Exception {
+        Method checkMethod = CpiKafkaPlusProducer.class.getDeclaredMethod(
+                "checkNodeFaultEscalation", Classification.class, CpiKafkaPlusErrorCode.class, Throwable.class);
+        checkMethod.setAccessible(true);
+
+        Field escalatedField = CpiKafkaPlusProducer.class.getDeclaredField("nodeFaultEscalated");
+        escalatedField.setAccessible(true);
+
+        for (int i = 0; i < 4; i++) {
+            checkMethod.invoke(producer, Classification.FATAL_PRODUCER_UNUSABLE,
+                    CpiKafkaPlusErrorCode.KP_PROD_001,
+                    new RuntimeException("wrapper", new IllegalStateException("root A")));
+        }
+        assertFalse("Should not escalate yet (only 4 of same root cause)",
+                (boolean) escalatedField.get(producer));
+
+        for (int i = 0; i < 4; i++) {
+            checkMethod.invoke(producer, Classification.FATAL_PRODUCER_UNUSABLE,
+                    CpiKafkaPlusErrorCode.KP_PROD_001,
+                    new RuntimeException("wrapper", new IllegalArgumentException("root B")));
+        }
+        assertFalse("Different root causes under same wrapper must not be merged into one fault",
+                (boolean) escalatedField.get(producer));
+    }
+
+    /**
+     * Tests that the same root cause under different wrappers still counts as one fault identity
+     * and escalates at threshold.
+     */
+    @Test
+    public void sameRootCauseUnderDifferentWrappersEscalates() throws Exception {
+        Method checkMethod = CpiKafkaPlusProducer.class.getDeclaredMethod(
+                "checkNodeFaultEscalation", Classification.class, CpiKafkaPlusErrorCode.class, Throwable.class);
+        checkMethod.setAccessible(true);
+
+        Field escalatedField = CpiKafkaPlusProducer.class.getDeclaredField("nodeFaultEscalated");
+        escalatedField.setAccessible(true);
+
+        checkMethod.invoke(producer, Classification.FATAL_PRODUCER_UNUSABLE,
+                CpiKafkaPlusErrorCode.KP_PROD_001,
+                new RuntimeException("wrapper-1", new IllegalStateException("same root")));
+        checkMethod.invoke(producer, Classification.FATAL_PRODUCER_UNUSABLE,
+                CpiKafkaPlusErrorCode.KP_PROD_001,
+                new IllegalArgumentException("wrapper-2", new IllegalStateException("same root")));
+        checkMethod.invoke(producer, Classification.FATAL_PRODUCER_UNUSABLE,
+                CpiKafkaPlusErrorCode.KP_PROD_001,
+                new Exception("wrapper-3", new IllegalStateException("same root")));
+        checkMethod.invoke(producer, Classification.FATAL_PRODUCER_UNUSABLE,
+                CpiKafkaPlusErrorCode.KP_PROD_001,
+                new RuntimeException("wrapper-4", new IllegalStateException("same root")));
+        checkMethod.invoke(producer, Classification.FATAL_PRODUCER_UNUSABLE,
+                CpiKafkaPlusErrorCode.KP_PROD_001,
+                new Exception("wrapper-5", new IllegalStateException("same root")));
+
+        assertTrue("Same root cause across wrappers should escalate at threshold",
+                (boolean) escalatedField.get(producer));
+    }
+
+    /**
+     * Tests that the same fault (same relevant root-cause class + error code) does escalate
      * after reaching the threshold.
      */
     @Test

@@ -114,6 +114,12 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
      */
     private final java.util.Set<String> prewarmedTopics =
             java.util.Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap<String, Boolean>());
+    /**
+     * Topics currently being pre-warmed. Keeps concurrent sender threads from issuing duplicate
+     * metadata fetches for the same topic while still allowing retries after a failed attempt.
+     */
+    private final java.util.Set<String> prewarmingTopics =
+            java.util.Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap<String, Boolean>());
     private KafkaProducer<byte[], byte[]> kafkaProducer;
     private AvroSerializerHelper avroHelper;
     private AdapterTracingHelper tracingHelper;
@@ -714,8 +720,14 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
 
         // Send synchronously to ensure delivery before IFlow continues
         try {
-            Future<RecordMetadata> future = kafkaProducer.send(record);
-            RecordMetadata metadata = sendGuard.await(future, sendGuard.newDeadline(),
+            long deadlineMs = sendGuard.newDeadline();
+            Future<RecordMetadata> future = MonitorFaultRetry.execute(
+                    () -> kafkaProducer.send(record),
+                    new MonitorFaultRetry.Budget(),
+                    deadlineMs,
+                    topic,
+                    0);
+            RecordMetadata metadata = sendGuard.await(future, deadlineMs,
                     "Send to topic '" + topic + "'");
 
             in.setHeader("SAP_Receiver", metadata.topic());
@@ -856,7 +868,9 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
         }
         // Bounded like verifiedTopics, so a flow with unbounded dynamic topics cannot grow this set
         // without limit. Beyond the limit the pre-warm is simply skipped; the send path still works.
-        if (prewarmedTopics.size() >= VERIFIED_TOPICS_CACHE_LIMIT || !prewarmedTopics.add(topic)) {
+        if (prewarmedTopics.contains(topic)
+                || prewarmedTopics.size() >= VERIFIED_TOPICS_CACHE_LIMIT
+                || !prewarmingTopics.add(topic)) {
             return;
         }
 
@@ -867,6 +881,11 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
         // threshold (respects the log volume budget while still surfacing pathological fetches).
         long metadataStartMs = System.currentTimeMillis();
         try {
+            // Another thread may have completed the pre-warm between the first read and our in-flight
+            // marker acquisition. Re-check before doing the fetch.
+            if (prewarmedTopics.contains(topic)) {
+                return;
+            }
             // A short retry deadline on purpose: the monitor fault throws immediately and is worth
             // retrying, while a genuine metadata timeout has already consumed max.block.ms and must
             // not be multiplied by retrying it.
@@ -874,6 +893,10 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
                     new MonitorFaultRetry.Budget(),
                     System.currentTimeMillis() + PREWARM_RETRY_WINDOW_MS,
                     topic, -1);
+
+            if (prewarmedTopics.size() < VERIFIED_TOPICS_CACHE_LIMIT) {
+                prewarmedTopics.add(topic);
+            }
 
             long metadataWaitMs = System.currentTimeMillis() - metadataStartMs;
             // Only log slow pre-warms to avoid log noise on the success path.
@@ -891,6 +914,8 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
                     .with("producerPath", ProducerPath.SHARED)
                     .withOptional("clientId", resolvedClientId)
                     .with("thread", Thread.currentThread().getName()), e);
+        } finally {
+            prewarmingTopics.remove(topic);
         }
     }
 
@@ -1045,9 +1070,9 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
      * on this JVM despite mitigation. This indicates a node-level problem that requires
      * operator attention.
      *
-     * <p>Fault identity is keyed by exception class + error code, so the escalation message
-     * "the same fault has recurred" is actually true. Five different faults will not escalate;
-     * five occurrences of the same fault will.
+     * <p>Fault identity is keyed by relevant root-cause class + error code, so wrapper
+     * exceptions (e.g. RuntimeException) do not collapse different faults into one identity.
+     * Five different faults will not escalate; five occurrences of the same fault will.
      *
      * <p>Thresholds: 5 occurrences in 20 minutes. The observed incident was 5 in 18 minutes
      * across a whole worker node. We use 5 and 20 rather than 5 and 18 to avoid escalating
@@ -1064,9 +1089,10 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
             return;
         }
 
-        // Fault identity = exceptionClass + errorCode — so "same fault" claim is true
-        String exceptionClass = (cause != null) ? cause.getClass().getName() : "unknown";
-        String currentFaultIdentity = exceptionClass + ":" + errorCode.code();
+        // Fault identity = relevant root-cause class + errorCode
+        Throwable relevantCause = resolveNodeFaultIdentityCause(cause);
+        String relevantCauseClass = (relevantCause != null) ? relevantCause.getClass().getName() : "unknown";
+        String currentFaultIdentity = relevantCauseClass + ":" + errorCode.code();
 
         boolean shouldEscalate = false;
         int count = 0;
@@ -1095,8 +1121,27 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
         }
 
         if (shouldEscalate) {
-            emitNodeFaultEscalation(exceptionClass, errorCode, classification, count);
+            emitNodeFaultEscalation(relevantCauseClass, errorCode, classification, count);
         }
+    }
+
+    /**
+     * Resolves the relevant cause for node-fault identity, skipping wrapper exceptions where
+     * possible so that escalation groups by actual root cause.
+     */
+    private Throwable resolveNodeFaultIdentityCause(Throwable cause) {
+        if (cause == null) {
+            return null;
+        }
+        if (cause instanceof Exception) {
+            return KafkaErrorHelper.extractKafkaCause((Exception) cause);
+        }
+
+        Throwable current = cause;
+        while (current.getCause() != null && current.getCause() != current) {
+            current = current.getCause();
+        }
+        return current;
     }
 
     /**
@@ -1708,6 +1753,7 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
             // A replacement client starts with an empty metadata cache, so the pre-warm has to
             // happen again for every topic.
             prewarmedTopics.clear();
+            prewarmingTopics.clear();
         }
         if (avroHelper != null) {
             try {
