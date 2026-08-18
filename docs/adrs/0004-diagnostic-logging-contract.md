@@ -1,4 +1,4 @@
-# ADR 0002: Single, Enforced Diagnostic Logging Contract
+# ADR 0004: Single, Enforced Diagnostic Logging Contract
 
 ## Status
 Accepted (implemented on `feat/diagnostic-logging` branch), pending review
@@ -56,7 +56,7 @@ Rejected. The trace corpus proved these levels never reach the tenant trace file
 Rejected. MPL tracing was never active in the corpus (it is off by default), and the binding that would have enabled it never worked. Even when enabled, an MPL trace is per-message and cannot surface an adapter-level initialisation failure or a configuration defect that affects all messages.
 
 ### Emitting JSON log lines
-Rejected. JSON is parseable, but the `#`-separated trace format places unpredictable field boundaries in the middle of a record, so a JSON value containing `#` would be corrupted. Under time pressure, a `key=value` line is also easier to scan visually than a minified JSON blob.
+Rejected, but the argument is finer than it first appears. The obvious objection — that a `#` inside a JSON value would corrupt the record — applies just as much to a `key=value` value, so it does not distinguish the two. The real reason is that JSON's only advantage is machine parseability, and that advantage is already forfeited: the enclosing trace record cannot be split reliably (the thread name contains the delimiter), so a consumer must recover the payload with a regular expression regardless of what is inside it. What remains is the cost, and it falls on a human reading a truncated line under time pressure, for whom a minified JSON blob is materially harder to scan than a flat `key=value` sequence. If a machine-readable channel is ever genuinely needed, the right answer is a second explicit export, not a harder-to-read primary log.
 
 ### Using an MDC (Mapped Diagnostic Context)
 Rejected. SLF4J's MDC is a thread-local store that an appender can access when formatting. The CPI trace appender does not render MDC entries, so they would be lost identically to the `Throwable`. Additionally, the CPI runtime's thread pools do not propagate MDC context, so an identifier placed on the MDC by the Camel exchange lifecycle is not reliably present on the thread that eventually logs. The contract therefore places all context explicitly in the message text.
