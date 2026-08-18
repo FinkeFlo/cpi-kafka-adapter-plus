@@ -547,11 +547,14 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
             java.util.Properties props = ProducerConfigFactory.buildProducerProperties(endpoint);
             props.put(org.apache.kafka.clients.producer.ProducerConfig.TRANSACTIONAL_ID_CONFIG, transactionalId);
 
-            // transaction.two.phase.commit.enable controls Kafka Transaction Protocol V2 (KIP-890),
-            // introduced in Kafka 4.x. Confluent Cloud supports V2, but certain Kafka 4.x client
-            // versions have a bug in the TransactionManager that causes IllegalMonitorStateException
-            // when V2 is active. Set transactionV2Enabled=false in the adapter UI to force V1
-            // (the Kafka 3.x protocol) as a workaround until the upstream client bug is fixed.
+            // e6: transaction.two.phase.commit.enable controls KIP-939 Two-Phase Commit, NOT
+            // KIP-890 (Transaction Protocol V2 is broker-side and negotiated automatically).
+            // KIP-939 2PC changes how the coordinator handles prepared transactions.
+            //
+            // transactionV2Enabled=true  → config=true  → requests 2PC from broker
+            // transactionV2Enabled=false → config=false → traditional single-phase commit
+            //
+            // WARNING: Changing the default is a compatibility concern (separate branch).
             props.put(org.apache.kafka.clients.producer.ProducerConfig.TRANSACTION_TWO_PHASE_COMMIT_ENABLE_CONFIG,
                     endpoint.isTransactionV2Enabled());
 

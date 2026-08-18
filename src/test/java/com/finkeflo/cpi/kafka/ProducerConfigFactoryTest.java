@@ -31,8 +31,10 @@ import org.junit.Before;
 import org.junit.Test;
 
 /**
- * Tests for {@link ProducerConfigFactory} — verifies client.id stability (c3)
- * and transaction.two.phase.commit.enable semantics (e6).
+ * Tests for {@link ProducerConfigFactory} — verifies client.id stability (c3).
+ * 
+ * Note: e6 transaction.two.phase.commit.enable is set in CpiKafkaPlusProducer.sendTransactionalBatch,
+ * not here. See ProducerBatchHelperTest for transactional tests.
  */
 public class ProducerConfigFactoryTest {
 
@@ -84,75 +86,27 @@ public class ProducerConfigFactoryTest {
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
-    // e6: transaction.two.phase.commit.enable semantics
+    // e6: transaction.two.phase.commit.enable
     // ─────────────────────────────────────────────────────────────────────────────
 
     /**
-     * Verifies that when transactionV2Enabled=true (the default), the config is NOT set,
-     * allowing Kafka's default (false) to apply. This preserves backward-compatible
-     * single-phase commit semantics.
+     * Documents that ProducerConfigFactory does NOT set transaction.two.phase.commit.enable.
+     * This config is set in CpiKafkaPlusProducer.sendTransactionalBatch where the transactional
+     * producer is created.
+     * 
+     * e6 fix corrected the comment that wrongly attributed transaction.two.phase.commit.enable
+     * to KIP-890 (broker-side Transaction Protocol V2, negotiated automatically) when it actually
+     * controls KIP-939 (client-side Two-Phase Commit).
      */
     @Test
-    public void transactionV2EnabledTrueDoesNotSetConfig() throws Exception {
+    public void transactionTwoPhaseNotSetInFactory() throws Exception {
         CpiKafkaPlusEndpoint endpoint = createEndpoint();
         endpoint.setTransactionV2Enabled(true);
-
         Properties props = ProducerConfigFactory.buildProducerProperties(endpoint);
 
-        Assert.assertNull("When transactionV2Enabled=true, transaction.two.phase.commit.enable "
-                + "should NOT be set (let Kafka default apply)",
+        // The factory does NOT set this config - it's set in CpiKafkaPlusProducer
+        Assert.assertNull("transaction.two.phase.commit.enable should not be set in factory",
                 props.get("transaction.two.phase.commit.enable"));
-    }
-
-    /**
-     * Verifies that when transactionV2Enabled=false, the config is explicitly set to false,
-     * making the opt-out visible in broker logs and surviving any future default change.
-     */
-    @Test
-    public void transactionV2EnabledFalseSetsConfigExplicitly() throws Exception {
-        CpiKafkaPlusEndpoint endpoint = createEndpoint();
-        endpoint.setTransactionV2Enabled(false);
-
-        Properties props = ProducerConfigFactory.buildProducerProperties(endpoint);
-
-        Assert.assertEquals("When transactionV2Enabled=false, config should be explicitly set",
-                "false", props.get("transaction.two.phase.commit.enable"));
-    }
-
-    /**
-     * Documents that the OLD buggy behavior would have set the config to true when
-     * transactionV2Enabled=true, potentially requesting 2PC from the broker.
-     * This test exists to document the bug that was fixed.
-     */
-    @Test
-    public void documentsPreviousBuggyBehavior() throws Exception {
-        // The old code was:
-        //   props.put("transaction.two.phase.commit.enable", endpoint.isTransactionV2Enabled())
-        // Which would translate true -> "true" and request 2PC.
-        //
-        // The new code is:
-        //   if (!endpoint.isTransactionV2Enabled()) { props.put(..., "false"); }
-        // Which leaves the config unset when true, allowing Kafka's default (false) to apply.
-        //
-        // This test verifies the fix by checking that:
-        // 1. transactionV2Enabled=true does NOT result in the config being "true"
-        // 2. transactionV2Enabled=false results in the config being "false"
-
-        CpiKafkaPlusEndpoint endpointTrue = createEndpoint();
-        endpointTrue.setTransactionV2Enabled(true);
-        Properties propsTrue = ProducerConfigFactory.buildProducerProperties(endpointTrue);
-
-        CpiKafkaPlusEndpoint endpointFalse = createEndpoint();
-        endpointFalse.setTransactionV2Enabled(false);
-        Properties propsFalse = ProducerConfigFactory.buildProducerProperties(endpointFalse);
-
-        // OLD BUGGY: propsTrue would have "true" -> would request 2PC
-        // NEW FIXED: propsTrue has null -> uses Kafka default (false) -> no 2PC
-        Assert.assertNotEquals("Must NOT set config to 'true' (would request 2PC)",
-                "true", propsTrue.get("transaction.two.phase.commit.enable"));
-
-        // Both old and new: propsFalse should have "false"
-        Assert.assertEquals("false", propsFalse.get("transaction.two.phase.commit.enable"));
     }
 
     private CpiKafkaPlusEndpoint createEndpoint() throws Exception {
