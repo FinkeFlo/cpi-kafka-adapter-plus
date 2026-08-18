@@ -146,6 +146,16 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
 
         @Override
         public void handleException(String message, Exchange exchange, Exception e) {
+            // f2: Call traceError for consumer failures before delegating to the exception handler
+            java.util.Map<String, String> context = new java.util.LinkedHashMap<>();
+            context.put("topic", endpoint.getEffectiveTopic());
+            context.put("groupId", endpoint.getGroupId());
+            context.put("message", message);
+            tracingHelper.traceError(exchange, e, context, true);
+
+            // f1/f4/f5: Report failure with structured fields and attachment
+            tracingHelper.reportFailure(exchange, e, "CONSUMER_EXCEPTION", context, true);
+
             getExceptionHandler().handleException(message, exchange, e);
         }
 

@@ -22,6 +22,7 @@ package com.finkeflo.cpi.kafka;
 
 import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
+import java.util.Map;
 import java.util.UUID;
 
 import org.apache.camel.Endpoint;
@@ -30,14 +31,36 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Helper for CPI adapter tracing and connection monitoring.
+ * Helper for CPI adapter tracing, message processing log enrichment, and connection monitoring.
  * Uses reflection to access CPI runtime APIs that are only available at runtime.
+ *
+ * <p>Diagnostic enrichment uses three complementary channels, each with different visibility rules:
+ * <ol>
+ *   <li><b>Custom Header Properties</b> ({@code addCustomHeaderProperty}): Trace-independent,
+ *       always written regardless of whether trace is active. Searchable via Monitor UI and OData
+ *       (MessageProcessingLogCustomHeaderProperties). This is the PRIMARY channel for structured
+ *       error fields.</li>
+ *   <li><b>Adapter Attributes</b> ({@code putAdapterAttribute}): Also trace-independent. Called
+ *       unconditionally per SAP blog examples. Secondary channel for the same fields.</li>
+ *   <li><b>Trace Messages</b> ({@code writeTrace}): Only written when {@code isTraceActive()}
+ *       returns true (auto-reverts after 10 minutes). Used for full payload/error block dumps.</li>
+ *   <li><b>Attachments</b> ({@code addAttachmentAsString}): Always available. Used for the full
+ *       serialised error block so the diagnostic line stays bounded.</li>
+ *   <li><b>Status Events</b> ({@code fireStatusEvent(FAILED)}): Marks the message as failed in
+ *       the MPL without requiring trace level.</li>
+ * </ol>
+ *
+ * <p>Design rationale: MPL tracing was never actually active in analysed production traces, so
+ * trace-only enrichment is not sufficient. Custom header properties and adapter attributes are
+ * the trace-independent channels that survive regardless.
  */
 public class AdapterTracingHelper {
 
     private static final Logger LOG = LoggerFactory.getLogger(AdapterTracingHelper.class);
     private static final String COMPONENT_ID = "ctype::Adapter/cname::kafkaAdapterPlus/vendor::FinkeFlo/version::0.0.1";
     private static final int MAX_TRACE_PAYLOAD_BYTES = 25 * 1024 * 1024;
+    /** Attachment name for the full error diagnostic block. */
+    private static final String ERROR_ATTACHMENT_NAME = "KafkaAdapterError";
 
     private final CpiKafkaPlusEndpoint endpoint;
     /**
@@ -153,19 +176,204 @@ public class AdapterTracingHelper {
      * @param e         the exception that triggered the failure
      * @param context   additional key-value pairs to include in the trace (may be empty, not null)
      */
-    public void traceError(Exchange exchange, Exception e, java.util.Map<String, String> context) {
+    public void traceError(Exchange exchange, Exception e, Map<String, String> context) {
+        traceError(exchange, e, context, false);
+    }
+
+    /**
+     * Writes a structured error trace for a sender (consumer) direction failure.
+     *
+     * @param exchange  the current Camel exchange
+     * @param e         the exception that triggered the failure
+     * @param context   additional key-value pairs (may be empty)
+     * @param senderDirection  true for consumer/sender direction (SENDER_OUTBOUND_FAULT),
+     *                         false for producer/receiver direction (RECEIVER_INBOUND_FAULT)
+     */
+    public void traceError(Exchange exchange, Exception e, Map<String, String> context,
+                           boolean senderDirection) {
         StringBuilder sb = new StringBuilder();
         sb.append("ERROR: ").append(AdapterDiagnostics.describeThrowable(e));
 
         if (!context.isEmpty()) {
             sb.append("\n\n--- Context ---");
-            for (java.util.Map.Entry<String, String> entry : context.entrySet()) {
+            for (Map.Entry<String, String> entry : context.entrySet()) {
                 sb.append('\n').append(entry.getKey()).append(": ").append(entry.getValue());
             }
         }
 
-        writeTrace(exchange, sb.toString().getBytes(StandardCharsets.UTF_8),
-                "RECEIVER_INBOUND_FAULT", "Kafka send failed");
+        String traceType = senderDirection ? "SENDER_OUTBOUND_FAULT" : "RECEIVER_INBOUND_FAULT";
+        String logMessage = senderDirection ? "Kafka consume failed" : "Kafka send failed";
+        writeTrace(exchange, sb.toString().getBytes(StandardCharsets.UTF_8), traceType, logMessage);
+    }
+
+    /**
+     * Reports a failure to the MPL with full diagnostic enrichment: custom header properties,
+     * adapter attributes, an attachment with the full error block, and optionally a FAILED status
+     * event. This is the central failure-reporting method that surfaces structured fields to the
+     * MPL independently of whether trace is on.
+     *
+     * <p>Enrichment channels used (f1/f4/f5):
+     * <ul>
+     *   <li>{@code addCustomHeaderProperty}: errorCode, topic, producerPath, retryable — PRIMARY
+     *       channel, trace-independent, searchable via Monitor UI and OData.</li>
+     *   <li>{@code putAdapterAttribute}: Same fields — secondary channel, also trace-independent.</li>
+     *   <li>{@code addAttachmentAsString}: Full serialised error block as attachment.</li>
+     *   <li>{@code fireStatusEvent(FAILED)}: Marks the message as failed in the MPL when
+     *       {@code fireStatusEvent} is true.</li>
+     * </ul>
+     *
+     * @param exchange         the current Camel exchange
+     * @param e                the exception that triggered the failure
+     * @param errorCode        a structured error code string (e.g. "KAFKA_SEND_TIMEOUT") — may be
+     *                         null if no error code is available yet (e.g. before CpiKafkaPlusErrorCode
+     *                         is created by another agent)
+     * @param context          additional key-value pairs for the diagnostic (may be empty)
+     * @param fireStatusEvent  true to also fire {@code AdapterStatusEvent.FAILED}, which marks the
+     *                         message as failed in the MPL (requires getMessageLogWithStatus)
+     */
+    public void reportFailure(Exchange exchange, Exception e, String errorCode,
+                               Map<String, String> context, boolean fireStatusEvent) {
+        if (!adkMessageLogPresent || exchange == null) {
+            return;
+        }
+        Object factory = resolveMessageLogFactory(exchange);
+        if (factory == null) {
+            return;
+        }
+
+        // Build the full diagnostic block for the attachment
+        String fullDiagnostic = buildFullDiagnostic(e, errorCode, context);
+
+        // Determine retryability
+        String retryable = RecordProcessor.isRetryable(e) ? "true" : "false";
+
+        // Extract topic from context or endpoint
+        String topic = context.getOrDefault("topic", endpoint.getEffectiveTopic());
+
+        // Extract producerPath from context if present
+        String producerPath = context.get("producerPath");
+
+        try {
+            Object mplLog;
+            boolean useStatusVariant = fireStatusEvent;
+
+            Class<?> factoryInterface =
+                    Class.forName("com.sap.it.api.msglog.adapter.AdapterMessageLogFactory");
+            Class<?> messageLogInterface =
+                    Class.forName("com.sap.it.api.msglog.adapter.AdapterMessageLog");
+            Class<?> baseMessageLogInterface =
+                    Class.forName("com.sap.it.api.msglog.MessageLog");
+
+            if (useStatusVariant) {
+                // f5: Use getMessageLogWithStatus for firing the FAILED event
+                Method getMessageLogWithStatusMethod = factoryInterface.getMethod(
+                        "getMessageLogWithStatus",
+                        Object.class, String.class, String.class, String.class);
+                mplLog = getMessageLogWithStatusMethod.invoke(factory, exchange,
+                        "Kafka adapter failure", COMPONENT_ID, UUID.randomUUID().toString());
+            } else {
+                Method getMessageLogMethod = factoryInterface.getMethod("getMessageLog",
+                        Object.class, String.class, String.class, String.class);
+                mplLog = getMessageLogMethod.invoke(factory, exchange,
+                        "Kafka adapter failure", COMPONENT_ID, UUID.randomUUID().toString());
+            }
+
+            if (mplLog == null) {
+                return;
+            }
+
+            try {
+                // f1: PRIMARY channel — addCustomHeaderProperty (trace-independent)
+                Method addCustomHeaderProperty = baseMessageLogInterface.getMethod(
+                        "addCustomHeaderProperty", String.class, String.class);
+                if (errorCode != null) {
+                    addCustomHeaderProperty.invoke(mplLog, "KafkaAdapterErrorCode", errorCode);
+                }
+                addCustomHeaderProperty.invoke(mplLog, "KafkaAdapterTopic", topic);
+                if (producerPath != null) {
+                    addCustomHeaderProperty.invoke(mplLog, "KafkaAdapterProducerPath", producerPath);
+                }
+                addCustomHeaderProperty.invoke(mplLog, "KafkaAdapterRetryable", retryable);
+
+                // f1: Secondary channel — putAdapterAttribute (also trace-independent)
+                Method putAdapterAttribute = messageLogInterface.getMethod(
+                        "putAdapterAttribute", String.class, String.class);
+                if (errorCode != null) {
+                    putAdapterAttribute.invoke(mplLog, "errorCode", errorCode);
+                }
+                putAdapterAttribute.invoke(mplLog, "topic", topic);
+                if (producerPath != null) {
+                    putAdapterAttribute.invoke(mplLog, "producerPath", producerPath);
+                }
+                putAdapterAttribute.invoke(mplLog, "retryable", retryable);
+
+                // f4: Attachment with full error block
+                Method addAttachmentAsString = baseMessageLogInterface.getMethod(
+                        "addAttachmentAsString", String.class, String.class, String.class);
+                addAttachmentAsString.invoke(mplLog, ERROR_ATTACHMENT_NAME, fullDiagnostic, "text/plain");
+
+                // f5: Fire FAILED status event if requested
+                if (useStatusVariant) {
+                    Class<?> statusEventClass =
+                            Class.forName("com.sap.it.api.msglog.adapter.AdapterStatusEvent");
+                    Class<?> logWithStatusInterface =
+                            Class.forName("com.sap.it.api.msglog.adapter.AdapterMessageLogWithStatus");
+                    @SuppressWarnings("unchecked")
+                    Object failedEvent = Enum.valueOf((Class<Enum>) statusEventClass, "FAILED");
+                    String statusMessage = (errorCode != null ? errorCode + ": " : "")
+                            + (e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName());
+                    // Truncate status message to avoid exceeding any platform limits
+                    if (statusMessage.length() > 500) {
+                        statusMessage = statusMessage.substring(0, 497) + "...";
+                    }
+                    Method fireStatusEventMethod = logWithStatusInterface.getMethod(
+                            "fireStatusEvent", statusEventClass, String.class);
+                    fireStatusEventMethod.invoke(mplLog, failedEvent, statusMessage);
+                }
+
+                LOG.debug("MPL failure reported: errorCode={} topic={} retryable={} fireStatusEvent={}",
+                        errorCode, topic, retryable, useStatusVariant);
+            } finally {
+                // f5: Always close the log with status variant
+                if (useStatusVariant) {
+                    Class<?> logWithStatusInterface =
+                            Class.forName("com.sap.it.api.msglog.adapter.AdapterMessageLogWithStatus");
+                    Method closeMethod = logWithStatusInterface.getMethod("close");
+                    closeMethod.invoke(mplLog);
+                }
+            }
+        } catch (Exception reflectionError) {
+            reportUnavailableOnce("reportFailure reflection failed", reflectionError);
+        }
+    }
+
+    /**
+     * Builds the full diagnostic block for attachment.
+     */
+    private String buildFullDiagnostic(Exception e, String errorCode, Map<String, String> context) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("=== Kafka Adapter Plus Diagnostic ===\n\n");
+        if (errorCode != null) {
+            sb.append("Error Code: ").append(errorCode).append('\n');
+        }
+        sb.append("Exception: ").append(AdapterDiagnostics.describeThrowable(e)).append("\n\n");
+
+        if (!context.isEmpty()) {
+            sb.append("--- Context ---\n");
+            for (Map.Entry<String, String> entry : context.entrySet()) {
+                sb.append(entry.getKey()).append(": ").append(entry.getValue()).append('\n');
+            }
+            sb.append('\n');
+        }
+
+        // Add correlation IDs from CorrelationHelper patterns
+        sb.append("--- Correlation ---\n");
+        sb.append("endpoint.topic: ").append(endpoint.getEffectiveTopic()).append('\n');
+        sb.append("endpoint.groupId: ")
+                .append(endpoint.getGroupId() != null ? endpoint.getGroupId() : "N/A").append('\n');
+        sb.append("endpoint.bootstrapServers: ").append(endpoint.getBootstrapServers()).append('\n');
+
+        return sb.toString();
     }
 
     @SuppressWarnings("unchecked")

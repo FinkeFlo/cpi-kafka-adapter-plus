@@ -499,6 +499,20 @@ final class RecordProcessor {
             errorType = permanentError ? "PERMANENT" : "TRANSIENT";
         }
 
+        // f2: Trace the error for consumer/sender direction before routing to DLQ or exception handler
+        Exchange traceExchange = callback.createExchange();
+        java.util.Map<String, String> context = new java.util.LinkedHashMap<>();
+        context.put("topic", record.topic());
+        context.put("partition", String.valueOf(record.partition()));
+        context.put("offset", String.valueOf(record.offset()));
+        context.put("retryAttempts", String.valueOf(actualRetries));
+        context.put("errorType", errorType != null ? errorType : "UNKNOWN");
+        tracingHelper.traceError(traceExchange, lastError, context, true);
+
+        // f1/f4/f5: Report failure with structured fields and attachment
+        String errorCode = permanentError ? "CONSUMER_PERMANENT_ERROR" : "CONSUMER_RETRIES_EXHAUSTED";
+        tracingHelper.reportFailure(traceExchange, lastError, errorCode, context, true);
+
         if (dlqHelper != null) {
             try {
                 dlqHelper.sendToDlq(record, lastError, actualRetries, errorType);
@@ -541,6 +555,18 @@ final class RecordProcessor {
                                               ConsumerRecord<byte[], byte[]> record,
                                               Exception cause,
                                               boolean commitAfterSuccess) {
+        // f2: Trace the deserialization failure for consumer/sender direction
+        Exchange traceExchange = callback.createExchange();
+        java.util.Map<String, String> context = new java.util.LinkedHashMap<>();
+        context.put("topic", record.topic());
+        context.put("partition", String.valueOf(record.partition()));
+        context.put("offset", String.valueOf(record.offset()));
+        context.put("failureType", "DESERIALIZATION");
+        tracingHelper.traceError(traceExchange, cause, context, true);
+
+        // f1/f4/f5: Report failure with structured fields and attachment
+        tracingHelper.reportFailure(traceExchange, cause, "DESERIALIZATION_FAILED", context, true);
+
         if (dlqHelper == null) {
             throw cause instanceof RuntimeException
                     ? (RuntimeException) cause
@@ -858,11 +884,29 @@ final class RecordProcessor {
             mplExchange.getIn().setHeader("SAP_Sender", record.topic());
             tracingHelper.traceInbound(mplExchange, value);
             mplExchange.setProperty(Exchange.ROUTE_STOP, Boolean.TRUE);
-            mplExchange.setException(new RuntimeException(errorMsg));
+            RuntimeException validationException = new RuntimeException(errorMsg);
+            mplExchange.setException(validationException);
+
+            // f2: Call traceError for the consumer/sender direction (SENDER_OUTBOUND_FAULT)
+            java.util.Map<String, String> context = new java.util.LinkedHashMap<>();
+            context.put("topic", record.topic());
+            context.put("partition", String.valueOf(record.partition()));
+            context.put("offset", String.valueOf(record.offset()));
+            context.put("validationError", validationError);
+            tracingHelper.traceError(mplExchange, validationException, context, true);
+
+            // f1/f4/f5: Report failure with structured fields and attachment
+            tracingHelper.reportFailure(mplExchange, validationException,
+                    "SCHEMA_VALIDATION_FAILED", context, true);
+
             callback.processExchange(mplExchange);
         } catch (Exception e) {
-            LOG.debug("[CPI-KAFKA-PLUS-DIAG] reportValidationErrorToMpl failed for offset={}: {}",
-                    record.offset(), e.getMessage());
+            // b4: Swallowed error now logged at ERROR, not DEBUG — only ERROR reaches tenant trace
+            AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("consumer.mpl.report.failed")
+                    .with("topic", record.topic())
+                    .with("partition", record.partition())
+                    .with("offset", record.offset())
+                    .with("validationError", validationError), e);
         }
     }
 }

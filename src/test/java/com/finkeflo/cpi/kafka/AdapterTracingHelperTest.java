@@ -120,6 +120,58 @@ public class AdapterTracingHelperTest {
         Assert.assertNotNull(eventDetails.getMethod("setException", Throwable.class));
     }
 
+    /**
+     * f1/f4/f5: Verify the ADK signatures for the new MPL enrichment methods.
+     *
+     * <p>These methods are used by {@code reportFailure}:
+     * <ul>
+     *   <li>f1: {@code addCustomHeaderProperty(String, String)} on MessageLog interface</li>
+     *   <li>f1: {@code putAdapterAttribute(String, String)} on AdapterMessageLog interface</li>
+     *   <li>f4: {@code addAttachmentAsString(String, String, String)} on MessageLog interface</li>
+     *   <li>f5: {@code getMessageLogWithStatus(Object, String, String, String)} on factory</li>
+     *   <li>f5: {@code fireStatusEvent(AdapterStatusEvent, String)} on log-with-status interface</li>
+     *   <li>f5: {@code close()} on log-with-status interface (AutoCloseable)</li>
+     * </ul>
+     */
+    @Test
+    public void newMplEnrichmentSignaturesExist() throws Exception {
+        Class<?> factory = Class.forName("com.sap.it.api.msglog.adapter.AdapterMessageLogFactory");
+        Class<?> messageLog = Class.forName("com.sap.it.api.msglog.adapter.AdapterMessageLog");
+        Class<?> baseMessageLog = Class.forName("com.sap.it.api.msglog.MessageLog");
+        Class<?> logWithStatus = Class.forName("com.sap.it.api.msglog.adapter.AdapterMessageLogWithStatus");
+        Class<?> statusEvent = Class.forName("com.sap.it.api.msglog.adapter.AdapterStatusEvent");
+
+        // f1: addCustomHeaderProperty on MessageLog (base interface)
+        Assert.assertNotNull("f1: addCustomHeaderProperty must exist",
+                baseMessageLog.getMethod("addCustomHeaderProperty", String.class, String.class));
+
+        // f1: putAdapterAttribute on AdapterMessageLog
+        Assert.assertNotNull("f1: putAdapterAttribute must exist",
+                messageLog.getMethod("putAdapterAttribute", String.class, String.class));
+
+        // f4: addAttachmentAsString on MessageLog (base interface)
+        Assert.assertNotNull("f4: addAttachmentAsString must exist",
+                baseMessageLog.getMethod("addAttachmentAsString", String.class, String.class, String.class));
+
+        // f5: getMessageLogWithStatus on factory
+        Assert.assertNotNull("f5: getMessageLogWithStatus must exist",
+                factory.getMethod("getMessageLogWithStatus",
+                        Object.class, String.class, String.class, String.class));
+
+        // f5: fireStatusEvent(AdapterStatusEvent, String) on log-with-status interface
+        Assert.assertNotNull("f5: fireStatusEvent must exist",
+                logWithStatus.getMethod("fireStatusEvent", statusEvent, String.class));
+
+        // f5: close() on log-with-status interface (AutoCloseable)
+        Assert.assertNotNull("f5: close must exist",
+                logWithStatus.getMethod("close"));
+
+        // f5: AdapterStatusEvent.FAILED must be the only enum value
+        @SuppressWarnings("unchecked")
+        Object failedEvent = Enum.valueOf((Class<Enum>) statusEvent, "FAILED");
+        Assert.assertNotNull("f5: AdapterStatusEvent.FAILED must exist", failedEvent);
+    }
+
     /** Every trace-type name used as a string in the helper must exist in the ADK enum. */
     @Test
     public void everyTraceTypeNameResolves() throws Exception {
@@ -127,9 +179,18 @@ public class AdapterTracingHelperTest {
         Class<? extends Enum> traceType = (Class<? extends Enum>)
                 Class.forName("com.sap.it.api.msglog.adapter.AdapterTraceMessageType");
 
-        for (String name : new String[] {"SENDER_INBOUND", "RECEIVER_OUTBOUND", "RECEIVER_INBOUND_FAULT"}) {
+        // f3: Verify all trace types used in the helper including the fault types
+        for (String name : new String[] {
+                "SENDER_INBOUND",
+                "SENDER_OUTBOUND",
+                "SENDER_OUTBOUND_FAULT",  // f3: Used for consumer/sender direction errors
+                "RECEIVER_OUTBOUND",
+                "RECEIVER_INBOUND",
+                "RECEIVER_INBOUND_FAULT"  // f3: Used for producer/receiver direction errors
+        }) {
             Assert.assertNotNull(name, Enum.valueOf(traceType, name));
         }
+
         // Error traces use the fault variant. The receiver direction has no RECEIVER_OUTBOUND_FAULT,
         // so RECEIVER_INBOUND_FAULT is the correct value and this asserts the assumption holds.
         boolean receiverOutboundFaultExists = true;
@@ -150,5 +211,45 @@ public class AdapterTracingHelperTest {
         context.put("topic", "test-topic");
 
         helper.traceError(exchange, new IllegalStateException("boom"), context);
+    }
+
+    /**
+     * Off-platform (ADK absent) the traceError with direction parameter must stay silent.
+     */
+    @Test
+    public void traceErrorWithDirectionIsHarmlessWhenTheMplBindingIsUnavailable() {
+        org.apache.camel.Exchange exchange = new org.apache.camel.support.DefaultExchange(ctx);
+        java.util.Map<String, String> context = new java.util.LinkedHashMap<>();
+        context.put("topic", "test-topic");
+
+        // Sender direction (consumer side)
+        helper.traceError(exchange, new IllegalStateException("consumer fail"), context, true);
+
+        // Receiver direction (producer side)
+        helper.traceError(exchange, new IllegalStateException("producer fail"), context, false);
+    }
+
+    /**
+     * Off-platform (ADK absent) the reportFailure method must stay silent and not throw.
+     */
+    @Test
+    public void reportFailureIsHarmlessWhenTheMplBindingIsUnavailable() {
+        org.apache.camel.Exchange exchange = new org.apache.camel.support.DefaultExchange(ctx);
+        java.util.Map<String, String> context = new java.util.LinkedHashMap<>();
+        context.put("topic", "test-topic");
+        context.put("partition", "0");
+        context.put("offset", "12345");
+
+        // Without firing status event
+        helper.reportFailure(exchange, new IllegalStateException("test error"),
+                "TEST_ERROR_CODE", context, false);
+
+        // With firing status event
+        helper.reportFailure(exchange, new IllegalStateException("test error"),
+                "TEST_ERROR_CODE", context, true);
+
+        // With null error code (should not throw)
+        helper.reportFailure(exchange, new IllegalStateException("test error"),
+                null, context, false);
     }
 }

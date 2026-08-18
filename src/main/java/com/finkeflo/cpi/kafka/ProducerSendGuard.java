@@ -90,20 +90,30 @@ final class ProducerSendGuard {
      * abort paths, where the send outcome is only needed for diagnostics and must never replace the
      * original failure. Kafka's own send futures cannot be cancelled reliably, so a stalled future
      * stops the diagnostic drain without claiming that buffered records were released.
+     *
+     * <p>b4: Failures are now logged at ERROR with full stack traces via {@link AdapterDiagnostics},
+     * because only ERROR reaches the CPI tenant trace file. A swallowed send failure is exactly how
+     * the original production incident stayed invisible.
      */
     void awaitAllQuietly(List<Future<RecordMetadata>> futures, long deadlineMs) {
         for (int i = 0; i < futures.size(); i++) {
             try {
                 await(futures.get(i), deadlineMs, "Buffered record " + i);
             } catch (SendStalledException e) {
-                LOG.warn("[CPI-KAFKA-PLUS-DIAG] {}", e.getMessage());
+                // b4: Upgrade to ERROR with full stack trace — swallowed send failures stayed invisible
+                AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("producer.send.stalled")
+                        .with("recordIndex", i)
+                        .with("budgetMs", budgetMs)
+                        .with("securityProtocol", securityProtocol), e);
                 return;
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 return;
             } catch (Exception e) {
-                LOG.warn("[CPI-KAFKA-PLUS-DIAG] Buffered record {} failed during abort: {}",
-                        i, e.getMessage());
+                // b4: Upgrade to ERROR with full stack trace — swallowed failures stayed invisible
+                AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("producer.send.abort.failed")
+                        .with("recordIndex", i)
+                        .with("phase", "awaitAllQuietly"), e);
             }
         }
     }
