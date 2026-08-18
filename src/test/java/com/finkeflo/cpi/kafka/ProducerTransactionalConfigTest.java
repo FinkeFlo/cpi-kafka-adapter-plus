@@ -170,51 +170,50 @@ public class ProducerTransactionalConfigTest {
     }
 
     @Test
-    public void testTransactionV2DisabledAppliedToRegularProducer() throws Exception {
-        // transactionV2Enabled=false pins TRANSACTION_TWO_PHASE_COMMIT_ENABLE to false for ALL
-        // producers (not only transactional ones), so two-phase commit (KIP-939) can never be
-        // negotiated. Note: this does NOT disable Transaction Protocol V2 (KIP-890), which the
-        // client derives from the broker's finalized "transaction.version" feature.
-        try (org.apache.camel.impl.DefaultCamelContext ctx = new org.apache.camel.impl.DefaultCamelContext()) {
-            ctx.addComponent("cpi-kafka-plus", new CpiKafkaPlusComponent());
-            ctx.start();
+    public void testTwoPhaseCommitPinnedFalseRegardlessOfLegacyOption() throws Exception {
+        // The retired transactionV2Enabled option must not influence the producer config in either
+        // position: two-phase commit (KIP-939) is pinned to false for ALL producers. Note this does
+        // not touch Transaction Protocol V2 (KIP-890), which the client derives from the broker's
+        // finalized "transaction.version" feature.
+        for (String legacy : new String[]{"", "&transactionV2Enabled=false", "&transactionV2Enabled=true"}) {
+            try (org.apache.camel.impl.DefaultCamelContext ctx = new org.apache.camel.impl.DefaultCamelContext()) {
+                ctx.addComponent("cpi-kafka-plus", new CpiKafkaPlusComponent());
+                ctx.start();
 
-            String uri = "cpi-kafka-plus:some-topic?bootstrapServers=localhost%3A9999&securityProtocol=PLAINTEXT&transactionV2Enabled=false";
-            CpiKafkaPlusEndpoint endpoint = (CpiKafkaPlusEndpoint) ctx.getEndpoint(uri);
-            Assert.assertFalse("transactionV2Enabled should be false", endpoint.isTransactionV2Enabled());
+                String uri = "cpi-kafka-plus:some-topic?bootstrapServers=localhost%3A9999"
+                        + "&securityProtocol=PLAINTEXT" + legacy;
+                CpiKafkaPlusEndpoint endpoint = (CpiKafkaPlusEndpoint) ctx.getEndpoint(uri);
 
-            java.util.Properties props = ProducerConfigFactory.buildProducerProperties(endpoint);
-            Assert.assertEquals(
-                    "transaction.two.phase.commit.enable must be false for regular producer when transactionV2Enabled=false",
-                    false,
-                    props.get(org.apache.kafka.clients.producer.ProducerConfig.TRANSACTION_TWO_PHASE_COMMIT_ENABLE_CONFIG));
+                java.util.Properties props = ProducerConfigFactory.buildProducerProperties(endpoint);
+                Assert.assertEquals(
+                        "two-phase commit must be pinned to false for URI suffix '" + legacy + "'",
+                        false,
+                        props.get(org.apache.kafka.clients.producer.ProducerConfig
+                                .TRANSACTION_TWO_PHASE_COMMIT_ENABLE_CONFIG));
+            }
         }
     }
 
     @Test
-    public void testTransactionV2EnabledByDefaultForRegularProducer() throws Exception {
-        // Default (transactionV2Enabled=true): the adapter must not touch the config at all, so the
-        // Kafka client default (false) applies. It must never be set to true — that would request
-        // two-phase commit, which needs broker support and a TWO_PHASE_COMMIT ACL.
+    public void testLegacyTransactionV2UriParameterStillResolves() throws Exception {
+        // The option was removed from the channel UI in 1.2.6, but existing iFlows may still carry
+        // it in their endpoint URI. Camel must keep resolving such URIs instead of failing on an
+        // unknown parameter.
         try (org.apache.camel.impl.DefaultCamelContext ctx = new org.apache.camel.impl.DefaultCamelContext()) {
             ctx.addComponent("cpi-kafka-plus", new CpiKafkaPlusComponent());
             ctx.start();
 
-            String uri = "cpi-kafka-plus:some-topic?bootstrapServers=localhost%3A9999&securityProtocol=PLAINTEXT";
+            String uri = "cpi-kafka-plus:some-topic?bootstrapServers=localhost%3A9999"
+                    + "&securityProtocol=PLAINTEXT&transactionV2Enabled=false";
             CpiKafkaPlusEndpoint endpoint = (CpiKafkaPlusEndpoint) ctx.getEndpoint(uri);
-            Assert.assertTrue("transactionV2Enabled should default to true", endpoint.isTransactionV2Enabled());
-
-            java.util.Properties props = ProducerConfigFactory.buildProducerProperties(endpoint);
-            Assert.assertNull(
-                    "transaction.two.phase.commit.enable must not be set when transactionV2Enabled=true",
-                    props.get(org.apache.kafka.clients.producer.ProducerConfig.TRANSACTION_TWO_PHASE_COMMIT_ENABLE_CONFIG));
+            Assert.assertNotNull("legacy URI with transactionV2Enabled must still resolve", endpoint);
         }
     }
 
     @Test
     public void testTwoPhaseCommitNeverEnabledForTransactionalProducer() throws Exception {
         // Regression guard for 1.2.4: the transactional path must never write
-        // transaction.two.phase.commit.enable=true, regardless of transactionV2Enabled.
+        // transaction.two.phase.commit.enable=true.
         try (org.apache.camel.impl.DefaultCamelContext ctx = new org.apache.camel.impl.DefaultCamelContext()) {
             ctx.addComponent("cpi-kafka-plus", new CpiKafkaPlusComponent());
             ctx.start();
