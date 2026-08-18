@@ -166,17 +166,24 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
     private static final long REBUILD_BACKOFF_MS = 30_000L;
     private volatile long lastRebuildAttemptMs = 0L;
     private volatile int rebuildAttemptsSinceSuccess = 0;
+    /** Tracks whether a rebuild is pending effect confirmation from the next send. */
+    private volatile boolean pendingRebuildEffect = false;
 
     // ─────────────────────────────────────────────────────────────────────────────
-    // e4b: Node-level fault escalation — if the same fault recurs more than N times
-    // within T minutes despite mitigation, escalate to make the node problem visible.
+    // e4b: Node-level fault escalation — if the same fault (keyed by exception class +
+    // error code) recurs more than N times within T minutes despite mitigation, escalate
+    // to make the node problem visible.
     // Thresholds: 5 occurrences in 20 minutes (observed incident was 5 in 18 min).
     // ─────────────────────────────────────────────────────────────────────────────
     private static final int NODE_FAULT_ESCALATION_COUNT = 5;
     private static final long NODE_FAULT_ESCALATION_WINDOW_MS = 20 * 60 * 1000L;
-    private volatile long nodeFaultWindowStartMs = 0L;
-    private volatile int nodeFaultCountInWindow = 0;
-    private volatile boolean nodeFaultEscalated = false;
+    /** Lock for atomic escalation decisions. The incident involved 5 threads — volatile++ would race. */
+    private final Object nodeFaultLock = new Object();
+    /** Fault identity = exceptionClass + ":" + errorCode. Keyed to make "same fault" claim true. */
+    private String nodeFaultIdentity = null;
+    private long nodeFaultWindowStartMs = 0L;
+    private int nodeFaultCountInWindow = 0;
+    private boolean nodeFaultEscalated = false;
 
     public CpiKafkaPlusProducer(CpiKafkaPlusEndpoint endpoint) {
         super(endpoint);
@@ -878,10 +885,39 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
     void recordSendSuccess() {
         boolean wasRecovering = consecutiveSendFailures > 0;
         consecutiveSendFailures = 0;
+
+        // e4: Emit rebuild effect if this is the first success after a rebuild
+        if (pendingRebuildEffect) {
+            pendingRebuildEffect = false;
+            // Guard topic access on what is essentially a success path that follows a failure
+            String topic;
+            try {
+                topic = endpoint.getEffectiveTopic();
+            } catch (Exception e) {
+                topic = "<unavailable>";
+            }
+            AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("producer.rebuild.effect")
+                    .with("outcome", "RECOVERED")
+                    .with("producerPath", ProducerPath.SHARED)
+                    .withOptional("clientId", resolvedClientId)
+                    .withOptional("topic", topic)
+                    .with("thread", Thread.currentThread().getName()), null);
+        }
+
         if (wasRecovering) {
             tracingHelper.publishConnectionStatus(true, null);
-            LOG.info("[CPI-KAFKA-PLUS-DIAG] Send recovered after previous failures for topic='{}'",
-                    endpoint.getEffectiveTopic());
+            // Guard topic access — recovery logging is on a path that follows failures
+            String topic;
+            try {
+                topic = endpoint.getEffectiveTopic();
+            } catch (Exception e) {
+                topic = "<unavailable>";
+            }
+            AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("producer.send.recovered")
+                    .with("producerPath", ProducerPath.SHARED)
+                    .withOptional("clientId", resolvedClientId)
+                    .withOptional("topic", topic)
+                    .with("thread", Thread.currentThread().getName()), null);
         }
         // e4: Reset rebuild tracking on success
         rebuildAttemptsSinceSuccess = 0;
@@ -908,10 +944,20 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
         boolean intervalElapsed = (now - lastHeartbeatMs) >= HEARTBEAT_INTERVAL_MS;
 
         if (stateChanged || intervalElapsed) {
-            LOG.error("[CPI-KAFKA-PLUS-DIAG] producer.heartbeat: status=HEALTHY, producerPath=SHARED, "
-                    + "clientId={}, sendsSinceLastHeartbeat={}, topic={}, thread={}",
-                    resolvedClientId, sendsSinceLastHeartbeat, endpoint.getEffectiveTopic(),
-                    Thread.currentThread().getName());
+            // Guard topic access even on success path for consistency
+            String topic;
+            try {
+                topic = endpoint.getEffectiveTopic();
+            } catch (Exception e) {
+                topic = "<unavailable>";
+            }
+            AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("producer.heartbeat")
+                    .with("status", "HEALTHY")
+                    .with("producerPath", ProducerPath.SHARED)
+                    .withOptional("clientId", resolvedClientId)
+                    .with("sendsSinceLastHeartbeat", sendsSinceLastHeartbeat)
+                    .withOptional("topic", topic)
+                    .with("thread", Thread.currentThread().getName()), null);
             lastHeartbeatMs = now;
             lastHeartbeatHealthy = healthy;
             sendsSinceLastHeartbeat = 0;
@@ -975,7 +1021,7 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
         AdapterDiagnostics.error(LOG, event, e);
 
         // e4b: Check for node-level fault escalation
-        checkNodeFaultEscalation(classification, errorCode);
+        checkNodeFaultEscalation(classification, errorCode, e);
 
         if (shouldRebuild) {
             triggerReconnectWithMeasurement();
@@ -987,38 +1033,79 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
      * on this JVM despite mitigation. This indicates a node-level problem that requires
      * operator attention.
      *
+     * <p>Fault identity is keyed by exception class + error code, so the escalation message
+     * "the same fault has recurred" is actually true. Five different faults will not escalate;
+     * five occurrences of the same fault will.
+     *
      * <p>Thresholds: 5 occurrences in 20 minutes. The observed incident was 5 in 18 minutes
      * across a whole worker node. We use 5 and 20 rather than 5 and 18 to avoid escalating
      * on a single retryable blip that happens to cross a window boundary.
+     *
+     * <p>The window reset, increment and escalation decision are synchronized because the
+     * incident involved 5 concurrent threads — volatile++ races under exactly that load.
      */
-    private void checkNodeFaultEscalation(Classification classification, CpiKafkaPlusErrorCode errorCode) {
+    private void checkNodeFaultEscalation(Classification classification, CpiKafkaPlusErrorCode errorCode,
+                                           Throwable cause) {
         // Only track producer-unusable or unknown faults (not retriable or data errors)
         if (classification != Classification.FATAL_PRODUCER_UNUSABLE
                 && classification != Classification.UNKNOWN_FATAL) {
             return;
         }
 
-        long now = System.currentTimeMillis();
+        // Fault identity = exceptionClass + errorCode — so "same fault" claim is true
+        String exceptionClass = (cause != null) ? cause.getClass().getName() : "unknown";
+        String currentFaultIdentity = exceptionClass + ":" + errorCode.code();
 
-        // Reset window if it has expired
-        if ((now - nodeFaultWindowStartMs) > NODE_FAULT_ESCALATION_WINDOW_MS) {
-            nodeFaultWindowStartMs = now;
-            nodeFaultCountInWindow = 0;
-            nodeFaultEscalated = false;
+        boolean shouldEscalate = false;
+        int count = 0;
+
+        synchronized (nodeFaultLock) {
+            long now = System.currentTimeMillis();
+
+            // Reset window if expired OR if a different fault is seen (start fresh tracking)
+            boolean windowExpired = (now - nodeFaultWindowStartMs) > NODE_FAULT_ESCALATION_WINDOW_MS;
+            boolean differentFault = nodeFaultIdentity != null && !nodeFaultIdentity.equals(currentFaultIdentity);
+
+            if (windowExpired || differentFault) {
+                nodeFaultWindowStartMs = now;
+                nodeFaultCountInWindow = 0;
+                nodeFaultEscalated = false;
+                nodeFaultIdentity = currentFaultIdentity;
+            }
+
+            nodeFaultCountInWindow++;
+            count = nodeFaultCountInWindow;
+
+            if (count >= NODE_FAULT_ESCALATION_COUNT && !nodeFaultEscalated) {
+                nodeFaultEscalated = true;
+                shouldEscalate = true;
+            }
         }
 
-        nodeFaultCountInWindow++;
+        if (shouldEscalate) {
+            // Guard against endpoint.getEffectiveTopic() throwing on failure path
+            String topic;
+            try {
+                topic = endpoint.getEffectiveTopic();
+            } catch (Exception e) {
+                topic = "<unavailable>";
+            }
 
-        if (nodeFaultCountInWindow >= NODE_FAULT_ESCALATION_COUNT && !nodeFaultEscalated) {
-            nodeFaultEscalated = true;
-            LOG.error("[CPI-KAFKA-PLUS-DIAG] producer.node.fault.escalation: "
-                    + "THE SAME FAULT HAS RECURRED {} TIMES WITHIN {} MINUTES ON THIS JVM DESPITE MITIGATION. "
-                    + "This indicates a node-level problem requiring operator attention. "
-                    + "The node address is available in the trace record's second-to-last #-separated field. "
-                    + "classification={}, errorCode={}, clientId={}, topic={}, thread={}",
-                    nodeFaultCountInWindow, NODE_FAULT_ESCALATION_WINDOW_MS / 60_000,
-                    classification, errorCode.code(), resolvedClientId,
-                    endpoint.getEffectiveTopic(), Thread.currentThread().getName());
+            AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("producer.node.fault.escalation")
+                    .with("faultClass", exceptionClass)
+                    .with("errorCode", errorCode.code())
+                    .with("classification", classification)
+                    .with("countInWindow", count)
+                    .with("windowMinutes", NODE_FAULT_ESCALATION_WINDOW_MS / 60_000)
+                    .with("producerPath", ProducerPath.SHARED)
+                    .withOptional("clientId", resolvedClientId)
+                    .withOptional("topic", topic)
+                    .with("thread", Thread.currentThread().getName())
+                    .with("advice", "The same fault has recurred " + count + " times within "
+                            + (NODE_FAULT_ESCALATION_WINDOW_MS / 60_000) + " minutes on this JVM despite "
+                            + "mitigation. This indicates a node-level problem. The node address is available "
+                            + "in the trace record's second-to-last #-separated field."),
+                    null); // No throwable - the original failure is already logged
         }
     }
 
@@ -1026,41 +1113,48 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
      * e4: Triggers a producer rebuild and measures/logs the outcome.
      *
      * <p>The reason this method exists (instead of just calling {@link #triggerReconnect()})
-     * is that we currently rebuild and then have no idea whether it helped. This method emits
-     * whether the rebuild succeeded, how long it took, and whether the producer is now usable.
+     * is that we currently rebuild and then have no idea whether it helped.
+     *
+     * <p>This method emits {@code producerRecreated=true/false} and the duration. Whether the
+     * rebuild actually <i>helped</i> is determined by the next send: if that succeeds,
+     * {@link #recordSendSuccess()} emits {@code producer.rebuild.effect} with {@code outcome=RECOVERED}.
+     * If it fails, the diagnosis is that rebuilding did not help — which is visible from the
+     * failure line immediately following the rebuild line.
      */
     private void triggerReconnectWithMeasurement() {
         lastRebuildAttemptMs = System.currentTimeMillis();
         rebuildAttemptsSinceSuccess++;
+        pendingRebuildEffect = true; // Track whether next send shows recovery
 
         long rebuildStartMs = System.currentTimeMillis();
-        boolean rebuildSucceeded = false;
+        boolean producerRecreated = false;
         Exception rebuildException = null;
 
         try {
             triggerReconnect();
-            // If triggerReconnect didn't throw, check if producer is now usable
-            rebuildSucceeded = (kafkaProducer != null);
+            // A non-null producer only means it was constructed, not that it works
+            producerRecreated = (kafkaProducer != null);
         } catch (Exception e) {
             rebuildException = e;
         }
 
         long rebuildDurationMs = System.currentTimeMillis() - rebuildStartMs;
 
-        if (rebuildSucceeded) {
-            LOG.error("[CPI-KAFKA-PLUS-DIAG] producer.rebuild.outcome: status=SUCCESS, "
-                    + "durationMs={}, attemptsSinceLastSuccess={}, clientId={}, producerPath=SHARED, thread={}",
-                    rebuildDurationMs, rebuildAttemptsSinceSuccess, resolvedClientId,
-                    Thread.currentThread().getName());
+        // Route both success and failure through AdapterDiagnostics for consistent format
+        AdapterDiagnostics.Event event = AdapterDiagnostics.event("producer.rebuild.outcome")
+                .with("producerRecreated", producerRecreated)
+                .with("durationMs", rebuildDurationMs)
+                .with("attemptsSinceLastSuccess", rebuildAttemptsSinceSuccess)
+                .with("producerPath", ProducerPath.SHARED)
+                .withOptional("clientId", resolvedClientId)
+                .with("thread", Thread.currentThread().getName());
+
+        if (rebuildException != null) {
+            AdapterDiagnostics.error(LOG, event.with("rebuildException", rebuildException.getClass().getSimpleName()),
+                    rebuildException);
         } else {
-            AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("producer.rebuild.outcome")
-                    .with("status", "FAILED")
-                    .with("durationMs", rebuildDurationMs)
-                    .with("attemptsSinceLastSuccess", rebuildAttemptsSinceSuccess)
-                    .with("producerPath", ProducerPath.SHARED)
-                    .withOptional("clientId", resolvedClientId)
-                    .with("thread", Thread.currentThread().getName()),
-                    rebuildException != null ? rebuildException : new RuntimeException("Producer still null after rebuild"));
+            // No throwable - just log the outcome. Next send will close the loop.
+            AdapterDiagnostics.error(LOG, event, null);
         }
     }
 
@@ -1077,8 +1171,18 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
         boolean wasRecovering = consecutiveTxnSendFailures > 0;
         consecutiveTxnSendFailures = 0;
         if (wasRecovering) {
-            LOG.info("[CPI-KAFKA-PLUS-DIAG] Transactional send recovered after previous failures for topic='{}'",
-                    endpoint.getEffectiveTopic());
+            // Recovery after failure is a low-volume, high-value event that justifies ERROR.
+            // INFO does not reach the CPI tenant trace file, so recovery would be invisible.
+            String topic;
+            try {
+                topic = endpoint.getEffectiveTopic();
+            } catch (Exception e) {
+                topic = "<unavailable>";
+            }
+            AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("producer.transactional.send.recovered")
+                    .with("producerPath", ProducerPath.TRANSACTIONAL)
+                    .withOptional("topic", topic)
+                    .with("thread", Thread.currentThread().getName()), null);
         }
     }
 
