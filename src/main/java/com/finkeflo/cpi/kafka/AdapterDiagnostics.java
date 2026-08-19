@@ -62,6 +62,14 @@ final class AdapterDiagnostics {
     private static final int MAX_MESSAGE_CHARS = 300;
     /** Overall budget for a single rendered line. */
     private static final int MAX_TOTAL_CHARS = 8000;
+    /**
+     * Budget for a stack trace rendered into an MPL attachment. Two orders of magnitude above the
+     * line budget because an attachment is not a log line, but still bounded: SAP documents no
+     * per-attachment limit, so the only real ceiling is tenant disk space, and a record that fails
+     * on every poll writes one of these per delivery. A full trace is kilobytes, so this cap is
+     * reached only by something pathological — which is exactly when a cap is wanted.
+     */
+    static final int MAX_ATTACHMENT_CHARS = 128 * 1024;
 
     private AdapterDiagnostics() {}
 
@@ -205,6 +213,54 @@ final class AdapterDiagnostics {
             out.append(" CAUSED_BY …(chain truncated)");
         }
         return out.toString();
+    }
+
+    /**
+     * Renders a throwable in the standard multi-line JVM form — every frame, every {@code Caused
+     * by:}, every {@code Suppressed:} — capped at {@code maxChars}.
+     *
+     * <p>This is the counterpart to {@link #describeThrowable}, not a replacement for it. That one
+     * flattens an exception into a single line because the tenant trace file stores one record per
+     * line, which forces a hard budget of twelve frames per level. An MPL attachment has no such
+     * constraint, and a failure that originates outside the adapter — a mapping, a script, a router
+     * — is frequently unreadable within twelve frames, because the adapter's own frames are at the
+     * top and the actual cause is far below.
+     *
+     * <p>{@code printStackTrace} is used rather than a hand-rolled walk so the output is the exact
+     * form every Java developer already reads, including the JDK's own circular-reference guard.
+     *
+     * <p>Never throws. It runs on a failure path, where a secondary exception would replace the
+     * incident it was meant to describe. A throwable whose {@code getMessage()} throws — rare, but
+     * real in code that builds messages lazily — therefore yields whatever was rendered before the
+     * failure plus a marker naming it, rather than an exception of its own.
+     *
+     * @param maxChars the budget; a non-positive value means unbounded
+     */
+    static String renderFullStackTrace(Throwable t, int maxChars) {
+        if (t == null) {
+            return "null";
+        }
+        java.io.StringWriter sink = new java.io.StringWriter(2048);
+        try {
+            java.io.PrintWriter writer = new java.io.PrintWriter(sink);
+            t.printStackTrace(writer);
+            writer.flush();
+        } catch (Throwable renderingFailed) {
+            String partial = sink.toString();
+            String marker = "…[stack trace rendering failed: "
+                    + renderingFailed.getClass().getName() + "]";
+            return partial.isEmpty() ? marker : cap(partial, maxChars) + '\n' + marker;
+        }
+        return cap(sink.toString(), maxChars);
+    }
+
+    /** Applies a character budget and states in the output what was dropped, rather than hiding it. */
+    private static String cap(String text, int maxChars) {
+        if (maxChars <= 0 || text.length() <= maxChars) {
+            return text;
+        }
+        return text.substring(0, maxChars) + "\n…[truncated: " + (text.length() - maxChars)
+                + " of " + text.length() + " chars omitted]";
     }
 
     private static void appendSingle(StringBuilder out, Throwable t) {

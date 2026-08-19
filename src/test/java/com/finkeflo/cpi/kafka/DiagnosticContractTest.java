@@ -291,31 +291,124 @@ public class DiagnosticContractTest {
      * failure mode as instrumentation that never emits, just moved into the configuration layer
      * where the other rules in this class cannot see it.
      *
-     * <p>The rule is conditional rather than a flat prohibition: offering the option on the sender
-     * is fine as soon as something on the consumer path actually reads it. It fails only for the
-     * combination that misleads.
+     * <p>The rule is conditional rather than a flat prohibition: an option may be offered on a
+     * channel as soon as something on that channel's runtime path actually reads it. It fails only
+     * for the combination that misleads. It is expressed as a table because the defect is not
+     * specific to one option — every option added to a metadata file can repeat it.
      */
     @Test
     public void anOptionIsNotOfferedOnAChannelThatIgnoresIt() throws IOException {
-        String senderMetadata = read(Paths.get("src/main/resources/metadata/metadata-sender-1.2.0.xml"));
-        if (!senderMetadata.contains("diagnosticsLevel")) {
+        // option, the accessor a runtime class has to call, and which side has to call it
+        assertOptionIsReadWhereItIsOffered("diagnosticsLevel", "isDiagnosticsLevelFull", Channel.SENDER);
+        assertOptionIsReadWhereItIsOffered("writeMplErrorAttachment", "isWriteMplErrorAttachment", Channel.SENDER);
+        assertOptionIsReadWhereItIsOffered("diagnosticsLevel", "isDiagnosticsLevelFull", Channel.RECEIVER);
+        assertOptionIsReadWhereItIsOffered("writeMplErrorAttachment", "isWriteMplErrorAttachment", Channel.RECEIVER);
+    }
+
+    private enum Channel {
+        /** The sender channel consumes from Kafka, so its runtime path is the consumer side. */
+        SENDER("metadata-sender-1.2.0.xml") {
+            @Override
+            boolean isRuntimeClass(String fileName) {
+                return fileName.contains("Consumer") || fileName.contains("RecordProcessor");
+            }
+        },
+        /** The receiver channel produces to Kafka, so its runtime path is the producer side. */
+        RECEIVER("metadata-receiver-1.2.0.xml") {
+            @Override
+            boolean isRuntimeClass(String fileName) {
+                return fileName.contains("Producer");
+            }
+        };
+
+        private final String metadataFile;
+
+        Channel(String metadataFile) {
+            this.metadataFile = metadataFile;
+        }
+
+        abstract boolean isRuntimeClass(String fileName);
+    }
+
+    private void assertOptionIsReadWhereItIsOffered(String option, String accessor, Channel channel)
+            throws IOException {
+        String metadata = read(Paths.get("src/main/resources/metadata/" + channel.metadataFile));
+        if (!metadata.contains(option)) {
             return;
         }
 
-        List<String> consumerSideReaders = new ArrayList<>();
+        List<String> readers = new ArrayList<>();
         for (Path p : adapterSources()) {
             String name = p.getFileName().toString();
-            boolean consumerSide = name.contains("Consumer") || name.contains("RecordProcessor");
-            if (consumerSide && read(p).contains("isDiagnosticsLevelFull")) {
-                consumerSideReaders.add(name);
+            if (channel.isRuntimeClass(name) && read(p).contains(accessor)) {
+                readers.add(name);
             }
         }
 
-        assertFalse("The sender metadata offers 'diagnosticsLevel', but no consumer-side class reads "
-                        + "it, so selecting FULL on a sender channel changes nothing at all. Either "
-                        + "implement a consumer-side effect or remove the option from the sender "
-                        + "metadata and from docs/configuration.md.",
-                consumerSideReaders.isEmpty());
+        assertFalse("The " + channel.name().toLowerCase() + " metadata offers '" + option
+                        + "', but no class on that channel's runtime path calls " + accessor
+                        + "(), so setting it changes nothing at all. Either implement the effect on "
+                        + "that side or remove the option from " + channel.metadataFile
+                        + " and from docs/configuration.md.",
+                readers.isEmpty());
+    }
+
+    /**
+     * The ERROR line in {@code reportFailure} must be emitted before the method touches the ADK, and
+     * must not be conditional on anything.
+     *
+     * <p>Everything after that point depends on a Message Processing Log handle: it is skipped
+     * entirely off-platform, it is skipped when the ADK binding is dead, and — as long as
+     * {@code handleRetryExhausted} reports against a freshly created exchange — it can be written
+     * against the wrong log entry. The ERROR line is therefore the only channel guaranteed to carry
+     * the failure. Moving it below the ADK section, or behind any of the flags that govern the
+     * optional channels, would silently make a failure disappear under exactly the conditions that
+     * produce failures.
+     */
+    @Test
+    public void reportFailureLogsTheErrorBeforeAndIndependentlyOfTheMessageProcessingLog() throws IOException {
+        String source = read(SOURCE_ROOT.resolve("AdapterTracingHelper.java"));
+        String signature = "boolean writeAttachment, boolean fullStack) {";
+        int signatureAt = source.indexOf(signature);
+        assertTrue("reportFailure's implementing overload was not found — this test has drifted "
+                + "from the code it guards.", signatureAt > 0);
+        // Start behind the signature: it names the parameters this test looks for, so including it
+        // would make the rule report itself.
+        int bodyStart = signatureAt + signature.length();
+
+        int errorLine = source.indexOf("AdapterDiagnostics.error(LOG, errorEvent, e);", bodyStart);
+        int adkGuard = source.indexOf("if (!adkMessageLogPresent", bodyStart);
+        assertTrue("reportFailure no longer emits the unconditional ERROR line.", errorLine > 0);
+        assertTrue("reportFailure no longer guards the ADK section.", adkGuard > 0);
+        assertTrue("The ERROR line must precede the ADK section, otherwise a dead or wrongly "
+                + "correlated Message Processing Log takes the diagnosis with it.", errorLine < adkGuard);
+
+        String preamble = source.substring(bodyStart, errorLine);
+        assertFalse("The ERROR line in reportFailure became conditional. It is the only channel that "
+                        + "survives a dead MPL binding, so it must run for every failure:\n" + preamble,
+                preamble.contains("writeAttachment") || preamble.contains("fullStack")
+                        || preamble.contains("isWriteMplErrorAttachment"));
+    }
+
+    /**
+     * The attachment costs tenant storage on every failure, so it must be written only when the
+     * calling channel asked for it — and the reflective lookup that prepares it must sit inside the
+     * same guard, or the class resolution is paid for an attachment that is never written.
+     */
+    @Test
+    public void theErrorAttachmentIsWrittenOnlyWhenRequested() throws IOException {
+        String source = read(SOURCE_ROOT.resolve("AdapterTracingHelper.java"));
+        int write = source.indexOf("addAttachmentAsString.invoke(");
+        assertTrue("The attachment write was not found.", write > 0);
+
+        int guard = source.lastIndexOf("if (writeAttachment) {", write);
+        assertTrue("The attachment is written unconditionally. It consumes tenant storage on every "
+                + "single failure, including a record redelivered on every poll, so it has to stay "
+                + "behind the channel's opt-in.", guard > 0);
+
+        int lookup = source.lastIndexOf("\"addAttachmentAsString\"", write);
+        assertTrue("The reflective addAttachmentAsString lookup sits outside the writeAttachment "
+                + "guard, so it is resolved even when nothing is attached.", lookup > guard);
     }
 
     private static String firstLine(String statement) {

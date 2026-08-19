@@ -248,6 +248,115 @@ public class AdapterDiagnosticsTest {
         Assert.assertTrue(logged, logged.contains("java.lang.IllegalStateException"));
     }
 
+    // --- renderFullStackTrace: the attachment form ---
+
+    /** A throwable whose message cannot be produced. Rare in the JDK, real in lazily built messages. */
+    private static final class HostileThrowable extends RuntimeException {
+        private static final long serialVersionUID = 1L;
+
+        HostileThrowable() {
+            super("never read");
+        }
+
+        @Override
+        public String getMessage() {
+            throw new IllegalStateException("message computation failed");
+        }
+    }
+
+    private static Throwable nestedFailure() {
+        Throwable root = thrown(() -> { throw new IllegalArgumentException("root cause"); });
+        Throwable middle = new IllegalStateException("middle layer", root);
+        RuntimeException top = new RuntimeException("top layer", middle);
+        top.addSuppressed(new IllegalStateException("suppressed close failure"));
+        return top;
+    }
+
+    @Test
+    public void fullStackTraceCarriesEveryCauseLevelAndSuppressedException() {
+        String rendered = AdapterDiagnostics.renderFullStackTrace(nestedFailure(), 0);
+
+        Assert.assertTrue(rendered, rendered.contains("java.lang.RuntimeException: top layer"));
+        Assert.assertTrue(rendered, rendered.contains("Caused by: java.lang.IllegalStateException: middle layer"));
+        Assert.assertTrue(rendered, rendered.contains("Caused by: java.lang.IllegalArgumentException: root cause"));
+        Assert.assertTrue(rendered, rendered.contains("Suppressed: java.lang.IllegalStateException: suppressed close failure"));
+        // Multi-line by construction — this is the property the compact form cannot have, and the
+        // reason the attachment exists at all.
+        Assert.assertTrue(rendered, rendered.contains("\n\tat "));
+    }
+
+    /**
+     * The compact line form caps at 12 frames per level. The attachment must not, because a failure
+     * raised outside the adapter puts its actual cause far below the adapter's own frames.
+     */
+    @Test
+    public void fullStackTraceIsNotLimitedToTwelveFramesPerLevel() {
+        Throwable deep = thrown(() -> recurseThenThrow(40));
+
+        String compact = AdapterDiagnostics.describeThrowable(deep);
+        String full = AdapterDiagnostics.renderFullStackTrace(deep, 0);
+
+        Assert.assertTrue(compact, compact.contains("more)"));
+        Assert.assertTrue("the full form must show more frames than the compact one",
+                countOccurrences(full, "\tat ") > 12);
+    }
+
+    @Test
+    public void fullStackTraceIsCappedAndSaysWhatItDropped() {
+        Throwable deep = thrown(() -> recurseThenThrow(40));
+        String uncapped = AdapterDiagnostics.renderFullStackTrace(deep, 0);
+
+        int cap = 200;
+        String capped = AdapterDiagnostics.renderFullStackTrace(deep, cap);
+
+        Assert.assertTrue("the fixture must be long enough to be truncated", uncapped.length() > cap);
+        Assert.assertTrue(capped, capped.startsWith(uncapped.substring(0, cap)));
+        // The numbers must be the real ones: a truncation notice that cannot be checked against the
+        // original is not evidence, it is decoration.
+        Assert.assertTrue(capped, capped.endsWith("…[truncated: " + (uncapped.length() - cap)
+                + " of " + uncapped.length() + " chars omitted]"));
+    }
+
+    @Test
+    public void fullStackTraceLeavesShortTracesUntouched() {
+        Throwable t = thrown(() -> { throw new IllegalStateException("short"); });
+        String rendered = AdapterDiagnostics.renderFullStackTrace(t, AdapterDiagnostics.MAX_ATTACHMENT_CHARS);
+        Assert.assertFalse(rendered, rendered.contains("truncated"));
+    }
+
+    @Test
+    public void fullStackTraceSurvivesNull() {
+        Assert.assertEquals("null", AdapterDiagnostics.renderFullStackTrace(null, 4096));
+    }
+
+    /**
+     * The attachment is written while an incident is being reported. A diagnostic that throws would
+     * replace the very failure it was meant to describe — the failure mode ADR 0004 exists to
+     * prevent — so a throwable that cannot render itself must degrade, not propagate.
+     */
+    @Test
+    public void fullStackTraceSurvivesAThrowableThatCannotRenderItself() {
+        String rendered = AdapterDiagnostics.renderFullStackTrace(new HostileThrowable(), 4096);
+
+        Assert.assertTrue(rendered, rendered.contains("stack trace rendering failed"));
+        Assert.assertTrue(rendered, rendered.contains("java.lang.IllegalStateException"));
+    }
+
+    private static void recurseThenThrow(int depth) {
+        if (depth <= 0) {
+            throw new IllegalStateException("deep failure");
+        }
+        recurseThenThrow(depth - 1);
+    }
+
+    private static int countOccurrences(String haystack, String needle) {
+        int count = 0;
+        for (int i = haystack.indexOf(needle); i >= 0; i = haystack.indexOf(needle, i + needle.length())) {
+            count++;
+        }
+        return count;
+    }
+
     private static IllegalMonitorStateException thrownMonitorState() {
         Object monitor = new Object();
         try {

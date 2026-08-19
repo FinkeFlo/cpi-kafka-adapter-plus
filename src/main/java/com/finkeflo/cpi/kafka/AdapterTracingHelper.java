@@ -44,8 +44,10 @@ import org.slf4j.LoggerFactory;
  *       unconditionally per SAP blog examples. Secondary channel for the same fields.</li>
  *   <li><b>Trace Messages</b> ({@code writeTrace}): Only written when {@code isTraceActive()}
  *       returns true (auto-reverts after 10 minutes). Used for full payload/error block dumps.</li>
- *   <li><b>Attachments</b> ({@code addAttachmentAsString}): Always available. Used for the full
- *       serialised error block so the diagnostic line stays bounded.</li>
+ *   <li><b>Attachments</b> ({@code addAttachmentAsString}): Opt-in per channel. Carries the full
+ *       serialised error block, optionally including the complete stack trace, so the diagnostic
+ *       line stays bounded. Off by default because it is the only channel here that consumes
+ *       tenant storage, and it consumes it on every single failure.</li>
  *   <li><b>Status Events</b> ({@code fireStatusEvent(FAILED)}): Marks the message as failed in
  *       the MPL without requiring trace level.</li>
  * </ol>
@@ -224,7 +226,8 @@ public class AdapterTracingHelper {
      *   <li>{@code addCustomHeaderProperty}: errorCode, topic, producerPath, retryable — PRIMARY
      *       channel, trace-independent, searchable via Monitor UI and OData.</li>
      *   <li>{@code putAdapterAttribute}: Same fields — secondary channel, also trace-independent.</li>
-     *   <li>{@code addAttachmentAsString}: Full serialised error block as attachment.</li>
+     *   <li>{@code addAttachmentAsString}: Full serialised error block as attachment, when the
+     *       calling channel asks for it.</li>
      *   <li>{@code fireStatusEvent(FAILED)}: Marks the message as failed in the MPL when
      *       {@code fireStatusEvent} is true.</li>
      * </ul>
@@ -240,6 +243,28 @@ public class AdapterTracingHelper {
      */
     public void reportFailure(Exchange exchange, Exception e, String errorCode,
                                Map<String, String> context, boolean fireStatusEvent) {
+        // Attaches unconditionally, in the compact rendering: this is what the consumer paths have
+        // always done, and changing their monitor output is a separate decision from adding the
+        // producer paths. See the overload below.
+        reportFailure(exchange, e, errorCode, context, fireStatusEvent, true, false);
+    }
+
+    /**
+     * Same as {@link #reportFailure(Exchange, Exception, String, Map, boolean)}, with explicit
+     * control over the attachment.
+     *
+     * <p>The attachment is the one channel here that costs tenant storage, and it costs it on every
+     * failure — a record that cannot be processed is redelivered on every poll, so a stalled
+     * partition writes one per delivery. It is therefore opt-in on the channel that reads the
+     * option, while every other channel stays unconditional.
+     *
+     * @param writeAttachment  true to attach the serialised error block
+     * @param fullStack        true to append the complete multi-line stack trace to that
+     *                         attachment, in addition to the compact rendering in its header
+     */
+    public void reportFailure(Exchange exchange, Exception e, String errorCode,
+                               Map<String, String> context, boolean fireStatusEvent,
+                               boolean writeAttachment, boolean fullStack) {
         // Always emit ERROR log with errorCode — this is the primary diagnostic channel because
         // only ERROR reaches the CPI tenant trace file, and MPL tracing is often inactive.
         // The errorCode enables grep-based triage on the trace file.
@@ -275,8 +300,11 @@ public class AdapterTracingHelper {
         boolean useStatusVariant = fireStatusEvent;
 
         try {
-            // Build the full diagnostic block for the attachment (null-safe)
-            String fullDiagnostic = buildFullDiagnosticSafe(e, errorCode, safeContext);
+            // Build the error block only when it is going to be attached — serialising a full
+            // stack trace for nobody would be paid on every failure.
+            String fullDiagnostic = writeAttachment
+                    ? buildFullDiagnosticSafe(e, errorCode, safeContext, fullStack)
+                    : null;
 
             // Determine retryability (null-safe)
             String retryable = isRetryableSafe(e) ? "true" : "false";
@@ -334,10 +362,12 @@ public class AdapterTracingHelper {
                 }
                 putAdapterAttribute.invoke(mplLog, "retryable", retryable);
 
-                // f4: Attachment with full error block
-                Method addAttachmentAsString = baseMessageLogInterface.getMethod(
-                        "addAttachmentAsString", String.class, String.class, String.class);
-                addAttachmentAsString.invoke(mplLog, ERROR_ATTACHMENT_NAME, fullDiagnostic, "text/plain");
+                // f4: Attachment with full error block — opt-in, see the parameter javadoc
+                if (writeAttachment) {
+                    Method addAttachmentAsString = baseMessageLogInterface.getMethod(
+                            "addAttachmentAsString", String.class, String.class, String.class);
+                    addAttachmentAsString.invoke(mplLog, ERROR_ATTACHMENT_NAME, fullDiagnostic, "text/plain");
+                }
 
                 // f5: Fire FAILED status event if requested
                 if (useStatusVariant) {
@@ -419,9 +449,10 @@ public class AdapterTracingHelper {
     }
 
     /** Null-safe wrapper for building the full diagnostic. */
-    private String buildFullDiagnosticSafe(Exception e, String errorCode, Map<String, String> context) {
+    private String buildFullDiagnosticSafe(Exception e, String errorCode, Map<String, String> context,
+                                           boolean fullStack) {
         try {
-            return buildFullDiagnostic(e, errorCode, context);
+            return buildFullDiagnostic(e, errorCode, context, fullStack);
         } catch (Exception ignored) {
             return "Failed to build diagnostic for: " + (errorCode != null ? errorCode : "unknown error");
         }
@@ -429,8 +460,14 @@ public class AdapterTracingHelper {
 
     /**
      * Builds the full diagnostic block for attachment (null-safe for context).
+     *
+     * <p>With {@code fullStack}, the compact single-line rendering is followed by the complete
+     * multi-line stack trace. The compact form is kept alongside it rather than replaced: it is the
+     * string an operator greps for in the tenant trace file, so having the identical text in the
+     * attachment is what lets the two be matched up.
      */
-    private String buildFullDiagnostic(Exception e, String errorCode, Map<String, String> context) {
+    private String buildFullDiagnostic(Exception e, String errorCode, Map<String, String> context,
+                                       boolean fullStack) {
         Map<String, String> safeContext = context != null ? context : java.util.Collections.emptyMap();
         StringBuilder sb = new StringBuilder();
         sb.append("=== Kafka Adapter Plus Diagnostic ===\n\n");
@@ -452,6 +489,12 @@ public class AdapterTracingHelper {
         sb.append("endpoint.topic: ").append(getEffectiveTopicSafe()).append('\n');
         sb.append("endpoint.groupId: ").append(getGroupIdSafe()).append('\n');
         sb.append("endpoint.bootstrapServers: ").append(getBootstrapServersSafe()).append('\n');
+
+        if (fullStack) {
+            sb.append("\n--- Stack trace ---\n");
+            sb.append(AdapterDiagnostics.renderFullStackTrace(e, AdapterDiagnostics.MAX_ATTACHMENT_CHARS));
+            sb.append('\n');
+        }
 
         return sb.toString();
     }

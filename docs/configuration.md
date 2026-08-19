@@ -192,6 +192,7 @@ For detailed security setup, see [Authentication](security/authentication.md).
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `diagnosticsLevel` | `STANDARD` | Diagnostic output level. `STANDARD` (default) is fully diagnostic on its own: every failure produces one structured ERROR line with the complete serialised cause chain. `FULL` adds exactly one thing, a bounded thread dump (at most 20 threads, 10 frames each, with lock owners) attached to the node-fault escalation that fires when the same fault recurs 5 times in 20 minutes. Leave this on `STANDARD` unless you are actively investigating such a fault. |
+| `writeMplErrorAttachment` | `false` | Attach the full error details, including the real multi-line stack trace with `Caused by:` and `Suppressed:` entries, to the failed message in Message Monitoring under the name `KafkaAdapterError` (capped at 128 KB). Off by default because an attachment is written per failure and consumes tenant storage shared with every other integration flow — a message the broker rejects is retried, so one stuck message keeps writing. It gates the attachment only: the error code, topic, producer path and retryable flag reach the monitor either way, and the full cause chain always reaches the tenant trace file. Switch it on for an investigation, then off again. |
 
 ### Message Handling
 

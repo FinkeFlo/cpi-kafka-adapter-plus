@@ -332,6 +332,17 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
                     + "for deep investigation. Use FULL only when actively debugging; STANDARD is the normal operational mode.")
     private String diagnosticsLevel = "STANDARD";
 
+    @UriParam(label = "errorHandling", defaultValue = "false",
+            description = "Attach the full error block, including the complete stack trace, to the "
+                    + "failed message in CPI Monitoring. Off by default because attachments consume "
+                    + "tenant storage on every failure — a record that fails on every delivery writes "
+                    + "one each time. All other monitoring fields (KafkaAdapterErrorCode, "
+                    + "KafkaAdapterTopic, KafkaAdapterProducerPath, KafkaAdapterRetryable) are written "
+                    + "regardless of this setting, as is the ERROR line in the tenant trace file. "
+                    + "Switch this on when a failure originates outside the adapter and the cause "
+                    + "chain is too deep to read from the trace line.")
+    private boolean writeMplErrorAttachment = false;
+
     public CpiKafkaPlusEndpoint() {
         this.component = null;
     }
@@ -646,4 +657,7 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
 
     /** True when diagnostics level is set to FULL for verbose/expensive output. */
     public boolean isDiagnosticsLevelFull() { return "FULL".equalsIgnoreCase(diagnosticsLevel); }
+
+    public boolean isWriteMplErrorAttachment() { return writeMplErrorAttachment; }
+    public void setWriteMplErrorAttachment(boolean writeMplErrorAttachment) { this.writeMplErrorAttachment = writeMplErrorAttachment; }
 }

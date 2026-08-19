@@ -316,7 +316,13 @@ unreachable at that moment.
 
 When a failure occurs during an exchange, the adapter enriches the Message Processing Log with
 structured information. This is available in the CPI monitor even when MPL *tracing* is disabled
-(which is the default). Two channels are used, both trace-independent:
+(which is the default). Two channels are used, both trace-independent.
+
+Both sender and receiver channels enrich the MPL. They differ in one respect only: the sender always
+writes the error attachment, while on a receiver the attachment is opt-in via
+[`writeMplErrorAttachment`](configuration.md) and carries the full stack trace. Everything else —
+header properties, adapter attributes, the ERROR line in the tenant trace file — is identical and
+unconditional on both.
 
 ### Custom header properties
 
@@ -339,12 +345,36 @@ If the adapter can obtain an MPL handle with status support (`getMessageLogWithS
 `FAILED` status event with the error code and a truncated error message. This marks the message as
 failed in the monitor, making failures visible at a glance without opening each message.
 
+A receiver deliberately does not fire one. It rethrows the send failure into the integration flow,
+which marks the message failed anyway; a second event would only be a duplicate.
+
 ### Attachment with the full error block
 
-Independently of the trace level, the adapter attaches the complete serialised error block —
-exception chain, causes and frames — to the message's monitor entry under the name
-`KafkaAdapterError`. This is the one channel that is not subject to the 8,000-character line limit
-of the tenant trace file, so when a cause chain is deep this is where to read it in full.
+The adapter attaches the complete serialised error block — exception chain, causes and frames — to
+the message's monitor entry under the name `KafkaAdapterError`, independently of the trace level.
+This is the one channel that is not subject to the 8,000-character line limit of the tenant trace
+file, so when a cause chain is deep this is where to read it in full.
+
+On a **sender** the attachment is always written and holds the compact one-line rendering of the
+cause chain (up to 12 frames per level, 5 cause levels).
+
+On a **receiver** the attachment is written only when `writeMplErrorAttachment` is enabled, and it
+then also carries a `--- Stack trace ---` section with the *real* multi-line stack trace, including
+`Caused by:` and `Suppressed:` entries, capped at 128 KB with an explicit truncation footer. This is
+what you want when the failure came from outside Kafka and the error code is `KP-GEN-001`: the code
+says nothing, the stack trace says everything.
+
+The receiver default is `false`, and the reason is storage rather than volume of text. An attachment
+is written per failure, and a message the broker will not accept is retried — so one stuck message
+produces a steady stream of attachments against a tenant-wide storage budget shared with every other
+integration flow on the tenant. SAP documents no per-attachment size limit, but does warn that
+exhausting the tenant's disk opens the circuit breaker. Switch it on for an investigation, on the
+channel you are investigating, and switch it back off.
+
+Note what the option does *not* gate: the error code, topic, producer path and retryable flag reach
+the monitor either way, and the full cause chain always reaches the tenant trace file through the
+ERROR line. Turning the attachment off costs you the stack trace in the monitor, never the fact that
+a failure happened or why.
 
 A second trace-independent channel writes the same four facts as adapter attributes
 (`errorCode`, `topic`, `producerPath`, `retryable`) via `putAdapterAttribute`. It is redundant on

@@ -525,6 +525,7 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
                 CorrelationHelper.addTo(ctx, exchange);
                 tracingHelper.traceError(exchange, e, ctx);
                 handleSendFailure(e, "producer.batch.send", ctx);
+                reportSendFailureToMpl(exchange, e, ctx, ProducerPath.SHARED);
                 throw sendFailure("Failed to send batch to", topic, e);
             }
         }
@@ -608,6 +609,7 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
             CorrelationHelper.addTo(ctx, in.getExchange());
             tracingHelper.traceError(in.getExchange(), e, ctx);
             handleTxnSendFailure(e, ctx);
+            reportSendFailureToMpl(in.getExchange(), e, ctx, ProducerPath.TRANSACTIONAL);
             throw sendFailure("Failed to send transactional batch to", topic, e);
         } finally {
             if (txnProducer != null) {
@@ -729,6 +731,7 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
             CorrelationHelper.addTo(ctx, exchange);
             tracingHelper.traceError(exchange, e, ctx);
             handleSendFailure(e, "producer.single.send", ctx);
+            reportSendFailureToMpl(exchange, e, ctx, ProducerPath.SHARED);
             throw sendFailure("Failed to send message to", topic, e);
         }
     }
@@ -1391,6 +1394,36 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
             context.forEach(event::with);
         }
         AdapterDiagnostics.error(LOG, event, e);
+    }
+
+    /**
+     * Reports a send failure to the Message Processing Log, so that a failed message carries its
+     * own diagnosis in the monitor instead of only in the tenant trace file.
+     *
+     * <p>Until now the receiver channel wrote nothing to the MPL that survived without tracing:
+     * {@code traceError} goes through {@code writeTrace}, which is gated on {@code isTraceActive()}
+     * — a flag that reverts after ten minutes and was never on in any analysed production trace. So
+     * the one place an operator looks first, the failed message in the monitor, held nothing about
+     * why the send failed. The custom header properties and adapter attributes written here are
+     * trace-independent and searchable.
+     *
+     * <p>No {@code FAILED} status event is fired: the caller rethrows, so the integration flow marks
+     * the message failed itself. Firing one here would produce a second failure entry for one
+     * failure.
+     *
+     * <p>The attachment carrying the full stack trace is opt-in per channel, because it is the only
+     * part of this that consumes tenant storage — on every failure, including a record redelivered
+     * on every poll.
+     */
+    private void reportSendFailureToMpl(Exchange exchange, Exception e, Map<String, String> context,
+                                        ProducerPath producerPath) {
+        // producerPath is added to a copy, not to the caller's map: that map is also handed to
+        // handleSendFailure, which states producerPath as its own field, and a diagnostic line
+        // carrying the same key twice is a line no one can parse.
+        Map<String, String> mplContext = new java.util.LinkedHashMap<>(context);
+        mplContext.put("producerPath", producerPath.name());
+        tracingHelper.reportFailure(exchange, e, CpiKafkaPlusErrorCode.fromThrowable(e).code(),
+                mplContext, false, endpoint.isWriteMplErrorAttachment(), true);
     }
 
     /**

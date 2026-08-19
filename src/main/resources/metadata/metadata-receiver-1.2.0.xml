@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<ComponentMetadata ComponentId="ctype::Adapter/cname::kafkaAdapterPlus/vendor::FlorianKube/version::1.2.7"
+<ComponentMetadata ComponentId="ctype::Adapter/cname::kafkaAdapterPlus/vendor::FlorianKube/version::1.2.8"
                    ComponentName="kafkaAdapterPlus"
                    UIElementType="Adapter"
                    IsExtension="false"
@@ -14,7 +14,7 @@
     <!-- RECEIVER VARIANT (CPI -> Kafka Producer)                    -->
     <!-- ============================================================ -->
     <Variant VariantName="Kafka_Adapter_Plus_Receiver"
-             VariantId="ctype::AdapterVariant/cname::kafkaAdapterPlus/vendor::FlorianKube/tp::cpi-kafka-plus/mp::cpi-kafka-plus/direction::Receiver/version::1.2.7"
+             VariantId="ctype::AdapterVariant/cname::kafkaAdapterPlus/vendor::FlorianKube/tp::cpi-kafka-plus/mp::cpi-kafka-plus/direction::Receiver/version::1.2.8"
              MetadataVersion="2.0"
              gen:RuntimeComponentBaseUri="cpi-kafka-plus"
              AttachmentBehavior="Preserve"
@@ -217,6 +217,10 @@
                 <AttributeReference>
                     <ReferenceName>diagnosticsLevel</ReferenceName>
                     <description>Diagnostic output level. STANDARD (default) is fully diagnostic on its own: every failure produces one structured ERROR line with the complete serialised cause chain. FULL adds exactly one thing, a bounded thread dump (at most 20 threads, 10 frames each, with lock owners) attached to the node-fault escalation that fires when the same fault recurs 5 times in 20 minutes. That dump is the only evidence that can settle a monitor-ownership question. Leave this on STANDARD unless you are actively investigating such a fault.</description>
+                </AttributeReference>
+                <AttributeReference>
+                    <ReferenceName>writeMplErrorAttachment</ReferenceName>
+                    <description>Attach the full error block, including the complete stack trace, to the failed message in Message Processing Log. Off by default because an attachment consumes tenant storage on every single failure, and a message that keeps failing writes one every time. Everything else is written regardless of this setting: the error code, topic, producer path and retryable flag are attached to the message as searchable properties, and the full cause chain always reaches the tenant trace file as an ERROR line. Switch this on while investigating a failure whose cause chain is too deep to read from a single trace line, and switch it off afterwards.</description>
                 </AttributeReference>
             </AttributeGroup>
         </Tab>
@@ -874,6 +878,16 @@
             <FixedValue><Value>STANDARD</Value><GuiLabels guid="b1000009-0000-0000-0000-000000000011"><Label language="EN">Standard (Default)</Label></GuiLabels></FixedValue>
             <FixedValue><Value>FULL</Value><GuiLabels guid="b1000009-0000-0000-0000-000000000012"><Label language="EN">Full (Verbose)</Label></GuiLabels></FixedValue>
         </FixedValues>
+    </AttributeMetadata>
+
+    <AttributeMetadata>
+        <Name>writeMplErrorAttachment</Name>
+        <Usage>false</Usage>
+        <DataType>xsd:boolean</DataType>
+        <Default>false</Default>
+        <Length/>
+        <isparameterized>true</isparameterized>
+        <GuiLabels guid="b100000a-0000-0000-0000-000000000001"><Label language="EN">Attach Error Details to Message Monitoring</Label></GuiLabels>
     </AttributeMetadata>
 
 </ComponentMetadata>
