@@ -316,6 +316,22 @@ and both counters restart afterwards — the line therefore appears once per rec
 failed poll, and seeing it repeat at a steady cadence means the outage is ongoing rather than that
 the adapter is thrashing. The individual poll failures are logged separately with the cause.
 
+### `poll: detected invalid OSGi bundle wiring`
+
+This line means Kafka class loading failed with the CPI hot-update signature
+`bundle wiring ... no longer valid` (typically wrapped in `NoClassDefFoundError` or
+`ClassNotFoundException`). In this state the route can still tick "alive" while poll/assignment
+logic is broken.
+
+From this version onward, the adapter treats that signature as a dedicated recoverable state: it
+closes the current consumer immediately and rebuilds it on the next poll cycle, rather than waiting
+for the generic failure thresholds. If wiring remains stale, it additionally tries a bounded
+automatic restart of the affected Camel route (`stopRoute`/`startRoute`, max 2 attempts, 15-minute
+cooldown), which mirrors the manual "restart iFlow" fix path.
+
+If the line keeps repeating even after those attempts, the tenant runtime still serves a stale class
+space and needs platform-side runtime recovery.
+
 ### `adapter.mpl.unavailable`
 
 The Message Processing Log binding could not be resolved, so MPL traces will not be written for this

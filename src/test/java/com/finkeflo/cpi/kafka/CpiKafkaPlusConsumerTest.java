@@ -405,6 +405,63 @@ public class CpiKafkaPlusConsumerTest {
     }
 
     @Test
+    public void testIsBundleWiringInvalidFailureWithNoClassDefFoundError() {
+        Throwable failure = new NoClassDefFoundError(
+                "org/apache/kafka/clients/consumer/ConsumerPartitionAssignor$GroupSubscription");
+        failure.initCause(new ClassNotFoundException(
+                "Unable to load class 'org.apache.kafka.clients.consumer.ConsumerPartitionAssignor$GroupSubscription' "
+                        + "because the bundle wiring for com.finkeflo.cpi.kafka.cpi-kafka-adapter-plus is no longer valid."));
+
+        Assert.assertTrue(CpiKafkaPlusConsumer.isBundleWiringInvalidFailure(failure));
+    }
+
+    @Test
+    public void testIsBundleWiringInvalidFailureWithWrappedClassNotFound() {
+        Throwable failure = new RuntimeException("wrapped",
+                new ClassNotFoundException(
+                        "Unable to load class 'org.apache.kafka.clients.consumer.internals.ConsumerCoordinator$3' "
+                                + "because the bundle wiring for com.finkeflo.cpi.kafka.cpi-kafka-adapter-plus is no longer valid."));
+
+        Assert.assertTrue(CpiKafkaPlusConsumer.isBundleWiringInvalidFailure(failure));
+    }
+
+    @Test
+    public void testIsBundleWiringInvalidFailureFalseForRegularClassNotFound() {
+        Assert.assertFalse(CpiKafkaPlusConsumer.isBundleWiringInvalidFailure(
+                new ClassNotFoundException("org.example.DoesNotExist")));
+    }
+
+    @Test
+    public void testShouldAttemptWiringRouteRestartFirstAttempt() {
+        Assert.assertTrue(CpiKafkaPlusConsumer.shouldAttemptWiringRouteRestart(
+                false, 0, 0L, 1_000L));
+    }
+
+    @Test
+    public void testShouldAttemptWiringRouteRestartFalseWhenInProgress() {
+        Assert.assertFalse(CpiKafkaPlusConsumer.shouldAttemptWiringRouteRestart(
+                true, 0, 0L, 1_000L));
+    }
+
+    @Test
+    public void testShouldAttemptWiringRouteRestartFalseWhenAttemptsExhausted() {
+        Assert.assertFalse(CpiKafkaPlusConsumer.shouldAttemptWiringRouteRestart(
+                false, 2, 0L, 1_000L));
+    }
+
+    @Test
+    public void testShouldAttemptWiringRouteRestartRespectsCooldown() {
+        long now = 1_000_000L;
+        long fourteenMinutesAgo = now - (14 * 60_000L);
+        long sixteenMinutesAgo = now - (16 * 60_000L);
+
+        Assert.assertFalse(CpiKafkaPlusConsumer.shouldAttemptWiringRouteRestart(
+                false, 1, fourteenMinutesAgo, now));
+        Assert.assertTrue(CpiKafkaPlusConsumer.shouldAttemptWiringRouteRestart(
+                false, 1, sixteenMinutesAgo, now));
+    }
+
+    @Test
     public void testBuildStoppedByErrorPolicyExceptionUsesMatchingCauseInMessage() {
         IllegalStateException ex = CpiKafkaPlusConsumer.buildStoppedByErrorPolicyException(
                 "topic-a", "group-a",
