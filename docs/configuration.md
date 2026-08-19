@@ -113,7 +113,6 @@ For details on Avro integration, see [Avro / Schema Registry](features/avro-sche
 | `dlqCredentialAlias` | — | SASL credential alias for the DLQ Kafka cluster, if different from the main connection. |
 | `retryOnlyTransientErrors` | `true` | Retry only transient errors; send permanent errors directly to the DLQ. |
 | `retryDelaySeconds` | `0` | Initial retry delay in seconds with exponential backoff capped at 300 seconds. |
-| `writeMplErrorAttachment` | `true` | Write the full error diagnostic (including full stack trace) as MPL attachment `KafkaAdapterError`. Disable to keep only searchable MPL headers/attributes. |
 
 **Auto-Pause on Errors**
 
@@ -193,7 +192,6 @@ For detailed security setup, see [Authentication](security/authentication.md).
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `diagnosticsLevel` | `STANDARD` | Diagnostic output level. `STANDARD` (default) is fully diagnostic on its own: every failure produces one structured ERROR line with the complete serialised cause chain. `FULL` adds exactly one thing, a bounded thread dump (at most 20 threads, 10 frames each, with lock owners) attached to the node-fault escalation that fires when the same fault recurs 5 times in 20 minutes. Leave this on `STANDARD` unless you are actively investigating such a fault. |
-| `writeMplErrorAttachment` | `true` | Write the full error diagnostic (including full stack trace) as MPL attachment `KafkaAdapterError`. Disable to keep only searchable MPL headers/attributes. |
 
 ### Message Handling
 

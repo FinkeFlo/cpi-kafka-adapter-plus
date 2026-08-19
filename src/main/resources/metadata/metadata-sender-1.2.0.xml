@@ -380,10 +380,6 @@
                         <AttributeValue>true</AttributeValue>
                     </EditCondition>
                 </AttributeReference>
-                <AttributeReference>
-                    <ReferenceName>writeMplErrorAttachment</ReferenceName>
-                    <description>Write the full error diagnostic as MPL attachment 'KafkaAdapterError'. Disable to keep only searchable MPL headers/attributes without the full attachment payload.</description>
-                </AttributeReference>
             </AttributeGroup>
             <AttributeGroup id="autoPauseConfig">
                 <Name xsi:type="xs:string" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">Auto-Pause on Errors</Name>
@@ -952,15 +948,6 @@
         <Length/>
         <isparameterized>true</isparameterized>
         <GuiLabels guid="b1000003-0000-0000-0000-000000000102"><Label language="EN">Min Backlog to Drain</Label></GuiLabels>
-    </AttributeMetadata>
-    <AttributeMetadata>
-        <Name>writeMplErrorAttachment</Name>
-        <Usage>false</Usage>
-        <DataType>xsd:boolean</DataType>
-        <Default>true</Default>
-        <Length/>
-        <isparameterized>true</isparameterized>
-        <GuiLabels guid="b1000010-0000-0000-0000-000000000001"><Label language="EN">Write MPL Error Attachment</Label></GuiLabels>
     </AttributeMetadata>
 
 </ComponentMetadata>
