@@ -325,8 +325,12 @@ logic is broken.
 
 From this version onward, the adapter treats that signature as a dedicated recoverable state: it
 closes the current consumer immediately and rebuilds it on the next poll cycle, rather than waiting
-for the generic failure thresholds. If this line keeps repeating, the tenant runtime still serves a
-stale class space and needs platform-side runtime recovery.
+for the generic failure thresholds. If wiring remains stale, it additionally tries a bounded
+automatic restart of the affected Camel route (`stopRoute`/`startRoute`, max 2 attempts, 15-minute
+cooldown), which mirrors the manual "restart iFlow" fix path.
+
+If the line keeps repeating even after those attempts, the tenant runtime still serves a stale class
+space and needs platform-side runtime recovery.
 
 ### `adapter.mpl.unavailable`
 

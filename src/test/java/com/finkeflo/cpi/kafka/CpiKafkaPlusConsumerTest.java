@@ -432,6 +432,36 @@ public class CpiKafkaPlusConsumerTest {
     }
 
     @Test
+    public void testShouldAttemptWiringRouteRestartFirstAttempt() {
+        Assert.assertTrue(CpiKafkaPlusConsumer.shouldAttemptWiringRouteRestart(
+                false, 0, 0L, 1_000L));
+    }
+
+    @Test
+    public void testShouldAttemptWiringRouteRestartFalseWhenInProgress() {
+        Assert.assertFalse(CpiKafkaPlusConsumer.shouldAttemptWiringRouteRestart(
+                true, 0, 0L, 1_000L));
+    }
+
+    @Test
+    public void testShouldAttemptWiringRouteRestartFalseWhenAttemptsExhausted() {
+        Assert.assertFalse(CpiKafkaPlusConsumer.shouldAttemptWiringRouteRestart(
+                false, 2, 0L, 1_000L));
+    }
+
+    @Test
+    public void testShouldAttemptWiringRouteRestartRespectsCooldown() {
+        long now = 1_000_000L;
+        long fourteenMinutesAgo = now - (14 * 60_000L);
+        long sixteenMinutesAgo = now - (16 * 60_000L);
+
+        Assert.assertFalse(CpiKafkaPlusConsumer.shouldAttemptWiringRouteRestart(
+                false, 1, fourteenMinutesAgo, now));
+        Assert.assertTrue(CpiKafkaPlusConsumer.shouldAttemptWiringRouteRestart(
+                false, 1, sixteenMinutesAgo, now));
+    }
+
+    @Test
     public void testBuildStoppedByErrorPolicyExceptionUsesMatchingCauseInMessage() {
         IllegalStateException ex = CpiKafkaPlusConsumer.buildStoppedByErrorPolicyException(
                 "topic-a", "group-a",

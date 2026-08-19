@@ -32,6 +32,7 @@ import java.util.Set;
 import org.apache.camel.CamelExchangeException;
 import org.apache.camel.Exchange;
 import org.apache.camel.Processor;
+import org.apache.camel.Route;
 import org.apache.camel.support.ScheduledPollConsumer;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
@@ -59,6 +60,8 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
     private static final long STOPPED_BY_ERROR_REMINDER_INTERVAL_MS = 60_000L;
     private static final String INVALID_BUNDLE_WIRING_SNIPPET = "bundle wiring";
     private static final String INVALID_BUNDLE_WIRING_SUFFIX = "no longer valid";
+    private static final int MAX_ROUTE_RESTART_ATTEMPTS = 2;
+    private static final long ROUTE_RESTART_COOLDOWN_MS = 15 * 60_000L;
     /** Camel-Scheduler-Takt zwischen zwei poll()-Aufrufen, wenn pollingIntervalSeconds groesser ist. */
     private static final long KEEP_ALIVE_INTERVAL_SECONDS = 60L;
     /** Poll-Timeout des Keep-Alive-Polls — kurz, treibt nur den Coordinator-Roundtrip. */
@@ -103,6 +106,10 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
     private volatile boolean stoppedByErrorPolicy = false;
     private volatile Throwable stoppedByError;
     private volatile long lastStoppedByErrorReminderMs = 0L;
+    private volatile boolean routeRestartInProgress = false;
+    private volatile int routeRestartAttempts = 0;
+    private volatile long lastRouteRestartAttemptMs = 0L;
+    private volatile String owningRouteId;
     /**
      * Last CPI connection/consumption status published for this consumer. Drives transition-based
      * reporting so the monitor is neither stuck nor spammed:
@@ -203,6 +210,10 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
         stoppedByErrorPolicy = false;
         stoppedByError = null;
         lastStoppedByErrorReminderMs = 0L;
+        routeRestartInProgress = false;
+        routeRestartAttempts = 0;
+        lastRouteRestartAttemptMs = 0L;
+        owningRouteId = null;
         lastEmitTimeMs = 0L;
 
         // Fail-fast: validate shared configuration (Schema Registry, JSON Schema, SASL)
@@ -347,6 +358,10 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
         stoppedByErrorPolicy = false;
         stoppedByError = null;
         lastStoppedByErrorReminderMs = 0L;
+        routeRestartInProgress = false;
+        routeRestartAttempts = 0;
+        lastRouteRestartAttemptMs = 0L;
+        owningRouteId = null;
         lastEmitTimeMs = 0L;
         if (circuitBreaker != null) {
             circuitBreaker.reset();
@@ -801,6 +816,10 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
             LOG.info("[CPI-KAFKA-PLUS-DIAG] connection: OK — poll succeeded for topic='{}' group='{}'",
                     endpoint.getEffectiveTopic(), endpoint.getGroupId());
         }
+        // Any successful poll means the consumer is healthy again. Reset restart guards so a
+        // future independent wiring incident can self-heal again.
+        routeRestartAttempts = 0;
+        lastRouteRestartAttemptMs = 0L;
     }
 
     /**
@@ -1053,6 +1072,95 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
         closeConsumerQuietly();
         consecutivePollFailures = 0;
         firstPollFailureMs = 0L;
+        scheduleRouteRestartForInvalidWiring(failure);
+    }
+
+    static boolean shouldAttemptWiringRouteRestart(
+            boolean restartInProgress, int restartAttempts, long lastRestartAttemptMs, long nowMs) {
+        if (restartInProgress || restartAttempts >= MAX_ROUTE_RESTART_ATTEMPTS) {
+            return false;
+        }
+        return lastRestartAttemptMs == 0L || (nowMs - lastRestartAttemptMs) >= ROUTE_RESTART_COOLDOWN_MS;
+    }
+
+    private void scheduleRouteRestartForInvalidWiring(Throwable failure) {
+        long now = System.currentTimeMillis();
+        if (!shouldAttemptWiringRouteRestart(
+                routeRestartInProgress, routeRestartAttempts, lastRouteRestartAttemptMs, now)) {
+            LOG.error("[CPI-KAFKA-PLUS-DIAG] wiring-recovery: auto route restart suppressed for topic='{}' group='{}' "
+                            + "(inProgress={} attempts={} lastAttemptAgoMs={})",
+                    endpoint.getEffectiveTopic(), endpoint.getGroupId(),
+                    routeRestartInProgress, routeRestartAttempts,
+                    lastRouteRestartAttemptMs == 0L ? -1L : (now - lastRouteRestartAttemptMs));
+            return;
+        }
+
+        String routeId = resolveOwningRouteId();
+        if (routeId == null) {
+            LOG.error("[CPI-KAFKA-PLUS-DIAG] wiring-recovery: cannot resolve owning Camel route for topic='{}' group='{}'; "
+                            + "auto restart skipped. Please restart the iFlow once manually.",
+                    endpoint.getEffectiveTopic(), endpoint.getGroupId());
+            return;
+        }
+
+        routeRestartInProgress = true;
+        routeRestartAttempts++;
+        lastRouteRestartAttemptMs = now;
+        int attempt = routeRestartAttempts;
+
+        Thread restartThread = new Thread(() -> {
+            try {
+                if (shutdownRequested) {
+                    LOG.info("[CPI-KAFKA-PLUS-DIAG] wiring-recovery: route restart aborted (shutdown requested), route='{}'",
+                            routeId);
+                    return;
+                }
+                LOG.error("[CPI-KAFKA-PLUS-DIAG] wiring-recovery: restarting route='{}' topic='{}' group='{}' attempt={}/{} "
+                                + "after invalid bundle wiring exClass={} exMsg='{}'",
+                        routeId, endpoint.getEffectiveTopic(), endpoint.getGroupId(),
+                        attempt, MAX_ROUTE_RESTART_ATTEMPTS,
+                        failure.getClass().getName(), failure.getMessage());
+                endpoint.getCamelContext().getRouteController().stopRoute(routeId);
+                endpoint.getCamelContext().getRouteController().startRoute(routeId);
+                LOG.error("[CPI-KAFKA-PLUS-DIAG] wiring-recovery: route restart finished route='{}' topic='{}' group='{}'",
+                        routeId, endpoint.getEffectiveTopic(), endpoint.getGroupId());
+            } catch (Exception e) {
+                LOG.error("[CPI-KAFKA-PLUS-DIAG] wiring-recovery: route restart failed route='{}' topic='{}' group='{}' "
+                                + "attempt={}/{} exClass={} exMsg='{}' topStack={}",
+                        routeId, endpoint.getEffectiveTopic(), endpoint.getGroupId(),
+                        attempt, MAX_ROUTE_RESTART_ATTEMPTS,
+                        e.getClass().getName(), e.getMessage(), describeTopStack(e, 6), e);
+            } finally {
+                routeRestartInProgress = false;
+            }
+        }, "cpi-kafka-plus-route-restart-" + endpoint.getGroupId());
+        restartThread.setDaemon(true);
+        restartThread.start();
+    }
+
+    private String resolveOwningRouteId() {
+        if (owningRouteId != null) {
+            return owningRouteId;
+        }
+        if (endpoint.getCamelContext() == null) {
+            return null;
+        }
+        String endpointUri = endpoint.getEndpointUri();
+        for (Route route : endpoint.getCamelContext().getRoutes()) {
+            if (route == null || route.getEndpoint() == null) {
+                continue;
+            }
+            if (route.getEndpoint() == endpoint) {
+                owningRouteId = route.getId();
+                return owningRouteId;
+            }
+            String routeEndpointUri = route.getEndpoint().getEndpointUri();
+            if (endpointUri != null && endpointUri.equals(routeEndpointUri)) {
+                owningRouteId = route.getId();
+                return owningRouteId;
+            }
+        }
+        return null;
     }
 
     private void logStoppedByErrorReminderIfDue() {
