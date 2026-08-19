@@ -351,7 +351,7 @@ public class AdapterTracingHelper {
                             Class.forName("com.sap.it.api.msglog.adapter.AdapterMessageLogWithStatus");
                     @SuppressWarnings("unchecked")
                     Object failedEvent = Enum.valueOf((Class<Enum>) statusEventClass, "FAILED");
-                    String statusMessage = buildStatusMessage(errorCode, e);
+                    String statusMessage = buildStatusMessage(errorCode, e, safeContext);
                     Method fireStatusEventMethod = logWithStatusInterface.getMethod(
                             "fireStatusEvent", statusEventClass, String.class);
                     fireStatusEventMethod.invoke(mplLog, failedEvent, statusMessage);
@@ -381,7 +381,7 @@ public class AdapterTracingHelper {
     }
 
     /** Builds a status message from errorCode and exception, null-safe, with length limit. */
-    private String buildStatusMessage(String errorCode, Exception e) {
+    private String buildStatusMessage(String errorCode, Exception e, Map<String, String> context) {
         StringBuilder sb = new StringBuilder();
         if (errorCode != null) {
             sb.append(errorCode).append(": ");
@@ -392,6 +392,17 @@ public class AdapterTracingHelper {
             sb.append(e.getClass().getSimpleName());
         } else {
             sb.append("Unknown error");
+        }
+        if (context != null) {
+            String dlqOutcome = context.get("dlqOutcome");
+            if ("MOVED".equalsIgnoreCase(dlqOutcome)) {
+                String dlqTopic = context.get("dlqTopic");
+                if (dlqTopic != null && !dlqTopic.trim().isEmpty()) {
+                    sb.append(" (moved to dead-letter topic ").append(dlqTopic).append(")");
+                } else {
+                    sb.append(" (moved to dead-letter topic)");
+                }
+            }
         }
         String statusMessage = sb.toString();
         // Truncate status message to avoid exceeding any platform limits
