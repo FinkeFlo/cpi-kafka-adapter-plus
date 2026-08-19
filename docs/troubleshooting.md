@@ -294,6 +294,28 @@ The throttled success heartbeat. Emitted at most once per 5 minutes when sends a
 immediately on recovery after a failure. It carries `sendsSinceLastHeartbeat` so you can gauge
 throughput. If the heartbeat is present but failures are absent, the producer is healthy.
 
+### `runEmitCycle: alive`
+
+The consumer's counterpart, and it behaves differently on purpose. Only `reason=STATE_CHANGE`
+reaches the tenant trace file — it is written when the consumer's `initialized` state flips, so at
+startup and whenever the consumer is torn down or rebuilt. The recurring `reason=INTERVAL` tick is
+logged at INFO and is therefore visible on a local run but not on a tenant.
+
+Do not use the absence of this line as an alarm, and do not use its presence as an all-clear. It
+reports that the scheduler called `poll()`, which stays true while a partition does not advance at
+all — the stall in the 1.2.7 dead-letter incident would have been accompanied by an unbroken series
+of `alive` lines. To judge a consumer, use `closing consumer for reconnect`, the poll failure lines
+and the committed offsets. Older adapter versions wrote the tick at ERROR, which is why they
+contribute several hundred red lines per day and endpoint that mean nothing.
+
+### `poll: closing consumer for reconnect`
+
+Repeated poll failures crossed either the count threshold (5 consecutive) or the duration threshold
+(60 s), so the consumer is closed and rebuilt on the next poll. `reason` says which threshold fired,
+and both counters restart afterwards — the line therefore appears once per reconnect, not once per
+failed poll, and seeing it repeat at a steady cadence means the outage is ongoing rather than that
+the adapter is thrashing. The individual poll failures are logged separately with the cause.
+
 ### `adapter.mpl.unavailable`
 
 The Message Processing Log binding could not be resolved, so MPL traces will not be written for this

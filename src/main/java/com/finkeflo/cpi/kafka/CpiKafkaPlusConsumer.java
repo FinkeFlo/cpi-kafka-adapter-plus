@@ -577,33 +577,40 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
     }
 
     /**
-     * Fuehrt einen Emit-Zyklus aus: pollt Kafka und verarbeitet die Records
-     * (Drain-Schleife). Aus {@code poll()} extrahiert, damit {@code poll()}
-     * zwischen Emit-Zyklus und Keep-Alive-Poll dispatchen kann.
-     */
-    /**
      * Emits the "consumer is alive" heartbeat that operators rely on to tell a running consumer
      * from a stalled one.
      *
-     * <p>Logged at ERROR on purpose: the CPI tenant trace file only receives ERROR, so DEBUG or
-     * INFO would make the heartbeat invisible in production. It is therefore throttled instead of
-     * downgraded — unthrottled it fired once per poll cycle and produced every single log line
-     * this adapter contributed to a shared tenant, while no actual failure was ever logged.
+     * <p>The two branches are deliberately logged at different levels, because only one of them
+     * reports something. A change of {@code initialized} is an event and goes to ERROR, the only
+     * level the CPI tenant trace file receives — it is bounded, fires at startup and on each real
+     * transition, and for a reconnect it is the corroborating record next to
+     * {@code maybeReconnectAfterPollFailure()}'s own line.
      *
-     * <p>A change of {@code initialized} is always reported immediately, so a state transition is
-     * never swallowed by the throttle. The full per-cycle detail stays available at DEBUG for
-     * local runs, where the tenant appender does not apply.
+     * <p>The periodic tick goes to INFO, which the tenant appender drops. It proves only that the
+     * scheduler called {@code poll()}, which is not a failure anyone investigates: an unreachable
+     * broker, a rejected credential, a rebalance storm and a stalled partition each emit their own
+     * ERROR already. The tick cannot even be absent when it matters — it keeps reporting "alive"
+     * while a partition does not advance — so at ERROR it bought no evidence and cost roughly 288
+     * lines per day and endpoint in a file shared with every other integration flow on the tenant.
+     * Unthrottled it was worse still: it produced every single line this adapter contributed,
+     * while no actual failure was logged.
+     *
+     * <p>The throttle is applied regardless of level, so the INFO tick stays readable on local
+     * runs. The full per-cycle detail remains at DEBUG.
      */
     private void logEmitCycleHeartbeat() {
         long now = System.currentTimeMillis();
         boolean stateChanged = lastHeartbeatMs == 0L || initialized != lastHeartbeatInitialized;
-        if (stateChanged || now - lastHeartbeatMs >= HEARTBEAT_INTERVAL_MS) {
-            long suppressedForMs = lastHeartbeatMs == 0L ? 0L : now - lastHeartbeatMs;
-            LOG.error("[CPI-KAFKA-PLUS-DIAG] runEmitCycle: alive topic='{}' initialized={} reason={} sinceLastHeartbeatMs={}",
-                    endpoint.getEffectiveTopic(), initialized,
-                    stateChanged ? "STATE_CHANGE" : "INTERVAL", suppressedForMs);
+        long suppressedForMs = lastHeartbeatMs == 0L ? 0L : now - lastHeartbeatMs;
+        if (stateChanged) {
+            LOG.error("[CPI-KAFKA-PLUS-DIAG] runEmitCycle: alive topic='{}' initialized={} reason=STATE_CHANGE sinceLastHeartbeatMs={}",
+                    endpoint.getEffectiveTopic(), initialized, suppressedForMs);
             lastHeartbeatMs = now;
             lastHeartbeatInitialized = initialized;
+        } else if (suppressedForMs >= HEARTBEAT_INTERVAL_MS) {
+            LOG.info("[CPI-KAFKA-PLUS-DIAG] runEmitCycle: alive topic='{}' initialized={} reason=INTERVAL sinceLastHeartbeatMs={}",
+                    endpoint.getEffectiveTopic(), initialized, suppressedForMs);
+            lastHeartbeatMs = now;
         } else if (LOG.isDebugEnabled()) {
             LOG.debug("[CPI-KAFKA-PLUS-DIAG] runEmitCycle: emit cycle started for topic='{}' initialized={}",
                     endpoint.getEffectiveTopic(), initialized);
@@ -1026,6 +1033,14 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
      * if either the count threshold or the time-duration threshold is exceeded.
      * The duration check protects against long poll intervals where a few failures
      * would otherwise mean waiting tens of minutes before reconnect.
+     *
+     * <p>Both counters are reset once a reconnect is triggered, so they measure failures
+     * <em>since the last reconnect</em> rather than since the last success. Without that reset the
+     * thresholds stayed exceeded for as long as the outage lasted, and the consumer was destroyed
+     * and rebuilt on every single failed poll — a rebuild storm of the same shape the shared
+     * producer was rate-limited against in 1.2.7, only unbounded. A reconnect now happens at most
+     * once per {@code MAX_CONSECUTIVE_POLL_FAILURES} polls or once per
+     * {@code MAX_POLL_FAILURE_DURATION_MS}, whichever comes first.
      */
     private void maybeReconnectAfterPollFailure() {
         long now = System.currentTimeMillis();
@@ -1037,11 +1052,18 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
         boolean countExceeded = consecutivePollFailures >= MAX_CONSECUTIVE_POLL_FAILURES;
         boolean durationExceeded = durationMs >= MAX_POLL_FAILURE_DURATION_MS;
         if (countExceeded || durationExceeded) {
-            LOG.warn("[CPI-KAFKA-PLUS-DIAG] poll: closing consumer for reconnect (consecutiveFailures={} durationMs={} reason={})",
+            // ERROR, not WARN: WARN does not reach the CPI tenant trace file, so a consumer being
+            // torn down and rebuilt left no visible record at all — the rebuild that follows logs
+            // at INFO too. That made a reconnect indistinguishable from a consumer that had simply
+            // gone quiet. It is affordable at ERROR only because of the reset below; unbounded it
+            // would have added a second ERROR line to every failed poll.
+            LOG.error("[CPI-KAFKA-PLUS-DIAG] poll: closing consumer for reconnect (consecutiveFailures={} durationMs={} reason={})",
                     consecutivePollFailures, durationMs,
                     countExceeded ? (durationExceeded ? "count+duration" : "count") : "duration");
             initialized = false;
             closeConsumerQuietly();
+            consecutivePollFailures = 0;
+            firstPollFailureMs = 0L;
         }
     }
 
