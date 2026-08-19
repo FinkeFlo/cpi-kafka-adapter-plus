@@ -1125,11 +1125,12 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
                 LOG.error("[CPI-KAFKA-PLUS-DIAG] wiring-recovery: route restart finished route='{}' topic='{}' group='{}'",
                         routeId, endpoint.getEffectiveTopic(), endpoint.getGroupId());
             } catch (Exception e) {
-                LOG.error("[CPI-KAFKA-PLUS-DIAG] wiring-recovery: route restart failed route='{}' topic='{}' group='{}' "
-                                + "attempt={}/{} exClass={} exMsg='{}' topStack={}",
-                        routeId, endpoint.getEffectiveTopic(), endpoint.getGroupId(),
-                        attempt, MAX_ROUTE_RESTART_ATTEMPTS,
-                        e.getClass().getName(), e.getMessage(), describeTopStack(e, 6), e);
+                AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("wiring-recovery.route-restart.failed")
+                        .with("routeId", routeId)
+                        .with("topic", endpoint.getEffectiveTopic())
+                        .with("groupId", endpoint.getGroupId())
+                        .with("attempt", attempt)
+                        .with("maxAttempts", MAX_ROUTE_RESTART_ATTEMPTS), e);
             } finally {
                 routeRestartInProgress = false;
             }
