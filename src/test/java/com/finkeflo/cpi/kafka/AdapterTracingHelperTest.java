@@ -310,6 +310,24 @@ public class AdapterTracingHelperTest {
         helper.traceError(exchange, null, null, false);
     }
 
+    @Test
+    public void buildStatusMessageIncludesDlqOutcomeWhenMoved() throws Exception {
+        java.lang.reflect.Method buildStatusMessage = AdapterTracingHelper.class.getDeclaredMethod(
+                "buildStatusMessage", String.class, Exception.class, java.util.Map.class);
+        buildStatusMessage.setAccessible(true);
+
+        java.util.Map<String, String> context = new java.util.LinkedHashMap<>();
+        context.put("dlqOutcome", "MOVED");
+        context.put("dlqTopic", "e2e.kafka-adapter-plus.consumer.dlq-dead-letter");
+
+        String statusMessage = (String) buildStatusMessage.invoke(helper,
+                "KP-GEN-001", new IllegalStateException("Error Event Exception"), context);
+
+        Assert.assertTrue(statusMessage.contains("KP-GEN-001: Error Event Exception"));
+        Assert.assertTrue(statusMessage.contains(
+                "moved to dead-letter topic e2e.kafka-adapter-plus.consumer.dlq-dead-letter"));
+    }
+
     /**
      * Regression for defect #3: two different binding failures must both produce reports.
      *

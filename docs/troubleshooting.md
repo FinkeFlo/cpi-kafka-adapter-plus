@@ -385,6 +385,10 @@ the name `KafkaAdapterError`. This is the one channel that is not subject to the
 8,000-character line limit
 of the tenant trace file, so when a cause chain is deep this is where to read it in full.
 
+When a failed consume record is successfully routed to DLQ, the MPL status message now also
+states that outcome directly (`moved to dead-letter topic <topic>`), so the routing result is
+visible in the main MPL error text and not only in the attachment.
+
 A second trace-independent channel writes the same four facts as adapter attributes
 (`errorCode`, `topic`, `producerPath`, `retryable`) via `putAdapterAttribute`. It is redundant on
 purpose: the two APIs surface in different places in the monitor depending on tenant configuration,

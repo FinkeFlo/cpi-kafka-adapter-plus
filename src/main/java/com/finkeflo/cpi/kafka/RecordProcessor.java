@@ -517,24 +517,23 @@ final class RecordProcessor {
             errorType = permanentError ? "PERMANENT" : "TRANSIENT";
         }
 
-        // f2: Trace the error for consumer/sender direction before routing to DLQ or exception handler
-        Exchange traceExchange = callback.createExchange();
         java.util.Map<String, String> context = new java.util.LinkedHashMap<>();
         context.put("topic", record.topic());
         context.put("partition", String.valueOf(record.partition()));
         context.put("offset", String.valueOf(record.offset()));
         context.put("retryAttempts", String.valueOf(actualRetries));
         context.put("errorType", errorType != null ? errorType : "UNKNOWN");
-        tracingHelper.traceError(traceExchange, lastError, context, true);
-
-        // f1/f4/f5: Report failure with structured fields and attachment
-        // Derive error code from the exception using the central taxonomy
         String errorCode = CpiKafkaPlusErrorCode.fromThrowable(lastError).code();
-        tracingHelper.reportFailure(traceExchange, lastError, errorCode, context, true);
 
         if (dlqHelper != null) {
             try {
                 dlqHelper.sendToDlq(record, lastError, actualRetries, errorType);
+                java.util.Map<String, String> dlqContext = new java.util.LinkedHashMap<>(context);
+                dlqContext.put("dlqOutcome", "MOVED");
+                dlqContext.put("dlqTopic", endpoint.getDlqTopic());
+                Exchange traceExchange = callback.createExchange();
+                tracingHelper.traceError(traceExchange, lastError, dlqContext, true);
+                tracingHelper.reportFailure(traceExchange, lastError, errorCode, dlqContext, true);
                 if (commitAfterSuccess) {
                     commitSingleOffset(kafkaConsumer, record);
                 }
@@ -552,7 +551,18 @@ final class RecordProcessor {
                         .with("errorType", errorType != null ? errorType : "UNKNOWN")
                         .with("originalError", CpiKafkaPlusErrorCode.fromThrowable(lastError).code())
                         .with("consequence", "offset not committed, record will be reprocessed"), dlqEx);
+
+                java.util.Map<String, String> dlqContext = new java.util.LinkedHashMap<>(context);
+                dlqContext.put("dlqOutcome", "SEND_FAILED");
+                dlqContext.put("dlqTopic", endpoint.getDlqTopic());
+                Exchange traceExchange = callback.createExchange();
+                tracingHelper.traceError(traceExchange, lastError, dlqContext, true);
+                tracingHelper.reportFailure(traceExchange, lastError, errorCode, dlqContext, true);
             }
+        } else {
+            Exchange traceExchange = callback.createExchange();
+            tracingHelper.traceError(traceExchange, lastError, context, true);
+            tracingHelper.reportFailure(traceExchange, lastError, errorCode, context, true);
         }
 
         Exchange errorExchange = callback.createExchange();
