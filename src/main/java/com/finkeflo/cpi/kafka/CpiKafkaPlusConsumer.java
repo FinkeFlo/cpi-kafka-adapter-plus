@@ -57,6 +57,8 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
     private static final int MAX_CONSECUTIVE_POLL_FAILURES = 5;
     private static final long MAX_POLL_FAILURE_DURATION_MS = 60_000L;
     private static final long STOPPED_BY_ERROR_REMINDER_INTERVAL_MS = 60_000L;
+    private static final String INVALID_BUNDLE_WIRING_SNIPPET = "bundle wiring";
+    private static final String INVALID_BUNDLE_WIRING_SUFFIX = "no longer valid";
     /** Camel-Scheduler-Takt zwischen zwei poll()-Aufrufen, wenn pollingIntervalSeconds groesser ist. */
     private static final long KEEP_ALIVE_INTERVAL_SECONDS = 60L;
     /** Poll-Timeout des Keep-Alive-Polls — kurz, treibt nur den Coordinator-Roundtrip. */
@@ -779,6 +781,8 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
         } catch (Exception e) {
             if (isNonRetryablePollFailure(e)) {
                 handleNonRetryablePollFailure(e);
+            } else if (isBundleWiringInvalidFailure(e)) {
+                handleBundleWiringInvalidFailure(e);
             } else {
                 LOG.warn("[CPI-KAFKA-PLUS-DIAG] keepAlivePoll: best-effort poll failed: {}", e.getMessage());
             }
@@ -881,6 +885,8 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
                     describeTopStack(t, 6));
             if (isNonRetryablePollFailure(t)) {
                 handleNonRetryablePollFailure(t);
+            } else if (isBundleWiringInvalidFailure(t)) {
+                handleBundleWiringInvalidFailure(t);
             } else {
                 // A client without TLS against a TLS-only listener never gets far enough to see a
                 // handshake error — the broker just drops it, so the poll only ever times out. Name
@@ -958,6 +964,34 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
         return findNonRetryablePollFailureCause(failure) != null;
     }
 
+    /**
+     * Detects the known CPI hot-update class-space break where the active consumer thread runs
+     * against stale bundle wiring and Kafka client internals start failing with
+     * {@code NoClassDefFoundError}/{@code ClassNotFoundException} carrying
+     * "bundle wiring ... no longer valid". This is recoverable by rebuilding the KafkaConsumer.
+     */
+    static boolean isBundleWiringInvalidFailure(Throwable failure) {
+        Throwable current = failure;
+        while (current != null) {
+            boolean classLoadingFault = current instanceof NoClassDefFoundError
+                    || current instanceof ClassNotFoundException
+                    || current instanceof LinkageError;
+            String msg = current.getMessage();
+            boolean wiringSignature = msg != null
+                    && msg.contains(INVALID_BUNDLE_WIRING_SNIPPET)
+                    && msg.contains(INVALID_BUNDLE_WIRING_SUFFIX);
+            if (classLoadingFault && wiringSignature) {
+                return true;
+            }
+            Throwable next = current.getCause();
+            if (next == current) {
+                break;
+            }
+            current = next;
+        }
+        return false;
+    }
+
     private static Throwable findNonRetryablePollFailureCause(Throwable failure) {
         Throwable current = failure;
         while (current != null) {
@@ -1006,6 +1040,19 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
         tracingHelper.publishConnectionStatus(false, policyError);
         lastStoppedByErrorReminderMs = 0L;
         logStoppedByErrorReminderIfDue();
+    }
+
+    private void handleBundleWiringInvalidFailure(Throwable failure) {
+        LOG.error("[CPI-KAFKA-PLUS-DIAG] poll: detected invalid OSGi bundle wiring for topic='{}' group='{}' "
+                        + "(class-space stale after runtime update). Forcing immediate consumer rebuild. "
+                        + "exClass={} exMsg='{}' topStack={}",
+                endpoint.getEffectiveTopic(), endpoint.getGroupId(),
+                failure.getClass().getName(), failure.getMessage(), describeTopStack(failure, 6));
+        reportConnectionError(failure);
+        initialized = false;
+        closeConsumerQuietly();
+        consecutivePollFailures = 0;
+        firstPollFailureMs = 0L;
     }
 
     private void logStoppedByErrorReminderIfDue() {

@@ -34,10 +34,16 @@ import java.util.concurrent.Callable;
 public class BundleBackedClassLoader extends ClassLoader {
 
     private final ClassLoader bundleClassLoader;
+    private final ClassLoader fallbackClassLoader;
 
     public BundleBackedClassLoader(ClassLoader bundleClassLoader) {
+        this(bundleClassLoader, null);
+    }
+
+    public BundleBackedClassLoader(ClassLoader bundleClassLoader, ClassLoader fallbackClassLoader) {
         super(bundleClassLoader);
         this.bundleClassLoader = bundleClassLoader;
+        this.fallbackClassLoader = fallbackClassLoader;
     }
 
     @Override
@@ -45,6 +51,18 @@ public class BundleBackedClassLoader extends ClassLoader {
         try {
             return bundleClassLoader.loadClass(name);
         } catch (ClassNotFoundException e) {
+            // During hot bundle updates CPI may temporarily keep running threads on a stale
+            // bundle class loader. Fall back to the thread's original TCCL (if distinct) so the
+            // call can continue with the freshest class space available.
+            if (fallbackClassLoader != null
+                    && fallbackClassLoader != bundleClassLoader
+                    && fallbackClassLoader != this) {
+                try {
+                    return fallbackClassLoader.loadClass(name);
+                } catch (ClassNotFoundException ignored) {
+                    // Continue to system fallback.
+                }
+            }
             // Fallback to system classloader for JDK classes not wired by OSGi
             ClassLoader systemCl = ClassLoader.getSystemClassLoader();
             if (systemCl != null && systemCl != bundleClassLoader) {
@@ -62,7 +80,7 @@ public class BundleBackedClassLoader extends ClassLoader {
         ClassLoader originalCl = Thread.currentThread().getContextClassLoader();
         try {
             Thread.currentThread().setContextClassLoader(
-                    new BundleBackedClassLoader(bundleClass.getClassLoader()));
+                    new BundleBackedClassLoader(bundleClass.getClassLoader(), originalCl));
             return callable.call();
         } finally {
             Thread.currentThread().setContextClassLoader(originalCl);
@@ -77,7 +95,7 @@ public class BundleBackedClassLoader extends ClassLoader {
         ClassLoader originalCl = Thread.currentThread().getContextClassLoader();
         try {
             Thread.currentThread().setContextClassLoader(
-                    new BundleBackedClassLoader(bundleClass.getClassLoader()));
+                    new BundleBackedClassLoader(bundleClass.getClassLoader(), originalCl));
             action.run();
         } finally {
             Thread.currentThread().setContextClassLoader(originalCl);

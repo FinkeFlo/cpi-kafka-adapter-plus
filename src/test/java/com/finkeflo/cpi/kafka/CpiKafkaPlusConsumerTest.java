@@ -405,6 +405,33 @@ public class CpiKafkaPlusConsumerTest {
     }
 
     @Test
+    public void testIsBundleWiringInvalidFailureWithNoClassDefFoundError() {
+        Throwable failure = new NoClassDefFoundError(
+                "org/apache/kafka/clients/consumer/ConsumerPartitionAssignor$GroupSubscription");
+        failure.initCause(new ClassNotFoundException(
+                "Unable to load class 'org.apache.kafka.clients.consumer.ConsumerPartitionAssignor$GroupSubscription' "
+                        + "because the bundle wiring for com.finkeflo.cpi.kafka.cpi-kafka-adapter-plus is no longer valid."));
+
+        Assert.assertTrue(CpiKafkaPlusConsumer.isBundleWiringInvalidFailure(failure));
+    }
+
+    @Test
+    public void testIsBundleWiringInvalidFailureWithWrappedClassNotFound() {
+        Throwable failure = new RuntimeException("wrapped",
+                new ClassNotFoundException(
+                        "Unable to load class 'org.apache.kafka.clients.consumer.internals.ConsumerCoordinator$3' "
+                                + "because the bundle wiring for com.finkeflo.cpi.kafka.cpi-kafka-adapter-plus is no longer valid."));
+
+        Assert.assertTrue(CpiKafkaPlusConsumer.isBundleWiringInvalidFailure(failure));
+    }
+
+    @Test
+    public void testIsBundleWiringInvalidFailureFalseForRegularClassNotFound() {
+        Assert.assertFalse(CpiKafkaPlusConsumer.isBundleWiringInvalidFailure(
+                new ClassNotFoundException("org.example.DoesNotExist")));
+    }
+
+    @Test
     public void testBuildStoppedByErrorPolicyExceptionUsesMatchingCauseInMessage() {
         IllegalStateException ex = CpiKafkaPlusConsumer.buildStoppedByErrorPolicyException(
                 "topic-a", "group-a",
