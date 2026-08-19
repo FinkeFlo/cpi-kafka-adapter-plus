@@ -20,6 +20,8 @@
  */
 package com.finkeflo.cpi.kafka;
 
+import java.io.PrintWriter;
+import java.io.StringWriter;
 import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
@@ -195,7 +197,7 @@ public class AdapterTracingHelper {
         try {
             Map<String, String> safeContext = context != null ? context : java.util.Collections.emptyMap();
             StringBuilder sb = new StringBuilder();
-            sb.append("ERROR: ").append(AdapterDiagnostics.describeThrowable(e));
+            sb.append("ERROR: ").append(describeThrowableForMpl(e));
 
             if (!safeContext.isEmpty()) {
                 sb.append("\n\n--- Context ---");
@@ -334,10 +336,12 @@ public class AdapterTracingHelper {
                 }
                 putAdapterAttribute.invoke(mplLog, "retryable", retryable);
 
-                // f4: Attachment with full error block
-                Method addAttachmentAsString = baseMessageLogInterface.getMethod(
-                        "addAttachmentAsString", String.class, String.class, String.class);
-                addAttachmentAsString.invoke(mplLog, ERROR_ATTACHMENT_NAME, fullDiagnostic, "text/plain");
+                // f4: Optional attachment with full error block.
+                if (endpoint.isWriteMplErrorAttachment()) {
+                    Method addAttachmentAsString = baseMessageLogInterface.getMethod(
+                            "addAttachmentAsString", String.class, String.class, String.class);
+                    addAttachmentAsString.invoke(mplLog, ERROR_ATTACHMENT_NAME, fullDiagnostic, "text/plain");
+                }
 
                 // f5: Fire FAILED status event if requested
                 if (useStatusVariant) {
@@ -437,7 +441,7 @@ public class AdapterTracingHelper {
         if (errorCode != null) {
             sb.append("Error Code: ").append(errorCode).append('\n');
         }
-        sb.append("Exception: ").append(AdapterDiagnostics.describeThrowable(e)).append("\n\n");
+        sb.append("Exception:\n").append(describeThrowableForMpl(e)).append('\n');
 
         if (!safeContext.isEmpty()) {
             sb.append("--- Context ---\n");
@@ -454,6 +458,23 @@ public class AdapterTracingHelper {
         sb.append("endpoint.bootstrapServers: ").append(getBootstrapServersSafe()).append('\n');
 
         return sb.toString();
+    }
+
+    /**
+     * Full throwable rendering for MPL traces/attachments.
+     *
+     * <p>Unlike tenant-trace lines (which must stay bounded), MPL artifacts should preserve the
+     * complete stack trace with all frames and causes for deep debugging.
+     */
+    private static String describeThrowableForMpl(Throwable t) {
+        if (t == null) {
+            return "null";
+        }
+        StringWriter sw = new StringWriter(2048);
+        PrintWriter pw = new PrintWriter(sw);
+        t.printStackTrace(pw);
+        pw.flush();
+        return sw.toString();
     }
 
     /** Null-safe wrapper for endpoint.getGroupId(). */

@@ -379,9 +379,10 @@ failed in the monitor, making failures visible at a glance without opening each 
 
 ### Attachment with the full error block
 
-Independently of the trace level, the adapter attaches the complete serialised error block —
-exception chain, causes and frames — to the message's monitor entry under the name
-`KafkaAdapterError`. This is the one channel that is not subject to the 8,000-character line limit
+When `writeMplErrorAttachment=true` (default), the adapter attaches the complete error diagnostic —
+including the full Java stack trace and all nested causes — to the message's monitor entry under
+the name `KafkaAdapterError`. This is the one channel that is not subject to the
+8,000-character line limit
 of the tenant trace file, so when a cause chain is deep this is where to read it in full.
 
 A second trace-independent channel writes the same four facts as adapter attributes
