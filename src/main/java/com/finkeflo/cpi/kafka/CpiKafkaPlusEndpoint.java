@@ -332,11 +332,6 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
                     + "for deep investigation. Use FULL only when actively debugging; STANDARD is the normal operational mode.")
     private String diagnosticsLevel = "STANDARD";
 
-    @UriParam(label = "errorHandling", defaultValue = "true",
-            description = "Write the full Kafka adapter error diagnostic as an MPL attachment "
-                    + "('KafkaAdapterError'). Disable to keep only searchable MPL headers/attributes.")
-    private boolean writeMplErrorAttachment = true;
-
     public CpiKafkaPlusEndpoint() {
         this.component = null;
     }
@@ -651,9 +646,4 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
 
     /** True when diagnostics level is set to FULL for verbose/expensive output. */
     public boolean isDiagnosticsLevelFull() { return "FULL".equalsIgnoreCase(diagnosticsLevel); }
-
-    public boolean isWriteMplErrorAttachment() { return writeMplErrorAttachment; }
-    public void setWriteMplErrorAttachment(boolean writeMplErrorAttachment) {
-        this.writeMplErrorAttachment = writeMplErrorAttachment;
-    }
 }

@@ -218,10 +218,6 @@
                     <ReferenceName>diagnosticsLevel</ReferenceName>
                     <description>Diagnostic output level. STANDARD (default) is fully diagnostic on its own: every failure produces one structured ERROR line with the complete serialised cause chain. FULL adds exactly one thing, a bounded thread dump (at most 20 threads, 10 frames each, with lock owners) attached to the node-fault escalation that fires when the same fault recurs 5 times in 20 minutes. That dump is the only evidence that can settle a monitor-ownership question. Leave this on STANDARD unless you are actively investigating such a fault.</description>
                 </AttributeReference>
-                <AttributeReference>
-                    <ReferenceName>writeMplErrorAttachment</ReferenceName>
-                    <description>Write the full error diagnostic as MPL attachment 'KafkaAdapterError'. Disable to keep only searchable MPL headers/attributes without the full attachment payload.</description>
-                </AttributeReference>
             </AttributeGroup>
         </Tab>
 
@@ -878,15 +874,6 @@
             <FixedValue><Value>STANDARD</Value><GuiLabels guid="b1000009-0000-0000-0000-000000000011"><Label language="EN">Standard (Default)</Label></GuiLabels></FixedValue>
             <FixedValue><Value>FULL</Value><GuiLabels guid="b1000009-0000-0000-0000-000000000012"><Label language="EN">Full (Verbose)</Label></GuiLabels></FixedValue>
         </FixedValues>
-    </AttributeMetadata>
-    <AttributeMetadata>
-        <Name>writeMplErrorAttachment</Name>
-        <Usage>false</Usage>
-        <DataType>xsd:boolean</DataType>
-        <Default>true</Default>
-        <Length/>
-        <isparameterized>true</isparameterized>
-        <GuiLabels guid="b1000009-0000-0000-0000-000000000002"><Label language="EN">Write MPL Error Attachment</Label></GuiLabels>
     </AttributeMetadata>
 
 </ComponentMetadata>
