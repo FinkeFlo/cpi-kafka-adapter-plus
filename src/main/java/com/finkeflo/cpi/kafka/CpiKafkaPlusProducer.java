@@ -66,6 +66,14 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
     private static final int MAX_CONSECUTIVE_SEND_FAILURES = 3;
     private static final Duration TXN_PRODUCER_CLOSE_TIMEOUT = Duration.ofSeconds(5);
     /**
+     * The Kafka client default for {@code transaction.timeout.ms}
+     * ({@code ProducerConfig.java:532-534}, kafka-clients 4.3.1). The adapter never sets the option,
+     * so this is the window the broker actually applies. {@code deliveryTimeoutSeconds} must stay
+     * below it: otherwise the client is still waiting for acknowledgements of a transaction the
+     * broker has already discarded.
+     */
+    private static final int TRANSACTION_TIMEOUT_DEFAULT_SECONDS = 60;
+    /**
      * Upper bound for the AdminClient topic-existence probe. A metadata describe is a single round
      * trip, so this only ever comes into play when the broker is unreachable — in which case the
      * send that follows is going to fail anyway and there is nothing to gain from waiting longer.
@@ -121,6 +129,14 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
     private final java.util.Set<String> prewarmingTopics =
             java.util.Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap<String, Boolean>());
     private KafkaProducer<byte[], byte[]> kafkaProducer;
+    /**
+     * Creates the throw-away producer of a transactional attempt. A field rather than a direct
+     * {@code new}, because it is the only seam through which a test can fail a specific phase
+     * (SEND vs. COMMIT) with a specific exception class while still talking to a real broker —
+     * and the shared Testcontainers Kafka instance rules out stopping the broker itself.
+     */
+    java.util.function.Function<Properties, KafkaProducer<byte[], byte[]>> txnProducerFactory =
+            this::createTransactionalProducer;
     private AvroSerializerHelper avroHelper;
     private AdapterTracingHelper tracingHelper;
     private JsonSchemaValidator jsonSchemaValidator;
@@ -295,10 +311,97 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
                     exampleId);
         }
 
+        validateRetryConfiguration();
+
         // Surface a missing topic in the deployment log right away, and warm the cache when it is
         // present. Warning only, off the deployment thread — never blocks or delays route startup
         // (see the method javadoc).
         startTopicCheckInBackground();
+    }
+
+    /**
+     * Validates the producer outer-retry configuration and refuses a start-up that could not
+     * possibly work.
+     *
+     * <p>The worst-case check is a hard failure rather than a warning on purpose: a retry
+     * configuration whose first attempt already consumes the entire budget is a promise to
+     * operations that the adapter cannot keep, and it would only be discovered during the outage it
+     * was configured for.
+     */
+    private void validateRetryConfiguration() {
+        int maxAttempts = endpoint.getProducerRetryMaxAttempts();
+        if (maxAttempts < 1 || maxAttempts > 5) {
+            throw new IllegalArgumentException(
+                    "Please set producerRetryMaxAttempts between 1 and 5 (configured value: "
+                    + maxAttempts + "). This is the total number of attempts, not the number of "
+                    + "additional ones; 1 switches the retry off.");
+        }
+        int delaySeconds = endpoint.getProducerRetryDelaySeconds();
+        if (delaySeconds < 1 || delaySeconds > 30) {
+            throw new IllegalArgumentException(
+                    "Please set producerRetryDelaySeconds between 1 and 30 (configured value: "
+                    + delaySeconds + "). A delay below one second cannot help against a "
+                    + "disconnected broker node — the Kafka client has already backed off "
+                    + "exponentially before giving up — and only adds load.");
+        }
+        int budgetSeconds = endpoint.getProducerRetryTotalBudgetSeconds();
+        if (budgetSeconds < 5 || budgetSeconds > 300) {
+            throw new IllegalArgumentException(
+                    "Please set producerRetryTotalBudgetSeconds between 5 and 300 (configured value: "
+                    + budgetSeconds + ").");
+        }
+
+        if (maxAttempts == 1) {
+            return;  // feature off: nothing below can apply
+        }
+
+        boolean transactional = endpoint.isEnableTransactions();
+        boolean batchMode = !"NONE".equalsIgnoreCase(endpoint.getProducerBatchMode());
+
+        // A silently ineffective parameter is worse than no parameter: without transactions a
+        // partially sent batch cannot be repeated without duplicating the records that already
+        // made it, so this path deliberately never retries (see ProducerRetryPolicy).
+        if (batchMode && !transactional) {
+            LOG.warn("[CPI-KAFKA-PLUS-DIAG] producerRetryMaxAttempts={} has no effect for "
+                    + "producerBatchMode={} without enableTransactions=true, because a partially "
+                    + "sent batch cannot be retried without duplicating records. Enable "
+                    + "transactions to use producer retry for batches.",
+                    maxAttempts, endpoint.getProducerBatchMode());
+        }
+
+        if (transactional && endpoint.getMaxConcurrentTransactions() == 1) {
+            LOG.warn("[CPI-KAFKA-PLUS-DIAG] producerRetryMaxAttempts={} with "
+                    + "maxConcurrentTransactions=1: a retry holds the single transaction slot for "
+                    + "its whole duration (up to producerRetryTotalBudgetSeconds={}s), blocking "
+                    + "every other send on this node meanwhile. Consider raising "
+                    + "maxConcurrentTransactions.",
+                    maxAttempts, budgetSeconds);
+        }
+
+        int deliveryTimeoutSeconds = endpoint.getDeliveryTimeoutSeconds();
+        if (transactional && deliveryTimeoutSeconds >= TRANSACTION_TIMEOUT_DEFAULT_SECONDS) {
+            throw new IllegalArgumentException(
+                    "Please set deliveryTimeoutSeconds below " + TRANSACTION_TIMEOUT_DEFAULT_SECONDS
+                    + " (configured value: " + deliveryTimeoutSeconds + "s). The broker expires a "
+                    + "transaction after transaction.timeout.ms (" + TRANSACTION_TIMEOUT_DEFAULT_SECONDS
+                    + "s by default), so a longer delivery timeout would leave the client waiting "
+                    + "for acknowledgements of a transaction the broker has already discarded.");
+        }
+
+        long worstCase = ProducerRetryPolicy.worstCaseSeconds(maxAttempts, deliveryTimeoutSeconds,
+                delaySeconds, (int) TXN_PRODUCER_CLOSE_TIMEOUT.getSeconds(), transactional);
+        if (worstCase > budgetSeconds) {
+            throw new IllegalArgumentException(
+                    "Producer retry is configured with a worst case of " + worstCase
+                    + "s, which exceeds producerRetryTotalBudgetSeconds=" + budgetSeconds
+                    + ". Lower deliveryTimeoutSeconds (currently " + deliveryTimeoutSeconds
+                    + "s) or producerRetryMaxAttempts, or raise the budget. The budget must stay "
+                    + "below the timeout of the calling HTTP client. Note that one attempt costs "
+                    + "roughly four times deliveryTimeoutSeconds on the transactional path, because "
+                    + "initTransactions(), the metadata block inside send() and commitTransaction() "
+                    + "are each bounded by max.block.ms = min(30s, deliveryTimeoutSeconds) on top of "
+                    + "the wait for acknowledgements.");
+        }
     }
 
     @Override
@@ -550,7 +653,6 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
             throw new RuntimeException("Interrupted while waiting for a transaction slot", e);
         }
 
-        KafkaProducer<byte[], byte[]> txnProducer = null;
         try {
             synchronized (txnSlotInUse) {
                 for (int i = 0; i < txnSlotInUse.length; i++) {
@@ -566,60 +668,18 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
             }
 
             // resolvedMemberSuffix and topicHash are resolved once (fail-fast) in doStart() — never null here.
+            // The id is computed once, outside the retry loop, so every attempt of this message uses
+            // the same transactional.id. That is what lets the successor producer fence the epoch of
+            // the failed one and have the broker clean up its dangling transaction.
             transactionalId = endpoint.getTransactionalIdPrefix() + "-" + topicHash
                     + "-" + resolvedMemberSuffix + "-" + slotId;
 
             java.util.Properties props = ProducerConfigFactory.buildProducerProperties(endpoint);
             props.put(org.apache.kafka.clients.producer.ProducerConfig.TRANSACTIONAL_ID_CONFIG, transactionalId);
 
-            txnProducer = BundleBackedClassLoader.withBundleClassLoader(getClass(),
-                    () -> new KafkaProducer<>(props,
-                            new org.apache.kafka.common.serialization.ByteArraySerializer(),
-                            new org.apache.kafka.common.serialization.ByteArraySerializer()));
-
-            txnProducer.initTransactions();
-            txnProducer.beginTransaction();
-
-            ProducerBatchHelper.BatchSendResult result = ProducerBatchHelper.sendBatch(
-                    txnProducer, records, topic, fallbackKey, partition, timestamp,
-                    in, this::addRecordHeaders, valueSerializer, null, sendGuard,
-                    ProducerPath.TRANSACTIONAL, transactionalId);
-
-            txnProducer.commitTransaction();
-
-            ProducerBatchHelper.setResponseHeadersAndBody(in, topic, batchMode, result);
-            recordTxnSendSuccess();
-
-        } catch (Exception e) {
-            if (txnProducer != null) {
-                try {
-                    txnProducer.abortTransaction();
-                } catch (Exception abortEx) {
-                    LOG.warn("[CPI-KAFKA-PLUS-DIAG] Failed to abort transaction for slot {}: {}", slotId, abortEx.getMessage(), abortEx);
-                    e.addSuppressed(abortEx);
-                }
-            }
-            java.util.Map<String, String> ctx = new java.util.LinkedHashMap<>();
-            ctx.put("topic", topic);
-            ctx.put("batchMode", batchMode);
-            ctx.put("transactionalId", transactionalId != null ? transactionalId : "(not yet assigned)");
-            ctx.put("slotId", String.valueOf(slotId));
-            ctx.put("topicHash", topicHash != null ? topicHash : "(not yet computed)");
-            CorrelationHelper.addTo(ctx, in.getExchange());
-            tracingHelper.traceError(in.getExchange(), e, ctx);
-            handleTxnSendFailure(e, ctx);
-            throw sendFailure("Failed to send transactional batch to", topic, e);
+            runTransactionalAttempts(in, topic, batchMode, records, fallbackKey, partition, timestamp,
+                    valueSerializer, props, transactionalId, slotId);
         } finally {
-            if (txnProducer != null) {
-                try {
-                    // Bounded close — an unreachable broker must not hang here indefinitely, since
-                    // the transaction slot below is only released once close() returns. Without a
-                    // timeout, a broker outage could permanently exhaust all txn slots (deadlock).
-                    txnProducer.close(TXN_PRODUCER_CLOSE_TIMEOUT);
-                } catch (Exception closeEx) {
-                    LOG.warn("[CPI-KAFKA-PLUS-DIAG] Failed to close transactional producer for slot {}: {}", slotId, closeEx.getMessage(), closeEx);
-                }
-            }
             if (slotId != -1) {
                 synchronized (txnSlotInUse) {
                     txnSlotInUse[slotId] = false;
@@ -627,6 +687,244 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
             }
             txnSlotSemaphore.release();
         }
+    }
+
+    /**
+     * Runs up to {@code producerRetryMaxAttempts} transactional sends, each with its own throw-away
+     * producer, and reports the outcome exactly once.
+     *
+     * <p>Deliberately nested inside the transaction slot held by the caller: every attempt must use
+     * the same {@code transactional.id}, which is derived from the slot. The cost is that a retry
+     * holds a scarce slot for its whole duration — bounded by
+     * {@code producerRetryTotalBudgetSeconds} and validated against the slot count at start-up.
+     *
+     * <p>{@code abortTransaction()} is deliberately <em>not</em> called between attempts. After a
+     * network disconnect it throws itself — it is precisely the state this feature routes around.
+     * {@code close(Duration)} aborts an ongoing transaction that is not already completing
+     * (kafka-clients 4.3.1, {@code KafkaProducer.java:1366-1372}) and the successor's
+     * {@code initTransactions()} aborts anything the previous instance left in progress
+     * ({@code KafkaProducer.java:637-643}); two independent nets for the same case.
+     */
+    private void runTransactionalAttempts(Message in, String topic, String batchMode,
+                                          java.util.List<BatchRecord> records, String fallbackKey,
+                                          Integer partition, Long timestamp,
+                                          ProducerBatchHelper.ByteSerializer valueSerializer,
+                                          java.util.Properties props, String transactionalId,
+                                          int slotId) throws Exception {
+        int maxAttempts = endpoint.getProducerRetryMaxAttempts();
+        long delayMs = endpoint.getProducerRetryDelaySeconds() * 1000L;
+        long startedAtMs = System.currentTimeMillis();
+        long budgetDeadlineMs = startedAtMs + endpoint.getProducerRetryTotalBudgetSeconds() * 1000L;
+
+        Exception lastError = null;
+        ProducerRetryPolicy.TxnPhase phase = ProducerRetryPolicy.TxnPhase.CREATE;
+        ProducerRetryPolicy.StopReason stopReason = ProducerRetryPolicy.StopReason.RETRY_DISABLED;
+        int attempt = 0;
+
+        for (attempt = 1; attempt <= maxAttempts; attempt++) {
+            phase = ProducerRetryPolicy.TxnPhase.CREATE;
+            KafkaProducer<byte[], byte[]> txnProducer = null;
+            try {
+                txnProducer = txnProducerFactory.apply(props);
+
+                phase = ProducerRetryPolicy.TxnPhase.INIT;
+                txnProducer.initTransactions();
+
+                phase = ProducerRetryPolicy.TxnPhase.BEGIN;
+                txnProducer.beginTransaction();
+
+                phase = ProducerRetryPolicy.TxnPhase.SEND;
+                ProducerBatchHelper.BatchSendResult result = ProducerBatchHelper.sendBatch(
+                        txnProducer, records, topic, fallbackKey, partition, timestamp,
+                        in, this::addRecordHeaders, valueSerializer, null, sendGuard,
+                        ProducerPath.TRANSACTIONAL, transactionalId);
+
+                phase = ProducerRetryPolicy.TxnPhase.COMMIT;
+                txnProducer.commitTransaction();
+                phase = ProducerRetryPolicy.TxnPhase.COMMITTED;
+
+                ProducerBatchHelper.setResponseHeadersAndBody(in, topic, batchMode, result);
+                reportRetryRecovery(in, topic, attempt, System.currentTimeMillis() - startedAtMs,
+                        ProducerPath.TRANSACTIONAL);
+                recordTxnSendSuccess();
+                return;
+            } catch (Exception e) {
+                lastError = e;
+                ProducerRetryPolicy.Decision decision = ProducerRetryPolicy.decideTransactional(
+                        e, phase, attempt, maxAttempts, delayMs, budgetDeadlineMs,
+                        System.currentTimeMillis(),
+                        endpoint.isProducerRetryOnlyTransientErrors());
+                if (!decision.isRetry()) {
+                    stopReason = decision.stopReason();
+                    break;
+                }
+                logRetryAttempt(attempt, maxAttempts, phase, e, topic, transactionalId, slotId,
+                        budgetDeadlineMs);
+            } finally {
+                closeTxnProducerQuietly(txnProducer, slotId);
+            }
+
+            if (!sleepBetweenAttempts(delayMs)) {
+                stopReason = ProducerRetryPolicy.StopReason.INTERRUPTED;
+                break;
+            }
+        }
+
+        // All attempts consumed, or the failure was not retry-eligible: report once. Feeding the
+        // failure handlers per attempt would let the auto-pause counter and the node-fault
+        // escalation count up to five failures for a single message and trip early.
+        int attemptsMade = Math.min(attempt, maxAttempts);
+        if (lastError == null) {
+            // Only reachable if the loop never ran, which the start-up range check rules out.
+            lastError = new IllegalStateException(
+                    "Transactional send made no attempt (producerRetryMaxAttempts=" + maxAttempts + ")");
+        }
+        java.util.Map<String, String> ctx = new java.util.LinkedHashMap<>();
+        ctx.put("topic", topic);
+        ctx.put("batchMode", batchMode);
+        ctx.put("transactionalId", transactionalId != null ? transactionalId : "(not yet assigned)");
+        ctx.put("slotId", String.valueOf(slotId));
+        ctx.put("topicHash", topicHash != null ? topicHash : "(not yet computed)");
+        ctx.put("retryAttempts", String.valueOf(attemptsMade));
+        ctx.put("txnPhase", String.valueOf(phase));
+        ctx.put("stopReason", String.valueOf(stopReason));
+        ctx.put("totalElapsedMs", String.valueOf(System.currentTimeMillis() - startedAtMs));
+        CorrelationHelper.addTo(ctx, in.getExchange());
+
+        logRetryOutcome(attemptsMade, maxAttempts, stopReason, phase, lastError, topic,
+                System.currentTimeMillis() - startedAtMs, ProducerPath.TRANSACTIONAL);
+
+        tracingHelper.traceError(in.getExchange(), lastError, ctx);
+        handleTxnSendFailure(lastError, ctx);
+        throw sendFailure("Failed to send transactional batch to", topic, lastError);
+    }
+
+    /**
+     * Bounded close of a throw-away transactional producer. An unreachable broker must not hang
+     * here indefinitely, since the transaction slot is only released once every attempt has closed
+     * its producer. Without a timeout, a broker outage could permanently exhaust all txn slots.
+     */
+    private void closeTxnProducerQuietly(KafkaProducer<byte[], byte[]> txnProducer, int slotId) {
+        if (txnProducer == null) {
+            return;
+        }
+        try {
+            txnProducer.close(TXN_PRODUCER_CLOSE_TIMEOUT);
+        } catch (Exception closeEx) {
+            LOG.warn("[CPI-KAFKA-PLUS-DIAG] Failed to close transactional producer for slot {}: {}",
+                    slotId, closeEx.getMessage(), closeEx);
+        }
+    }
+
+    /** @return false if the wait was interrupted, in which case no further attempt may be made */
+    private boolean sleepBetweenAttempts(long delayMs) {
+        if (delayMs <= 0) {
+            return true;
+        }
+        try {
+            Thread.sleep(delayMs);
+            return true;
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+            return false;
+        }
+    }
+
+    /** Default implementation behind {@link #txnProducerFactory}. */
+    private KafkaProducer<byte[], byte[]> createTransactionalProducer(Properties props) {
+        try {
+            return BundleBackedClassLoader.withBundleClassLoader(getClass(),
+                    () -> new KafkaProducer<>(props,
+                            new org.apache.kafka.common.serialization.ByteArraySerializer(),
+                            new org.apache.kafka.common.serialization.ByteArraySerializer()));
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            // The callable itself only throws unchecked exceptions; the checked signature comes
+            // from the class-loader wrapper. Wrapped rather than swallowed so the cause chain — and
+            // with it the retry classification — stays intact.
+            throw new org.apache.kafka.common.KafkaException(
+                    "Failed to create the transactional producer", e);
+        }
+    }
+
+    /**
+     * Reports one failed attempt that will be repeated.
+     *
+     * <p>ERROR, like every other retry event, because the CPI tenant trace file receives only
+     * ERROR — a retry logged at WARN or INFO would be invisible in exactly the production incident
+     * it exists to explain. This is bounded (at most {@code producerRetryMaxAttempts} lines per
+     * message, capped at 5, and additionally capped by the budget) and only occurs during a real
+     * fault, so it reports an event rather than a pulse.
+     */
+    private void logRetryAttempt(int attempt, int maxAttempts, ProducerRetryPolicy.TxnPhase phase,
+                                 Exception e, String topic, String transactionalId, int slotId,
+                                 long budgetDeadlineMs) {
+        AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("producer.retry.attempt")
+                .with("attempt", attempt)
+                .with("maxAttempts", maxAttempts)
+                .with("txnPhase", phase)
+                .with("classification", KafkaErrorHelper.classify(e))
+                .with("delaySeconds", endpoint.getProducerRetryDelaySeconds())
+                .with("remainingBudgetMs", Math.max(0L, budgetDeadlineMs - System.currentTimeMillis()))
+                .with("topic", topic)
+                .withOptional("transactionalId", transactionalId)
+                .with("slotId", slotId)
+                .with("producerPath", ProducerPath.TRANSACTIONAL), e);
+    }
+
+    /**
+     * Reports the end of a retry run that did not succeed.
+     *
+     * <p>Two shapes, both carrying {@code attempts} and {@code recovered} under the same names as
+     * {@code producer.retry.effect}, so "how often does the retry actually rescue a message" is a
+     * ratio of two greppable lines rather than a manual correlation:
+     * {@code producer.retry.exhausted} when every attempt was used up, {@code producer.retry.skipped}
+     * when the failure was not retry-eligible in the first place.
+     *
+     * <p>Nothing is written when the feature is off ({@code producerRetryMaxAttempts=1}) — every
+     * ordinary failure would otherwise gain a second, contentless line.
+     */
+    private void logRetryOutcome(int attempts, int maxAttempts,
+                                 ProducerRetryPolicy.StopReason stopReason,
+                                 ProducerRetryPolicy.TxnPhase phase, Exception lastError,
+                                 String topic, long totalElapsedMs, ProducerPath producerPath) {
+        if (maxAttempts <= 1) {
+            return;
+        }
+        boolean exhausted = stopReason == ProducerRetryPolicy.StopReason.ATTEMPTS_EXHAUSTED
+                || stopReason == ProducerRetryPolicy.StopReason.BUDGET_EXHAUSTED;
+        AdapterDiagnostics.Event event = AdapterDiagnostics
+                .event(exhausted ? "producer.retry.exhausted" : "producer.retry.skipped")
+                .with("attempts", attempts)
+                .with("stopReason", stopReason)
+                .with("txnPhase", phase)
+                .with("classification", KafkaErrorHelper.classify(lastError))
+                .with("totalElapsedMs", totalElapsedMs)
+                .with("recovered", false)
+                .with("topic", topic)
+                .with("producerPath", producerPath);
+        AdapterDiagnostics.error(LOG, event, lastError);
+    }
+
+    /**
+     * Records that a send only succeeded because of a retry: as a diagnostic event, as a response
+     * header for the iFlow, and in the Message Processing Log so the message is findable in
+     * monitoring without reading the tenant trace.
+     */
+    private void reportRetryRecovery(Message in, String topic, int attempts, long totalElapsedMs,
+                                     ProducerPath producerPath) {
+        if (attempts <= 1) {
+            return;
+        }
+        in.setHeader("CamelKafkaPlusRetryAttempts", attempts);
+        AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("producer.retry.effect")
+                .with("attempts", attempts)
+                .with("totalElapsedMs", totalElapsedMs)
+                .with("recovered", true)
+                .with("topic", topic)
+                .with("producerPath", producerPath));
+        tracingHelper.annotateRetrySuccess(in.getExchange(), attempts);
     }
 
     private java.util.List<BatchRecord> parseBatchRecords(Message in, String batchMode) {
@@ -696,41 +994,108 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
             tracingHelper.traceOutbound(exchange, value);
         }
 
-        // Send synchronously to ensure delivery before IFlow continues
-        try {
-            long deadlineMs = sendGuard.newDeadline();
-            Future<RecordMetadata> future = MonitorFaultRetry.execute(
-                    () -> kafkaProducer.send(record),
-                    new MonitorFaultRetry.Budget(),
-                    deadlineMs,
-                    topic,
-                    0);
-            RecordMetadata metadata = sendGuard.await(future, deadlineMs,
-                    "Send to topic '" + topic + "'");
+        // Send synchronously to ensure delivery before IFlow continues.
+        //
+        // Two retry layers are stacked here on purpose. MonitorFaultRetry below catches the
+        // KAFKA-10902 JVM defect in the millisecond range on the send() call itself; the outer loop
+        // catches broker outages in the second range. Both are covered by the same total budget.
+        //
+        // The shared producer is deliberately *reused* across attempts rather than rebuilt: the
+        // broker deduplicates a re-sent record on (PID, sequence), and only the same producer
+        // instance keeps that PID. A fresh producer would get a new PID and turn a lost
+        // acknowledgement into a duplicate record. This is also why the loop requires idempotence.
+        int maxAttempts = endpoint.getProducerRetryMaxAttempts();
+        long delayMs = endpoint.getProducerRetryDelaySeconds() * 1000L;
+        long startedAtMs = System.currentTimeMillis();
+        long budgetDeadlineMs = startedAtMs + endpoint.getProducerRetryTotalBudgetSeconds() * 1000L;
+        Exception lastError = null;
+        ProducerRetryPolicy.StopReason stopReason = ProducerRetryPolicy.StopReason.RETRY_DISABLED;
+        int attempt = 0;
 
-            in.setHeader("SAP_Receiver", metadata.topic());
-            // Adapter-native headers, consistent with the batch producer and consumer.
-            // Note: the previous CamelKafkaTopic/Partition/Offset/Timestamp headers are
-            // intentionally no longer set here (#84) - iFlows must use the CpiKafkaPlus*
-            // headers below instead.
-            in.setHeader("CpiKafkaPlusTopic", metadata.topic());
-            in.setHeader("CpiKafkaPlusPartition", metadata.partition());
-            in.setHeader("CpiKafkaPlusOffset", metadata.offset());
-            in.setHeader("CpiKafkaPlusTimestamp", metadata.timestamp());
-            in.setHeader("CpiKafkaPlusStatus", "OK");
+        for (attempt = 1; attempt <= maxAttempts; attempt++) {
+            try {
+                long deadlineMs = sendGuard.newDeadline();
+                Future<RecordMetadata> future = MonitorFaultRetry.execute(
+                        () -> kafkaProducer.send(record),
+                        new MonitorFaultRetry.Budget(),
+                        deadlineMs,
+                        topic,
+                        0);
+                RecordMetadata metadata = sendGuard.await(future, deadlineMs,
+                        "Send to topic '" + topic + "'");
 
-            recordSendSuccess();
-            LOG.debug("[CPI-KAFKA-PLUS-DIAG] Message sent to topic '{}' partition {} offset {}",
-                    metadata.topic(), metadata.partition(), metadata.offset());
-        } catch (Exception e) {
-            Map<String, String> ctx = new java.util.LinkedHashMap<>();
-            ctx.put("topic", topic);
-            ctx.put("sendMode", "SINGLE");
-            CorrelationHelper.addTo(ctx, exchange);
-            tracingHelper.traceError(exchange, e, ctx);
-            handleSendFailure(e, "producer.single.send", ctx);
-            throw sendFailure("Failed to send message to", topic, e);
+                in.setHeader("SAP_Receiver", metadata.topic());
+                // Adapter-native headers, consistent with the batch producer and consumer.
+                // Note: the previous CamelKafkaTopic/Partition/Offset/Timestamp headers are
+                // intentionally no longer set here (#84) - iFlows must use the CpiKafkaPlus*
+                // headers below instead.
+                in.setHeader("CpiKafkaPlusTopic", metadata.topic());
+                in.setHeader("CpiKafkaPlusPartition", metadata.partition());
+                in.setHeader("CpiKafkaPlusOffset", metadata.offset());
+                in.setHeader("CpiKafkaPlusTimestamp", metadata.timestamp());
+                in.setHeader("CpiKafkaPlusStatus", "OK");
+
+                reportRetryRecovery(in, topic, attempt, System.currentTimeMillis() - startedAtMs,
+                        ProducerPath.SHARED);
+                recordSendSuccess();
+                LOG.debug("[CPI-KAFKA-PLUS-DIAG] Message sent to topic '{}' partition {} offset {}",
+                        metadata.topic(), metadata.partition(), metadata.offset());
+                return;
+            } catch (Exception e) {
+                lastError = e;
+                ProducerRetryPolicy.Decision decision = ProducerRetryPolicy.decideSingle(
+                        e, attempt, maxAttempts, delayMs, budgetDeadlineMs,
+                        System.currentTimeMillis(), endpoint.isEnableIdempotence());
+                if (!decision.isRetry()) {
+                    stopReason = decision.stopReason();
+                    break;
+                }
+                logSingleRetryAttempt(attempt, maxAttempts, e, topic, budgetDeadlineMs);
+            }
+
+            if (!sleepBetweenAttempts(delayMs)) {
+                stopReason = ProducerRetryPolicy.StopReason.INTERRUPTED;
+                break;
+            }
         }
+
+        int attemptsMade = Math.min(attempt, maxAttempts);
+        long totalElapsedMs = System.currentTimeMillis() - startedAtMs;
+        if (lastError == null) {
+            // Only reachable if the loop never ran, which the start-up range check rules out.
+            lastError = new IllegalStateException(
+                    "Send made no attempt (producerRetryMaxAttempts=" + maxAttempts + ")");
+        }
+        Map<String, String> ctx = new java.util.LinkedHashMap<>();
+        ctx.put("topic", topic);
+        ctx.put("sendMode", "SINGLE");
+        ctx.put("retryAttempts", String.valueOf(attemptsMade));
+        ctx.put("stopReason", String.valueOf(stopReason));
+        ctx.put("totalElapsedMs", String.valueOf(totalElapsedMs));
+        CorrelationHelper.addTo(ctx, exchange);
+
+        // Exactly once, with the last error — feeding the failure handler per attempt would inflate
+        // the consecutive-failure counter that drives the producer rebuild and the node-fault
+        // escalation.
+        logRetryOutcome(attemptsMade, maxAttempts, stopReason, null, lastError, topic,
+                totalElapsedMs, ProducerPath.SHARED);
+        tracingHelper.traceError(exchange, lastError, ctx);
+        handleSendFailure(lastError, "producer.single.send", ctx);
+        throw sendFailure("Failed to send message to", topic, lastError);
+    }
+
+    /** Single-path counterpart of {@link #logRetryAttempt}; there is no transaction phase here. */
+    private void logSingleRetryAttempt(int attempt, int maxAttempts, Exception e, String topic,
+                                       long budgetDeadlineMs) {
+        AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("producer.retry.attempt")
+                .with("attempt", attempt)
+                .with("maxAttempts", maxAttempts)
+                .with("txnPhase", "N/A")
+                .with("classification", KafkaErrorHelper.classify(e))
+                .with("delaySeconds", endpoint.getProducerRetryDelaySeconds())
+                .with("remainingBudgetMs", Math.max(0L, budgetDeadlineMs - System.currentTimeMillis()))
+                .with("topic", topic)
+                .with("producerPath", ProducerPath.SHARED), e);
     }
 
     private Integer parsePartitionHeader(Message in) {

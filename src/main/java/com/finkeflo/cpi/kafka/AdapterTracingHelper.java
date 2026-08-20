@@ -167,6 +167,52 @@ public class AdapterTracingHelper {
     }
 
     /**
+     * Marks a successfully sent message that only got through because of a producer retry.
+     *
+     * <p>Written as a searchable MPL property rather than only to the tenant trace, so that
+     * "which messages needed a retry" is a filter in Message Monitoring instead of a log
+     * correlation exercise. Both channels are trace-independent:
+     * {@code MessageLog.setIntegerProperty(String, Integer)} and
+     * {@code MessageLog.addCustomHeaderProperty(String, String)} — signatures verified against
+     * adapter.api / generic.api 3.21.0 and pinned in {@code AdapterTracingHelperTest}.
+     *
+     * <p>Never throws: a diagnostic must not replace the successful send it describes (ADR 0004).
+     */
+    public void annotateRetrySuccess(Exchange exchange, int attempts) {
+        if (attempts <= 1) {
+            return;
+        }
+        try {
+            Object factory = resolveMessageLogFactory(exchange);
+            if (factory == null) {
+                return;
+            }
+            Class<?> factoryInterface =
+                    Class.forName("com.sap.it.api.msglog.adapter.AdapterMessageLogFactory");
+            Class<?> baseMessageLogInterface =
+                    Class.forName("com.sap.it.api.msglog.MessageLog");
+
+            Method getMessageLogMethod = factoryInterface.getMethod("getMessageLog",
+                    Object.class, String.class, String.class, String.class);
+            Object mplLog = getMessageLogMethod.invoke(factory, exchange,
+                    "Kafka send recovered by retry", COMPONENT_ID, UUID.randomUUID().toString());
+            if (mplLog == null) {
+                return;
+            }
+
+            Method setIntegerProperty = baseMessageLogInterface.getMethod(
+                    "setIntegerProperty", String.class, Integer.class);
+            setIntegerProperty.invoke(mplLog, "KafkaRetryAttempts", Integer.valueOf(attempts));
+
+            Method addCustomHeaderProperty = baseMessageLogInterface.getMethod(
+                    "addCustomHeaderProperty", String.class, String.class);
+            addCustomHeaderProperty.invoke(mplLog, "KafkaRetryAttempts", String.valueOf(attempts));
+        } catch (Exception e) {
+            reportUnavailableOnce("annotating a retry success in the MPL failed", e);
+        }
+    }
+
+    /**
      * Writes a structured error trace to the CPI Message Processing Log (visible when trace level
      * is active). Includes the exception type, message, cause chain, and any caller-supplied
      * context entries (e.g. topic, transactionalId, slotId).
@@ -403,6 +449,11 @@ public class AdapterTracingHelper {
                     sb.append(" (moved to dead-letter topic)");
                 }
             }
+            // Same reasoning as the dead-letter outcome above: the retry history belongs in the
+            // status text, where it is visible without opening an attachment. Without it, a message
+            // that was tried five times looks exactly like one that was tried once — and the reason
+            // no further attempt was made would only exist in the tenant trace.
+            appendRetryOutcome(sb, context);
         }
         String statusMessage = sb.toString();
         // Truncate status message to avoid exceeding any platform limits
@@ -412,8 +463,27 @@ public class AdapterTracingHelper {
         return statusMessage;
     }
 
-    /** Null-safe wrapper for RecordProcessor.isRetryable. */
-    private boolean isRetryableSafe(Exception e) {
+    /**
+     * Appends the producer retry history to the MPL status text, if there was one.
+     *
+     * <p>{@code stopReason} is included because "was not retried" is not actionable on its own: a
+     * permanent error, an exhausted budget and a switched-off feature are three different
+     * conclusions for the operator reading this line.
+     */
+    private static void appendRetryOutcome(StringBuilder sb, Map<String, String> context) {
+        String attempts = context.get("retryAttempts");
+        if (attempts == null || "1".equals(attempts.trim()) || attempts.trim().isEmpty()) {
+            return;
+        }
+        sb.append(" (after ").append(attempts.trim()).append(" retry attempts");
+        String stopReason = context.get("stopReason");
+        if (stopReason != null && !stopReason.trim().isEmpty()) {
+            sb.append(", stopReason=").append(stopReason.trim());
+        }
+        sb.append(')');
+    }
+
+    /** Null-safe wrapper for RecordProcessor.isRetryable. */    private boolean isRetryableSafe(Exception e) {
         if (e == null) {
             return false;
         }

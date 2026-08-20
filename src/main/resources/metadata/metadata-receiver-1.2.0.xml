@@ -209,6 +209,31 @@
                     <ErrorMessage>Please enter a positive number in KB (e.g. 32768 for 32 MB)</ErrorMessage>
                 </AttributeReference>
             </AttributeGroup>
+            <AttributeGroup id="producerRetry">
+                <Name xsi:type="xs:string" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">Retry</Name>
+                <GuiLabels guid="a2000006-0000-0000-0000-000000000040">
+                    <Label language="EN">Retry</Label>
+                </GuiLabels>
+                <AttributeReference>
+                    <ReferenceName>producerRetryMaxAttempts</ReferenceName>
+                    <description>Total number of send attempts, not additional attempts. 1 (default) keeps the previous behaviour and switches the retry off. Only failures that provably wrote nothing are repeated: a transactional batch that failed before the commit, or a single non-transactional message with the idempotent producer enabled. A failure inside the commit and a partially sent non-transactional batch are never repeated, because that could duplicate records. Range: 1 to 5.</description>
+                    <ErrorMessage>Please enter a number between 1 and 5 for Max Send Attempts</ErrorMessage>
+                </AttributeReference>
+                <AttributeReference>
+                    <ReferenceName>producerRetryDelaySeconds</ReferenceName>
+                    <description>Constant wait between send attempts in seconds. There is no exponential backoff here because the Kafka client has already exhausted its own before giving up; a wait below one second cannot help against a disconnected broker node and only adds load. Range: 1 to 30.</description>
+                    <ErrorMessage>Please enter a number between 1 and 30 for Retry Delay</ErrorMessage>
+                </AttributeReference>
+                <AttributeReference>
+                    <ReferenceName>producerRetryOnlyTransientErrors</ReferenceName>
+                    <description>Retry only transient (retriable) send failures. Switch off to also retry a fenced or otherwise unusable transactional producer. Only do this when this Transactional ID Prefix is provably used by no other integration flow: a fencing error normally means another instance has taken over the transactional.id, and retrying then becomes a contest both sides lose. Data errors and unclassified errors are never retried.</description>
+                </AttributeReference>
+                <AttributeReference>
+                    <ReferenceName>producerRetryTotalBudgetSeconds</ReferenceName>
+                    <description>Hard upper bound in seconds for all send attempts of one message together. It must stay below the timeout of the calling system: if the caller times out while the adapter is still retrying, it may resend the request and duplicate the message outside the adapter's control. Range: 5 to 300.</description>
+                    <ErrorMessage>Please enter a number between 5 and 300 for Total Retry Budget</ErrorMessage>
+                </AttributeReference>
+            </AttributeGroup>
             <AttributeGroup id="diagnostics">
                 <Name xsi:type="xs:string" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">Diagnostics</Name>
                 <GuiLabels guid="a2000006-0000-0000-0000-000000000030">
@@ -813,6 +838,44 @@
         <Length/>
         <isparameterized>true</isparameterized>
         <GuiLabels guid="b1000006-0000-0000-0000-000000000006"><Label language="EN">Retry Delay (Seconds)</Label></GuiLabels>
+    </AttributeMetadata>
+
+    <!-- Producer Outer Retry (Receiver direction) -->
+    <AttributeMetadata>
+        <Name>producerRetryMaxAttempts</Name>
+        <Usage>false</Usage>
+        <DataType>xsd:integer</DataType>
+        <Default>1</Default>
+        <Length/>
+        <isparameterized>true</isparameterized>
+        <GuiLabels guid="b1000006-0000-0000-0000-000000000007"><Label language="EN">Max Send Attempts</Label></GuiLabels>
+    </AttributeMetadata>
+    <AttributeMetadata>
+        <Name>producerRetryDelaySeconds</Name>
+        <Usage>false</Usage>
+        <DataType>xsd:integer</DataType>
+        <Default>2</Default>
+        <Length/>
+        <isparameterized>true</isparameterized>
+        <GuiLabels guid="b1000006-0000-0000-0000-000000000008"><Label language="EN">Delay Between Attempts (Seconds)</Label></GuiLabels>
+    </AttributeMetadata>
+    <AttributeMetadata>
+        <Name>producerRetryOnlyTransientErrors</Name>
+        <Usage>false</Usage>
+        <DataType>xsd:boolean</DataType>
+        <Default>true</Default>
+        <Length/>
+        <isparameterized>true</isparameterized>
+        <GuiLabels guid="b1000006-0000-0000-0000-000000000009"><Label language="EN">Retry Transient Errors Only</Label></GuiLabels>
+    </AttributeMetadata>
+    <AttributeMetadata>
+        <Name>producerRetryTotalBudgetSeconds</Name>
+        <Usage>false</Usage>
+        <DataType>xsd:integer</DataType>
+        <Default>30</Default>
+        <Length/>
+        <isparameterized>true</isparameterized>
+        <GuiLabels guid="b1000006-0000-0000-0000-00000000000a"><Label language="EN">Total Retry Budget (Seconds)</Label></GuiLabels>
     </AttributeMetadata>
 
     <!-- Auto-Pause (Circuit Breaker) -->
