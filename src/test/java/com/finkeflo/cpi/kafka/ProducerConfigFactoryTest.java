@@ -113,6 +113,65 @@ public class ProducerConfigFactoryTest {
         }
     }
 
+    // ─────────────────────────────────────────────────────────────────────────────
+    // transaction.timeout.ms derived from delivery.timeout.ms (1.3.2)
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    /**
+     * A transaction has to stay open for as long as the send may legitimately take plus the commit
+     * that follows. Before 1.3.2 the option was never set, so the client default of 60 s applied
+     * while the shipped delivery timeout was 120 s — the broker would have aborted the transaction
+     * with the client still waiting for acknowledgements.
+     */
+    @Test
+    public void transactionTimeoutCoversTheDeliveryTimeout() throws Exception {
+        CpiKafkaPlusEndpoint endpoint = createEndpoint();
+        endpoint.setEnableTransactions(true);
+        endpoint.setDeliveryTimeoutSeconds(120);
+
+        Properties props = ProducerConfigFactory.buildProducerProperties(endpoint);
+
+        Assert.assertEquals("120 s delivery + 30 s commit headroom",
+                150_000, props.get(ProducerConfig.TRANSACTION_TIMEOUT_CONFIG));
+    }
+
+    @Test
+    public void transactionTimeoutNeverDropsBelowTheClientDefault() throws Exception {
+        // A short delivery timeout must not shrink the transaction window below what a channel had
+        // before this change, or an upgrade would tighten a bound nobody asked to tighten.
+        CpiKafkaPlusEndpoint endpoint = createEndpoint();
+        endpoint.setEnableTransactions(true);
+        endpoint.setDeliveryTimeoutSeconds(5);
+
+        Properties props = ProducerConfigFactory.buildProducerProperties(endpoint);
+
+        Assert.assertEquals(ProducerConfigFactory.TRANSACTION_TIMEOUT_CLIENT_DEFAULT_MS,
+                props.get(ProducerConfig.TRANSACTION_TIMEOUT_CONFIG));
+    }
+
+    @Test
+    public void transactionTimeoutIsCappedAtTheBrokerMaximum() throws Exception {
+        CpiKafkaPlusEndpoint endpoint = createEndpoint();
+        endpoint.setEnableTransactions(true);
+        endpoint.setDeliveryTimeoutSeconds(10_000);
+
+        Properties props = ProducerConfigFactory.buildProducerProperties(endpoint);
+
+        Assert.assertEquals(ProducerConfigFactory.TRANSACTION_TIMEOUT_BROKER_MAX_MS,
+                props.get(ProducerConfig.TRANSACTION_TIMEOUT_CONFIG));
+    }
+
+    /**
+     * A non-transactional producer rejects the option outright, so it must not appear there.
+     */
+    @Test
+    public void transactionTimeoutIsAbsentWithoutTransactions() throws Exception {
+        CpiKafkaPlusEndpoint endpoint = createEndpoint();
+        Properties props = ProducerConfigFactory.buildProducerProperties(endpoint);
+
+        Assert.assertNull(props.get(ProducerConfig.TRANSACTION_TIMEOUT_CONFIG));
+    }
+
     private CpiKafkaPlusEndpoint createEndpoint() throws Exception {
         CpiKafkaPlusEndpoint endpoint = new CpiKafkaPlusEndpoint();
         endpoint.setCamelContext(camelContext);

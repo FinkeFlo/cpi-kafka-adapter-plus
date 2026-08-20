@@ -134,9 +134,14 @@ deliveryTimeoutSeconds=2
 producerRetryTotalBudgetSeconds=30
 ```
 
-The adapter additionally refuses `deliveryTimeoutSeconds >= 60` while the retry is on, because the
-broker's `transaction.timeout.ms` defaults to 60 s and would discard the transaction while the
-client is still waiting for acknowledgements.
+On a transactional channel the adapter derives `transaction.timeout.ms` from
+`deliveryTimeoutSeconds` (delivery timeout plus up to 30 s of commit headroom, never below the
+client default of 60 s), so the broker keeps the transaction open for at least as long as the client
+waits for acknowledgements. Up to and including 1.3.1 the option was left at its 60 s default and
+any `deliveryTimeoutSeconds >= 60` was rejected instead — which made the shipped default of 120 s
+undeployable for exactly the channels the retry was built for. The remaining bound is the broker's
+`transaction.max.timeout.ms` (15 minutes by default), so `deliveryTimeoutSeconds` may not exceed
+870 s on a transactional channel.
 
 !!! warning "The budget must stay below the caller's timeout"
     If the calling system times out while the adapter is still retrying, it will consider the call

@@ -107,38 +107,59 @@ public class ProducerRetryConfigTest {
     @Test
     public void budgetOutsideTheAllowedRangeIsRejected() throws Exception {
         Map<String, String> params = new HashMap<>();
-        params.put("producerRetryTotalBudgetSeconds", "301");
+        params.put("producerRetryTotalBudgetSeconds", "901");
         Assert.assertTrue(startAndExpectRejection(params).contains("producerRetryTotalBudgetSeconds"));
     }
 
     @Test
-    public void defaultDeliveryTimeoutIsRejectedOnceRetryIsSwitchedOn() throws Exception {
-        // 120 s delivery timeout costs roughly 4 x 120 s per transactional attempt, so the retry
-        // could never reach a second attempt inside a 30 s budget.
+    public void defaultDeliveryTimeoutIsRejectedOnlyForExceedingTheBudget() throws Exception {
+        // Until 1.3.2 the shipped delivery timeout of 120 s was rejected outright on a
+        // transactional channel with the retry on, because transaction.timeout.ms was left at its
+        // 60 s client default. The adapter now derives that option from the delivery timeout, so
+        // the only remaining question is whether the worst case fits the configured budget — and
+        // the message must say so, rather than pointing at a broker limit that no longer applies.
         Map<String, String> params = new HashMap<>();
         params.put("producerBatchMode", "JSON_ARRAY");
         params.put("enableTransactions", "true");
         params.put("transactionalIdPrefix", "test-txn");
         params.put("producerRetryMaxAttempts", "2");
         String message = startAndExpectRejection(params);
-        Assert.assertTrue("the delivery timeout must be flagged: " + message,
-                message.contains("deliveryTimeoutSeconds"));
+        Assert.assertTrue("the budget must be flagged: " + message,
+                message.contains("producerRetryTotalBudgetSeconds"));
+        Assert.assertFalse("the 60 s transaction timeout rule is gone: " + message,
+                message.contains("transaction.timeout.ms"));
     }
 
     @Test
-    public void deliveryTimeoutAtOrAboveTheTransactionTimeoutIsRejected() throws Exception {
-        // transaction.timeout.ms defaults to 60 s (kafka-clients 4.3.1, ProducerConfig.java:532-534)
-        // and the adapter never overrides it, so the broker would discard the transaction while the
-        // client is still waiting for acknowledgements.
+    public void theShippedDeliveryTimeoutStartsWithABudgetThatFitsIt() throws Exception {
+        // The configuration a customer hits first: everything at its default except the retry.
+        // Two attempts at 120 s cost 432 s in the worst case, which was not even expressible
+        // before 1.3.2 because the budget was capped at 300 s.
         Map<String, String> params = new HashMap<>();
         params.put("producerBatchMode", "JSON_ARRAY");
         params.put("enableTransactions", "true");
         params.put("transactionalIdPrefix", "test-txn");
         params.put("producerRetryMaxAttempts", "2");
-        params.put("deliveryTimeoutSeconds", "60");
-        params.put("producerRetryTotalBudgetSeconds", "300");
+        params.put("producerRetryTotalBudgetSeconds", "450");
+
+        CpiKafkaPlusProducer producer = createProducer(params);
+        producer.doStart();
+        producer.doStop();
+    }
+
+    @Test
+    public void aDeliveryTimeoutBeyondTheBrokerTransactionCapIsRejected() throws Exception {
+        // A broker rejects transaction.timeout.ms above transaction.max.timeout.ms (15 minutes by
+        // default) at initTransactions(), which would surface as a failed send rather than a named
+        // parameter. The retry is deliberately off here: the bound belongs to transactions.
+        Map<String, String> params = new HashMap<>();
+        params.put("enableTransactions", "true");
+        params.put("transactionalIdPrefix", "test-txn");
+        params.put("deliveryTimeoutSeconds", "871");
         String message = startAndExpectRejection(params);
-        Assert.assertTrue(message, message.contains("transaction.timeout.ms"));
+        Assert.assertTrue(message, message.contains("deliveryTimeoutSeconds"));
+        Assert.assertTrue("the broker limit must be named: " + message,
+                message.contains("transaction.max.timeout.ms"));
     }
 
     @Test

@@ -161,7 +161,7 @@ For detailed security setup, see [Authentication](security/authentication.md).
 |-----------|---------|-------------|
 | `acks` | `all` | Producer acknowledgments: `all`, `1`, `0`. |
 | `enableIdempotence` | `true` | Enable idempotent producer. |
-| `deliveryTimeoutSeconds` | `120` | Maximum delivery time in seconds, including retries. |
+| `deliveryTimeoutSeconds` | `120` | Maximum delivery time in seconds, including retries. With `enableTransactions` the adapter derives `transaction.timeout.ms` from this value (plus up to 30 s commit headroom, never below 60 s), so the maximum is 870 s — above that a broker rejects the producer. |
 
 **Header Mapping**
 
@@ -220,7 +220,7 @@ For details on Avro integration, see [Avro / Schema Registry](features/avro-sche
 | `producerRetryMaxAttempts` | `1` | Total number of send attempts, not additional attempts. `1` keeps the previous behaviour and switches the retry off. Range 1–5. |
 | `producerRetryDelaySeconds` | `2` | Constant wait between attempts in seconds. Range 1–30. |
 | `producerRetryOnlyTransientErrors` | `true` | Retry only transient (`RETRIABLE`) failures. `false` additionally retries an unusable transactional producer. |
-| `producerRetryTotalBudgetSeconds` | `30` | Hard upper bound for all attempts of one message together. Must stay below the calling system's timeout. Range 5–300. |
+| `producerRetryTotalBudgetSeconds` | `30` | Hard upper bound for all attempts of one message together. Must stay below the calling system's timeout; a Kafka-to-Kafka or scheduled channel has no such caller and can use a larger budget. Range 5–900. |
 
 Only failures that provably wrote nothing are repeated. See [Producer Retry](features/producer-retry.md)
 for the decision tree, the duplicate guarantees and the interaction with `deliveryTimeoutSeconds`,
