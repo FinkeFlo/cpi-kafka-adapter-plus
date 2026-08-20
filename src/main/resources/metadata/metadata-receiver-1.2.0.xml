@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<ComponentMetadata ComponentId="ctype::Adapter/cname::kafkaAdapterPlus/vendor::FlorianKube/version::1.3.0"
+<ComponentMetadata ComponentId="ctype::Adapter/cname::kafkaAdapterPlus/vendor::FlorianKube/version::1.3.1"
                    ComponentName="kafkaAdapterPlus"
                    UIElementType="Adapter"
                    IsExtension="false"
@@ -14,7 +14,7 @@
     <!-- RECEIVER VARIANT (CPI -> Kafka Producer)                    -->
     <!-- ============================================================ -->
     <Variant VariantName="Kafka_Adapter_Plus_Receiver"
-             VariantId="ctype::AdapterVariant/cname::kafkaAdapterPlus/vendor::FlorianKube/tp::cpi-kafka-plus/mp::cpi-kafka-plus/direction::Receiver/version::1.3.0"
+             VariantId="ctype::AdapterVariant/cname::kafkaAdapterPlus/vendor::FlorianKube/tp::cpi-kafka-plus/mp::cpi-kafka-plus/direction::Receiver/version::1.3.1"
              MetadataVersion="2.0"
              gen:RuntimeComponentBaseUri="cpi-kafka-plus"
              AttachmentBehavior="Preserve"
@@ -209,45 +209,6 @@
                     <ErrorMessage>Please enter a positive number in KB (e.g. 32768 for 32 MB)</ErrorMessage>
                 </AttributeReference>
             </AttributeGroup>
-            <AttributeGroup id="producerRetry">
-                <Name xsi:type="xs:string" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">Retry</Name>
-                <GuiLabels guid="a2000006-0000-0000-0000-000000000040">
-                    <Label language="EN">Retry</Label>
-                </GuiLabels>
-                <AttributeReference>
-                    <ReferenceName>producerRetryMaxAttempts</ReferenceName>
-                    <description>Total number of send attempts, not additional attempts. 1 (default) keeps the previous behaviour and switches the retry off. Only failures that provably wrote nothing are repeated: a transactional batch that failed before the commit, or a single non-transactional message with the idempotent producer enabled. A failure inside the commit and a partially sent non-transactional batch are never repeated, because that could duplicate records. Range: 1 to 5.</description>
-                    <ErrorMessage>Please enter a number between 1 and 5 for Max Send Attempts</ErrorMessage>
-                </AttributeReference>
-                <AttributeReference>
-                    <ReferenceName>producerRetryDelaySeconds</ReferenceName>
-                    <description>Constant wait between send attempts in seconds. There is no exponential backoff here because the Kafka client has already exhausted its own before giving up; a wait below one second cannot help against a disconnected broker node and only adds load. Range: 1 to 30.</description>
-                    <ErrorMessage>Please enter a number between 1 and 30 for Retry Delay</ErrorMessage>
-                </AttributeReference>
-                <AttributeReference>
-                    <ReferenceName>producerRetryOnlyTransientErrors</ReferenceName>
-                    <description>Retry only transient (retriable) send failures. Switch off to also retry a fenced or otherwise unusable transactional producer. Only do this when this Transactional ID Prefix is provably used by no other integration flow: a fencing error normally means another instance has taken over the transactional.id, and retrying then becomes a contest both sides lose. Data errors and unclassified errors are never retried.</description>
-                </AttributeReference>
-                <AttributeReference>
-                    <ReferenceName>producerRetryTotalBudgetSeconds</ReferenceName>
-                    <description>Hard upper bound in seconds for all send attempts of one message together. It must stay below the timeout of the calling system: if the caller times out while the adapter is still retrying, it may resend the request and duplicate the message outside the adapter's control. Range: 5 to 300.</description>
-                    <ErrorMessage>Please enter a number between 5 and 300 for Total Retry Budget</ErrorMessage>
-                </AttributeReference>
-            </AttributeGroup>
-            <AttributeGroup id="diagnostics">
-                <Name xsi:type="xs:string" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">Diagnostics</Name>
-                <GuiLabels guid="a2000006-0000-0000-0000-000000000030">
-                    <Label language="EN">Diagnostics</Label>
-                </GuiLabels>
-                <AttributeReference>
-                    <ReferenceName>diagnosticsLevel</ReferenceName>
-                    <description>Diagnostic output level. STANDARD (default) is fully diagnostic on its own: every failure produces one structured ERROR line with the complete serialised cause chain. FULL adds exactly one thing, a bounded thread dump (at most 20 threads, 10 frames each, with lock owners) attached to the node-fault escalation that fires when the same fault recurs 5 times in 20 minutes. That dump is the only evidence that can settle a monitor-ownership question. Leave this on STANDARD unless you are actively investigating such a fault.</description>
-                </AttributeReference>
-                <AttributeReference>
-                    <ReferenceName>writeMplErrorAttachment</ReferenceName>
-                    <description>Write the full error diagnostic as MPL attachment 'KafkaAdapterError'. Disable to keep only searchable MPL headers/attributes without the full attachment payload.</description>
-                </AttributeReference>
-            </AttributeGroup>
         </Tab>
 
         <!-- ===== Tab: Message Handling ===== -->
@@ -340,6 +301,53 @@
                 </AttributeReference>
             </AttributeGroup>
         </Tab>
+
+        <!-- ===== Tab: Error Handling ===== -->
+        <Tab id="errorHandling">
+            <GuiLabels guid="a2000007-0000-0000-0000-000000000001">
+                <Label language="EN">Error Handling</Label>
+            </GuiLabels>
+            <AttributeGroup id="producerRetry">
+                <Name xsi:type="xs:string" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">Retry</Name>
+                <GuiLabels guid="a2000006-0000-0000-0000-000000000040">
+                    <Label language="EN">Retry</Label>
+                </GuiLabels>
+                <AttributeReference>
+                    <ReferenceName>producerRetryMaxAttempts</ReferenceName>
+                    <description>Total number of send attempts, not additional attempts. 1 (default) keeps the previous behaviour and switches the retry off. Only failures that provably wrote nothing are repeated: a transactional batch that failed before the commit, or a single non-transactional message with the idempotent producer enabled. A failure inside the commit and a partially sent non-transactional batch are never repeated, because that could duplicate records. Range: 1 to 5.</description>
+                    <ErrorMessage>Please enter a number between 1 and 5 for Max Send Attempts</ErrorMessage>
+                </AttributeReference>
+                <AttributeReference>
+                    <ReferenceName>producerRetryDelaySeconds</ReferenceName>
+                    <description>Constant wait between send attempts in seconds. There is no exponential backoff here because the Kafka client has already exhausted its own before giving up; a wait below one second cannot help against a disconnected broker node and only adds load. Range: 1 to 30.</description>
+                    <ErrorMessage>Please enter a number between 1 and 30 for Retry Delay</ErrorMessage>
+                </AttributeReference>
+                <AttributeReference>
+                    <ReferenceName>producerRetryOnlyTransientErrors</ReferenceName>
+                    <description>Retry only transient (retriable) send failures. Switch off to also retry a fenced or otherwise unusable transactional producer. Only do this when this Transactional ID Prefix is provably used by no other integration flow: a fencing error normally means another instance has taken over the transactional.id, and retrying then becomes a contest both sides lose. Data errors and unclassified errors are never retried.</description>
+                </AttributeReference>
+                <AttributeReference>
+                    <ReferenceName>producerRetryTotalBudgetSeconds</ReferenceName>
+                    <description>Hard upper bound in seconds for all send attempts of one message together. It must stay below the timeout of the calling system: if the caller times out while the adapter is still retrying, it may resend the request and duplicate the message outside the adapter's control. Range: 5 to 300.</description>
+                    <ErrorMessage>Please enter a number between 5 and 300 for Total Retry Budget</ErrorMessage>
+                </AttributeReference>
+            </AttributeGroup>
+            <AttributeGroup id="diagnostics">
+                <Name xsi:type="xs:string" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">Diagnostics</Name>
+                <GuiLabels guid="a2000006-0000-0000-0000-000000000030">
+                    <Label language="EN">Diagnostics</Label>
+                </GuiLabels>
+                <AttributeReference>
+                    <ReferenceName>diagnosticsLevel</ReferenceName>
+                    <description>Diagnostic output level. STANDARD (default) is fully diagnostic on its own: every failure produces one structured ERROR line with the complete serialised cause chain. FULL adds exactly one thing, a bounded thread dump (at most 20 threads, 10 frames each, with lock owners) attached to the node-fault escalation that fires when the same fault recurs 5 times in 20 minutes. That dump is the only evidence that can settle a monitor-ownership question. Leave this on STANDARD unless you are actively investigating such a fault.</description>
+                </AttributeReference>
+                <AttributeReference>
+                    <ReferenceName>writeMplErrorAttachment</ReferenceName>
+                    <description>Write the full error diagnostic as MPL attachment 'KafkaAdapterError'. Disable to keep only searchable MPL headers/attributes without the full attachment payload.</description>
+                </AttributeReference>
+            </AttributeGroup>
+        </Tab>
+
 
     </Variant>
 
