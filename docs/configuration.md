@@ -179,19 +179,6 @@ For detailed security setup, see [Authentication](security/authentication.md).
 | `transactionalIdPrefix` | — | Prefix for `transactional.id` (e.g. `my-app-txn`). Required if `enableTransactions` is `true`. |
 | `maxConcurrentTransactions` | `5` | Maximum number of concurrent transactional producers per worker node. |
 
-**Retry**
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `producerRetryMaxAttempts` | `1` | Total number of send attempts, not additional attempts. `1` keeps the previous behaviour and switches the retry off. Range 1–5. |
-| `producerRetryDelaySeconds` | `2` | Constant wait between attempts in seconds. Range 1–30. |
-| `producerRetryOnlyTransientErrors` | `true` | Retry only transient (`RETRIABLE`) failures. `false` additionally retries an unusable transactional producer. |
-| `producerRetryTotalBudgetSeconds` | `30` | Hard upper bound for all attempts of one message together. Must stay below the calling system's timeout. Range 5–300. |
-
-Only failures that provably wrote nothing are repeated. See [Producer Retry](features/producer-retry.md)
-for the decision tree, the duplicate guarantees and the interaction with `deliveryTimeoutSeconds`,
-which the adapter validates at start-up.
-
 **Performance Tuning**
 
 | Parameter | Default | Description |
@@ -200,13 +187,6 @@ which the adapter validates at start-up.
 | `maxRequestSizeKb` | `5120` | Maximum request size in KB. |
 | `producerBatchSizeKb` | `1024` | Kafka producer internal batch size in KB (UI label: "Producer Batch Size (KB)"). Controls how many records the client buffers before sending to the broker. |
 | `bufferMemoryKb` | `32768` | Total memory for producer buffering in KB. |
-
-**Diagnostics**
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `diagnosticsLevel` | `STANDARD` | Diagnostic output level. `STANDARD` (default) is fully diagnostic on its own: every failure produces one structured ERROR line with the complete serialised cause chain. `FULL` adds exactly one thing, a bounded thread dump (at most 20 threads, 10 frames each, with lock owners) attached to the node-fault escalation that fires when the same fault recurs 5 times in 20 minutes. Leave this on `STANDARD` unless you are actively investigating such a fault. |
-| `writeMplErrorAttachment` | `true` | Write the full error diagnostic (including full stack trace) as MPL attachment `KafkaAdapterError`. Disable to keep only searchable MPL headers/attributes. |
 
 ### Message Handling
 
@@ -230,3 +210,25 @@ For more details, see [JSON Schema Validation](features/json-schema-validation.m
 | `avroValueSerialization` | `true` | Serialize message values using Avro. Requires Schema Registry. |
 
 For details on Avro integration, see [Avro / Schema Registry](features/avro-schema-registry.md).
+
+### Error Handling
+
+**Retry**
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `producerRetryMaxAttempts` | `1` | Total number of send attempts, not additional attempts. `1` keeps the previous behaviour and switches the retry off. Range 1–5. |
+| `producerRetryDelaySeconds` | `2` | Constant wait between attempts in seconds. Range 1–30. |
+| `producerRetryOnlyTransientErrors` | `true` | Retry only transient (`RETRIABLE`) failures. `false` additionally retries an unusable transactional producer. |
+| `producerRetryTotalBudgetSeconds` | `30` | Hard upper bound for all attempts of one message together. Must stay below the calling system's timeout. Range 5–300. |
+
+Only failures that provably wrote nothing are repeated. See [Producer Retry](features/producer-retry.md)
+for the decision tree, the duplicate guarantees and the interaction with `deliveryTimeoutSeconds`,
+which the adapter validates at start-up.
+
+**Diagnostics**
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `diagnosticsLevel` | `STANDARD` | Diagnostic output level. `STANDARD` (default) is fully diagnostic on its own: every failure produces one structured ERROR line with the complete serialised cause chain. `FULL` adds exactly one thing, a bounded thread dump (at most 20 threads, 10 frames each, with lock owners) attached to the node-fault escalation that fires when the same fault recurs 5 times in 20 minutes. Leave this on `STANDARD` unless you are actively investigating such a fault. |
+| `writeMplErrorAttachment` | `true` | Write the full error diagnostic (including full stack trace) as MPL attachment `KafkaAdapterError`. Disable to keep only searchable MPL headers/attributes. |
