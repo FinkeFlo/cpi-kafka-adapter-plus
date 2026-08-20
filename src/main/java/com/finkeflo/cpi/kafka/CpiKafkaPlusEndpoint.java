@@ -316,7 +316,7 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
                     + "message together. Must stay below the timeout of the calling HTTP client: "
                     + "if the caller times out while the adapter is still retrying, it may resend "
                     + "the request and duplicate the message outside the adapter's control. "
-                    + "Range: 5-300.")
+                    + "Range: 5-900.")
     private int producerRetryTotalBudgetSeconds = 30;
 
     // --- Auto-Pause (Circuit Breaker) ---

@@ -66,13 +66,24 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
     private static final int MAX_CONSECUTIVE_SEND_FAILURES = 3;
     private static final Duration TXN_PRODUCER_CLOSE_TIMEOUT = Duration.ofSeconds(5);
     /**
-     * The Kafka client default for {@code transaction.timeout.ms}
-     * ({@code ProducerConfig.java:532-534}, kafka-clients 4.3.1). The adapter never sets the option,
-     * so this is the window the broker actually applies. {@code deliveryTimeoutSeconds} must stay
-     * below it: otherwise the client is still waiting for acknowledgements of a transaction the
-     * broker has already discarded.
+     * Upper bound for {@code deliveryTimeoutSeconds} on a transactional channel. The adapter derives
+     * {@code transaction.timeout.ms} from the delivery timeout (see
+     * {@link ProducerConfigFactory#transactionTimeoutMs(int)}), and the broker rejects a producer
+     * asking for more than its {@code transaction.max.timeout.ms} — 15 minutes by default — at
+     * {@code initTransactions()}. Rejecting that at start-up names the parameter to change; the
+     * broker's {@code InvalidTxnTimeoutException} on the first send would not.
      */
-    private static final int TRANSACTION_TIMEOUT_DEFAULT_SECONDS = 60;
+    private static final int MAX_TRANSACTIONAL_DELIVERY_TIMEOUT_SECONDS =
+            ProducerConfigFactory.TRANSACTION_TIMEOUT_BROKER_MAX_MS / 1000 - 30;
+    /**
+     * Upper bound for {@code producerRetryTotalBudgetSeconds}. Raised from 300 s in 1.3.2: with the
+     * shipped delivery timeout of 120 s a single transactional attempt already costs roughly 215 s,
+     * so two attempts could not be expressed at all and the retry was effectively unavailable to
+     * every channel that had not lowered its delivery timeout. The budget still has to stay below
+     * the timeout of a synchronous caller — but a Kafka-to-Kafka or scheduled channel has no such
+     * caller, and 300 s was an arbitrary bound for it.
+     */
+    private static final int MAX_RETRY_BUDGET_SECONDS = 900;
     /**
      * Upper bound for the AdminClient topic-existence probe. A metadata describe is a single round
      * trip, so this only ever comes into play when the broker is unreachable — in which case the
@@ -261,6 +272,16 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
                         "Please leave idempotence switched on — it cannot be turned off "
                         + "while transactional batching is enabled");
             }
+            int deliveryTimeoutSeconds = endpoint.getDeliveryTimeoutSeconds();
+            if (deliveryTimeoutSeconds > MAX_TRANSACTIONAL_DELIVERY_TIMEOUT_SECONDS) {
+                throw new IllegalArgumentException(
+                        "Please set deliveryTimeoutSeconds to at most "
+                        + MAX_TRANSACTIONAL_DELIVERY_TIMEOUT_SECONDS + " on a transactional channel "
+                        + "(configured value: " + deliveryTimeoutSeconds + "s). The adapter derives "
+                        + "transaction.timeout.ms from it, and a broker rejects a producer asking "
+                        + "for more than transaction.max.timeout.ms (15 minutes by default).");
+            }
+
             int slots = endpoint.getMaxConcurrentTransactions();
             if (slots < 1) {
                 throw new IllegalArgumentException(
@@ -345,9 +366,10 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
                     + "exponentially before giving up — and only adds load.");
         }
         int budgetSeconds = endpoint.getProducerRetryTotalBudgetSeconds();
-        if (budgetSeconds < 5 || budgetSeconds > 300) {
+        if (budgetSeconds < 5 || budgetSeconds > MAX_RETRY_BUDGET_SECONDS) {
             throw new IllegalArgumentException(
-                    "Please set producerRetryTotalBudgetSeconds between 5 and 300 (configured value: "
+                    "Please set producerRetryTotalBudgetSeconds between 5 and "
+                    + MAX_RETRY_BUDGET_SECONDS + " (configured value: "
                     + budgetSeconds + ").");
         }
 
@@ -379,14 +401,6 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
         }
 
         int deliveryTimeoutSeconds = endpoint.getDeliveryTimeoutSeconds();
-        if (transactional && deliveryTimeoutSeconds >= TRANSACTION_TIMEOUT_DEFAULT_SECONDS) {
-            throw new IllegalArgumentException(
-                    "Please set deliveryTimeoutSeconds below " + TRANSACTION_TIMEOUT_DEFAULT_SECONDS
-                    + " (configured value: " + deliveryTimeoutSeconds + "s). The broker expires a "
-                    + "transaction after transaction.timeout.ms (" + TRANSACTION_TIMEOUT_DEFAULT_SECONDS
-                    + "s by default), so a longer delivery timeout would leave the client waiting "
-                    + "for acknowledgements of a transaction the broker has already discarded.");
-        }
 
         long worstCase = ProducerRetryPolicy.worstCaseSeconds(maxAttempts, deliveryTimeoutSeconds,
                 delaySeconds, (int) TXN_PRODUCER_CLOSE_TIMEOUT.getSeconds(), transactional);

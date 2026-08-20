@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<ComponentMetadata ComponentId="ctype::Adapter/cname::kafkaAdapterPlus/vendor::FlorianKube/version::1.3.1"
+<ComponentMetadata ComponentId="ctype::Adapter/cname::kafkaAdapterPlus/vendor::FlorianKube/version::1.3.2"
                    ComponentName="kafkaAdapterPlus"
                    UIElementType="Adapter"
                    IsExtension="false"
@@ -14,7 +14,7 @@
     <!-- RECEIVER VARIANT (CPI -> Kafka Producer)                    -->
     <!-- ============================================================ -->
     <Variant VariantName="Kafka_Adapter_Plus_Receiver"
-             VariantId="ctype::AdapterVariant/cname::kafkaAdapterPlus/vendor::FlorianKube/tp::cpi-kafka-plus/mp::cpi-kafka-plus/direction::Receiver/version::1.3.1"
+             VariantId="ctype::AdapterVariant/cname::kafkaAdapterPlus/vendor::FlorianKube/tp::cpi-kafka-plus/mp::cpi-kafka-plus/direction::Receiver/version::1.3.2"
              MetadataVersion="2.0"
              gen:RuntimeComponentBaseUri="cpi-kafka-plus"
              AttachmentBehavior="Preserve"
@@ -135,7 +135,7 @@
                 </AttributeReference>
                 <AttributeReference>
                     <ReferenceName>deliveryTimeoutSeconds</ReferenceName>
-                    <description>Maximum time in seconds for message delivery, including retries. Default: 120 seconds (2 minutes). If delivery fails within this time, the send is reported as failed.</description>
+                    <description>Maximum time in seconds for message delivery, including retries. Default: 120 seconds (2 minutes). If delivery fails within this time, the send is reported as failed. With transactions enabled the adapter derives transaction.timeout.ms from this value, so the broker keeps the transaction open for at least as long as the client waits; the maximum is 870 seconds, above which a broker rejects the producer.</description>
                     <ErrorMessage>Please enter a positive number in seconds (e.g. 120 for 2 minutes)</ErrorMessage>
                 </AttributeReference>
             </AttributeGroup>
@@ -328,8 +328,8 @@
                 </AttributeReference>
                 <AttributeReference>
                     <ReferenceName>producerRetryTotalBudgetSeconds</ReferenceName>
-                    <description>Hard upper bound in seconds for all send attempts of one message together. It must stay below the timeout of the calling system: if the caller times out while the adapter is still retrying, it may resend the request and duplicate the message outside the adapter's control. Range: 5 to 300.</description>
-                    <ErrorMessage>Please enter a number between 5 and 300 for Total Retry Budget</ErrorMessage>
+                    <description>Hard upper bound in seconds for all send attempts of one message together. It must stay below the timeout of the calling system: if the caller times out while the adapter is still retrying, it may resend the request and duplicate the message outside the adapter's control. A Kafka-to-Kafka or scheduled channel has no such caller and can use a larger budget. One transactional attempt costs roughly four times Delivery Timeout, so raise this value rather than lowering Delivery Timeout when the start-up check reports a worst case above the budget. Range: 5 to 900.</description>
+                    <ErrorMessage>Please enter a number between 5 and 900 for Total Retry Budget</ErrorMessage>
                 </AttributeReference>
             </AttributeGroup>
             <AttributeGroup id="diagnostics">

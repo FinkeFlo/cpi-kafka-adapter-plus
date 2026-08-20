@@ -40,8 +40,47 @@ public final class ProducerConfigFactory {
      */
     static final long METADATA_MAX_IDLE_MS = 3_600_000L;
 
+    /**
+     * The Kafka client default for {@code transaction.timeout.ms} ({@code ProducerConfig},
+     * kafka-clients 4.3.1). The derived value never goes below it, so a channel that was running
+     * on the default before keeps exactly the window it had.
+     */
+    static final int TRANSACTION_TIMEOUT_CLIENT_DEFAULT_MS = 60_000;
+
+    /**
+     * The broker default for {@code transaction.max.timeout.ms} (15 minutes). A producer that asks
+     * for more is rejected at {@code initTransactions()} with {@code InvalidTxnTimeoutException},
+     * so the derived value is capped here. A broker configured *below* its own default will still
+     * reject the value — that is the broker's decision to make and it reports it precisely.
+     */
+    static final int TRANSACTION_TIMEOUT_BROKER_MAX_MS = 900_000;
+
     private ProducerConfigFactory() {
         // static utility class
+    }
+
+    /**
+     * Derives {@code transaction.timeout.ms} from the configured delivery timeout.
+     *
+     * <p>The transaction has to stay open for as long as the send may legitimately take, plus the
+     * commit that follows it. Leaving the client default of 60 s in place while allowing a longer
+     * delivery timeout is the one combination that cannot work: the broker aborts the transaction
+     * while the client is still waiting for acknowledgements, and the send then fails on a
+     * transaction that no longer exists. Until 1.3.2 the adapter never set this option and instead
+     * rejected any delivery timeout at or above 60 s once the producer retry was switched on —
+     * which made the shipped default of 120 s undeployable for exactly the channels the retry was
+     * built for.
+     *
+     * @param deliveryMs the configured {@code delivery.timeout.ms}
+     * @return the transaction timeout to request, bounded by the client default and the broker cap
+     */
+    static int transactionTimeoutMs(int deliveryMs) {
+        // The commit is bounded by max.block.ms, which this factory caps at 30 s, so that is the
+        // most the commit can add on top of the send.
+        long commitHeadroomMs = Math.min(30_000L, deliveryMs);
+        long derived = (long) deliveryMs + commitHeadroomMs;
+        derived = Math.max(TRANSACTION_TIMEOUT_CLIENT_DEFAULT_MS, derived);
+        return (int) Math.min(TRANSACTION_TIMEOUT_BROKER_MAX_MS, derived);
     }
 
     /**
@@ -118,6 +157,17 @@ public final class ProducerConfigFactory {
         // non-expiring, so the adapter never requests it. The flag only reaches the broker via
         // InitProducerId v6; no released broker advertises that version, so this is defence in depth.
         props.put(ProducerConfig.TRANSACTION_TWO_PHASE_COMMIT_ENABLE_CONFIG, false);
+
+        // transaction.timeout.ms is only meaningful on a transactional producer, and the option is
+        // rejected outright by a non-transactional one, so it is set exactly where it applies.
+        if (endpoint.isEnableTransactions()) {
+            int transactionTimeoutMs = transactionTimeoutMs(deliveryMs);
+            props.put(ProducerConfig.TRANSACTION_TIMEOUT_CONFIG, transactionTimeoutMs);
+            LOG.info("[CPI-KAFKA-PLUS-DIAG] buildProducerProperties: transaction.timeout.ms={} derived from "
+                    + "deliveryTimeoutSeconds={} (client default {} ms, broker cap {} ms)",
+                    transactionTimeoutMs, endpoint.getDeliveryTimeoutSeconds(),
+                    TRANSACTION_TIMEOUT_CLIENT_DEFAULT_MS, TRANSACTION_TIMEOUT_BROKER_MAX_MS);
+        }
 
         return props;
     }
