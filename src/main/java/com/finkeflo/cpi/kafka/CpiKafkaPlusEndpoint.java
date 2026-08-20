@@ -263,20 +263,61 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
             description = "SASL credential alias for DLQ Kafka cluster (if different from main connection)")
     private String dlqCredentialAlias;
 
-    // --- Smart Retry ---
+    // --- Smart Retry (Sender/consumer direction only — see producerRetry* below) ---
     @UriParam(label = "errorHandling", defaultValue = "true",
-            description = "Only retry transient errors (e.g. timeouts, connection failures). "
+            description = "Sender (consumer) direction only. Only retry transient errors "
+                    + "(e.g. timeouts, connection failures). "
                     + "Permanent errors like mapping failures or NullPointerExceptions are "
-                    + "sent directly to the DLQ without retries.")
+                    + "sent directly to the DLQ without retries. "
+                    + "The receiver (producer) direction uses producerRetryOnlyTransientErrors.")
     private boolean retryOnlyTransientErrors = true;
 
     @UriParam(label = "errorHandling", defaultValue = "0",
-            description = "Initial delay between retries in seconds. "
+            description = "Sender (consumer) direction only. Initial delay between retries in seconds. "
                     + "The delay doubles after each retry (exponential backoff), "
                     + "capped at 300 seconds. "
                     + "Example: with 2s delay and 3 retries the waits are 2s, 4s, 8s. "
-                    + "Set to 0 to retry immediately without delay.")
+                    + "Set to 0 to retry immediately without delay. "
+                    + "The receiver (producer) direction uses producerRetryDelaySeconds, which is "
+                    + "constant rather than exponential.")
     private int retryDelaySeconds = 0;
+
+    // --- Producer Outer Retry (Receiver direction) ---
+    // Deliberately separate parameters from the consumer-side smart retry above: the consumer
+    // parameters carry exponential-backoff semantics, and one option meaning two different things
+    // depending on the channel direction is a support trap.
+    @UriParam(label = "producer", defaultValue = "1",
+            description = "Total number of send attempts for the receiver direction, not additional "
+                    + "attempts. 1 (default) keeps today's behaviour and switches the feature off. "
+                    + "Only failures that provably wrote nothing are retried: a transactional batch "
+                    + "that failed before commitTransaction(), or a single non-transactional message "
+                    + "with idempotence enabled. A failure inside commitTransaction() and a "
+                    + "partially sent non-transactional batch are never retried, because a retry "
+                    + "could duplicate records. Range: 1-5.")
+    private int producerRetryMaxAttempts = 1;
+
+    @UriParam(label = "producer", defaultValue = "2",
+            description = "Constant wait between producer send attempts in seconds (no exponential "
+                    + "backoff: the Kafka client has already exhausted its own). Values below 1 "
+                    + "second are pointless against a disconnected broker node and only add load. "
+                    + "Range: 1-30.")
+    private int producerRetryDelaySeconds = 2;
+
+    @UriParam(label = "producer", defaultValue = "true",
+            description = "Retry only transient (RETRIABLE) send failures. Set to false to also "
+                    + "retry a fenced or otherwise unusable transactional producer — only safe when "
+                    + "this transactionalIdPrefix is provably used by no other iFlow, since a "
+                    + "ProducerFencedException usually means another instance took over the "
+                    + "transactional.id. Data errors and unclassified errors are never retried.")
+    private boolean producerRetryOnlyTransientErrors = true;
+
+    @UriParam(label = "producer", defaultValue = "30",
+            description = "Hard upper bound in seconds for all producer send attempts of one "
+                    + "message together. Must stay below the timeout of the calling HTTP client: "
+                    + "if the caller times out while the adapter is still retrying, it may resend "
+                    + "the request and duplicate the message outside the adapter's control. "
+                    + "Range: 5-300.")
+    private int producerRetryTotalBudgetSeconds = 30;
 
     // --- Auto-Pause (Circuit Breaker) ---
     @UriParam(label = "errorHandling", defaultValue = "false",
@@ -573,6 +614,20 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
 
     public int getRetryDelaySeconds() { return retryDelaySeconds; }
     public void setRetryDelaySeconds(int retryDelaySeconds) { this.retryDelaySeconds = retryDelaySeconds; }
+
+    // --- Producer Outer Retry Getters/Setters ---
+
+    public int getProducerRetryMaxAttempts() { return producerRetryMaxAttempts; }
+    public void setProducerRetryMaxAttempts(int producerRetryMaxAttempts) { this.producerRetryMaxAttempts = producerRetryMaxAttempts; }
+
+    public int getProducerRetryDelaySeconds() { return producerRetryDelaySeconds; }
+    public void setProducerRetryDelaySeconds(int producerRetryDelaySeconds) { this.producerRetryDelaySeconds = producerRetryDelaySeconds; }
+
+    public boolean isProducerRetryOnlyTransientErrors() { return producerRetryOnlyTransientErrors; }
+    public void setProducerRetryOnlyTransientErrors(boolean producerRetryOnlyTransientErrors) { this.producerRetryOnlyTransientErrors = producerRetryOnlyTransientErrors; }
+
+    public int getProducerRetryTotalBudgetSeconds() { return producerRetryTotalBudgetSeconds; }
+    public void setProducerRetryTotalBudgetSeconds(int producerRetryTotalBudgetSeconds) { this.producerRetryTotalBudgetSeconds = producerRetryTotalBudgetSeconds; }
 
     // --- Auto-Pause Getters/Setters ---
 

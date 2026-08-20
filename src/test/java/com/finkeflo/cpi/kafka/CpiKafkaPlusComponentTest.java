@@ -392,6 +392,37 @@ public class CpiKafkaPlusComponentTest {
     }
 
     @Test
+    public void testProducerRetryDefaultValues() throws Exception {
+        CpiKafkaPlusEndpoint endpoint = new CpiKafkaPlusEndpoint();
+        // Deliberately off by default: the feature lengthens how long a transaction slot and an
+        // HTTP worker thread are held, and it changes the timing of existing iFlows.
+        Assert.assertEquals("producerRetryMaxAttempts should default to 1 (feature off)",
+                1, endpoint.getProducerRetryMaxAttempts());
+        Assert.assertEquals("producerRetryDelaySeconds should default to 2",
+                2, endpoint.getProducerRetryDelaySeconds());
+        Assert.assertTrue("producerRetryOnlyTransientErrors should default to true",
+                endpoint.isProducerRetryOnlyTransientErrors());
+        Assert.assertEquals("producerRetryTotalBudgetSeconds should default to 30",
+                30, endpoint.getProducerRetryTotalBudgetSeconds());
+    }
+
+    @Test
+    public void testProducerRetryIsIndependentOfTheConsumerSmartRetry() throws Exception {
+        // The consumer parameters carry exponential-backoff semantics; one option meaning two
+        // different things depending on channel direction would be a support trap.
+        CpiKafkaPlusEndpoint endpoint = new CpiKafkaPlusEndpoint();
+        endpoint.setProducerRetryDelaySeconds(7);
+        endpoint.setProducerRetryOnlyTransientErrors(false);
+
+        Assert.assertEquals("consumer retryDelaySeconds must stay untouched",
+                0, endpoint.getRetryDelaySeconds());
+        Assert.assertTrue("consumer retryOnlyTransientErrors must stay untouched",
+                endpoint.isRetryOnlyTransientErrors());
+        Assert.assertEquals(7, endpoint.getProducerRetryDelaySeconds());
+        Assert.assertFalse(endpoint.isProducerRetryOnlyTransientErrors());
+    }
+
+    @Test
     public void testDlqValidationConditions() {
         CpiKafkaPlusEndpoint ep = new CpiKafkaPlusEndpoint();
 

@@ -172,6 +172,21 @@ public class AdapterTracingHelperTest {
         Assert.assertNotNull("f5: AdapterStatusEvent.FAILED must exist", failedEvent);
     }
 
+    /**
+     * The two reflective lookups behind {@code annotateRetrySuccess}, pinned against the real ADK
+     * jars like every other reflective call since 1.2.7. This is the success path, so a broken
+     * lookup here would not surface as a failing send — it would simply mean the retry annotation
+     * quietly stops appearing in Message Monitoring.
+     */
+    @Test
+    public void retrySuccessAnnotationSignaturesExist() throws Exception {
+        Class<?> baseMessageLog = Class.forName("com.sap.it.api.msglog.MessageLog");
+        Assert.assertNotNull("setIntegerProperty(String, Integer) must exist",
+                baseMessageLog.getMethod("setIntegerProperty", String.class, Integer.class));
+        Assert.assertNotNull("addCustomHeaderProperty(String, String) must exist",
+                baseMessageLog.getMethod("addCustomHeaderProperty", String.class, String.class));
+    }
+
     /** Every trace-type name used as a string in the helper must exist in the ADK enum. */
     @Test
     public void everyTraceTypeNameResolves() throws Exception {

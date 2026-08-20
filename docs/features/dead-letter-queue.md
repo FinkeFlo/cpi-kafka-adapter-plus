@@ -17,6 +17,14 @@ When **Enable Dead Letter Queue** (`dlqEnabled`) is turned on, records that fail
 | `retryOnlyTransientErrors` | `true` | Only retry transient errors (timeouts, connection failures). Permanent errors are sent directly to DLQ. |
 | `retryDelaySeconds` | `0` | Initial delay between retries in seconds. Doubles after each retry (exponential backoff), capped at 300s. |
 
+!!! note "Not to be confused with the producer retry"
+    `retryOnlyTransientErrors` and `retryDelaySeconds` on this page are **sender (consumer)
+    parameters**: they govern how often a record is reprocessed before it is dead-lettered, with
+    exponential backoff. The receiver (producer) direction has its own, separate set —
+    `producerRetryOnlyTransientErrors`, `producerRetryDelaySeconds`, `producerRetryMaxAttempts`,
+    `producerRetryTotalBudgetSeconds` — with a constant delay and completely different rules. See
+    [Producer Retry](producer-retry.md).
+
 ## How Retries Work
 
 Retries happen **synchronously in memory** during the same poll cycle — the record is not re-read from Kafka. The consumer holds the record and passes it to the IFlow pipeline up to **Max Retries before DLQ** (`dlqMaxRetries`) + 1 times (1 initial attempt + N retries).

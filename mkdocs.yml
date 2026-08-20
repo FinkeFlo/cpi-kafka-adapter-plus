@@ -57,6 +57,7 @@ nav:
       - Batch Processing: features/batch-processing.md
       - Avro / Schema Registry: features/avro-schema-registry.md
       - Producer Batch Send: features/producer-batch.md
+      - Producer Retry: features/producer-retry.md
       - JSON Schema Validation: features/json-schema-validation.md
       - Kafka Headers: features/kafka-headers.md
       - Dead Letter Queue: features/dead-letter-queue.md

@@ -111,8 +111,8 @@ For details on Avro integration, see [Avro / Schema Registry](features/avro-sche
 | `dlqTopic` | — | Topic name for the Dead Letter Queue. |
 | `dlqMaxRetries` | `3` | Maximum processing retries before routing to the DLQ. |
 | `dlqCredentialAlias` | — | SASL credential alias for the DLQ Kafka cluster, if different from the main connection. |
-| `retryOnlyTransientErrors` | `true` | Retry only transient errors; send permanent errors directly to the DLQ. |
-| `retryDelaySeconds` | `0` | Initial retry delay in seconds with exponential backoff capped at 300 seconds. |
+| `retryOnlyTransientErrors` | `true` | **Sender (consumer) direction only.** Retry only transient errors; send permanent errors directly to the DLQ. The receiver direction uses `producerRetryOnlyTransientErrors`. |
+| `retryDelaySeconds` | `0` | **Sender (consumer) direction only.** Initial retry delay in seconds with exponential backoff capped at 300 seconds. The receiver direction uses `producerRetryDelaySeconds`, which is constant rather than exponential. |
 | `writeMplErrorAttachment` | `true` | Write the full error diagnostic (including full stack trace) as MPL attachment `KafkaAdapterError`. Disable to keep only searchable MPL headers/attributes. |
 
 **Auto-Pause on Errors**
@@ -178,6 +178,19 @@ For detailed security setup, see [Authentication](security/authentication.md).
 | `enableTransactions` | `false` | Enable transactional batching (creates a new transactional producer per batch). |
 | `transactionalIdPrefix` | — | Prefix for `transactional.id` (e.g. `my-app-txn`). Required if `enableTransactions` is `true`. |
 | `maxConcurrentTransactions` | `5` | Maximum number of concurrent transactional producers per worker node. |
+
+**Retry**
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `producerRetryMaxAttempts` | `1` | Total number of send attempts, not additional attempts. `1` keeps the previous behaviour and switches the retry off. Range 1–5. |
+| `producerRetryDelaySeconds` | `2` | Constant wait between attempts in seconds. Range 1–30. |
+| `producerRetryOnlyTransientErrors` | `true` | Retry only transient (`RETRIABLE`) failures. `false` additionally retries an unusable transactional producer. |
+| `producerRetryTotalBudgetSeconds` | `30` | Hard upper bound for all attempts of one message together. Must stay below the calling system's timeout. Range 5–300. |
+
+Only failures that provably wrote nothing are repeated. See [Producer Retry](features/producer-retry.md)
+for the decision tree, the duplicate guarantees and the interaction with `deliveryTimeoutSeconds`,
+which the adapter validates at start-up.
 
 **Performance Tuning**
 
