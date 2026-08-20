@@ -1,0 +1,2170 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Custom Apache Kafka adapter for SAP Cloud Integration (CPI)">
+      
+      
+      
+      
+        <link rel="prev" href="../faq/">
+      
+      
+        <link rel="next" href="../changelog/">
+      
+      
+      <link rel="icon" href="../assets/branding/icon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.6.7">
+    
+    
+      
+        <title>Troubleshooting - Kafka Adapter Plus</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.8608ea7d.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.06af60db.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="teal">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#troubleshooting" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Kafka Adapter Plus" class="md-header__button md-logo" aria-label="Kafka Adapter Plus" data-md-component="logo">
+      
+  <img src="../assets/branding/icon.png" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Kafka Adapter Plus
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Troubleshooting
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="teal"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="teal"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      <label class="md-header__button md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+      </label>
+      <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/finkeflo/cpi-kafka-adapter-plus" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../getting-started/" class="md-tabs__link">
+        
+  
+    
+  
+  Getting Started
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../configuration/" class="md-tabs__link">
+        
+  
+    
+  
+  Configuration
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../features/batch-processing/" class="md-tabs__link">
+          
+  
+  Features
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../security/authentication/" class="md-tabs__link">
+          
+  
+  Security
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../adrs/0001-transactional-producer-concurrency/" class="md-tabs__link">
+          
+  
+  Architecture Decisions
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../faq/" class="md-tabs__link">
+        
+  
+    
+  
+  FAQ
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+    
+  
+  
+    <li class="md-tabs__item md-tabs__item--active">
+      <a href="./" class="md-tabs__link">
+        
+  
+    
+  
+  Troubleshooting
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../changelog/" class="md-tabs__link">
+        
+  
+    
+  
+  Changelog
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Kafka Adapter Plus" class="md-nav__button md-logo" aria-label="Kafka Adapter Plus" data-md-component="logo">
+      
+  <img src="../assets/branding/icon.png" alt="logo">
+
+    </a>
+    Kafka Adapter Plus
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/finkeflo/cpi-kafka-adapter-plus" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Home
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Getting Started
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Configuration
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Features
+    
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            Features
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../features/batch-processing/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Batch Processing
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../features/avro-schema-registry/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Avro / Schema Registry
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../features/producer-batch/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Producer Batch Send
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../features/producer-retry/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Producer Retry
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../features/json-schema-validation/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    JSON Schema Validation
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../features/kafka-headers/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Kafka Headers
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../features/dead-letter-queue/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Dead Letter Queue
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Security
+    
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            Security
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../security/authentication/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Authentication
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Architecture Decisions
+    
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            Architecture Decisions
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../adrs/0001-transactional-producer-concurrency/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    ADR 0001: Transactional Concurrency
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../adrs/0002-confluent-client-ersetzen/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    ADR 0002: JDK-only Schema Registry Client
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../adrs/0003-kafka-clients-unpack/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    ADR 0003: Unpacked kafka-clients
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../adrs/0004-diagnostic-logging-contract/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    ADR 0004: Diagnostic Logging Contract
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../faq/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    FAQ
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  <span class="md-ellipsis">
+    Troubleshooting
+    
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  <span class="md-ellipsis">
+    Troubleshooting
+    
+  </span>
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#why-the-adapter-logs-the-way-it-does" class="md-nav__link">
+    <span class="md-ellipsis">
+      Why the adapter logs the way it does
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#error-codes" class="md-nav__link">
+    <span class="md-ellipsis">
+      Error codes
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#exception-classification" class="md-nav__link">
+    <span class="md-ellipsis">
+      Exception classification
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#finding-the-adapters-lines" class="md-nav__link">
+    <span class="md-ellipsis">
+      Finding the adapter's lines
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Finding the adapter&#39;s lines">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#which-node-produced-a-line" class="md-nav__link">
+    <span class="md-ellipsis">
+      Which node produced a line
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reading-a-failure-line" class="md-nav__link">
+    <span class="md-ellipsis">
+      Reading a failure line
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Reading a failure line">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#field-reference" class="md-nav__link">
+    <span class="md-ellipsis">
+      Field reference
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#choosing-what-to-investigate" class="md-nav__link">
+    <span class="md-ellipsis">
+      Choosing what to investigate
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#illegalmonitorstateexception-current-thread-is-not-owner" class="md-nav__link">
+    <span class="md-ellipsis">
+      IllegalMonitorStateException: current thread is not owner
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#node-fault-escalation" class="md-nav__link">
+    <span class="md-ellipsis">
+      Node fault escalation
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#producer-rebuild-tracking" class="md-nav__link">
+    <span class="md-ellipsis">
+      Producer rebuild tracking
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dead-letter-producer-rebuild-tracking" class="md-nav__link">
+    <span class="md-ellipsis">
+      Dead-letter producer rebuild tracking
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#common-situations" class="md-nav__link">
+    <span class="md-ellipsis">
+      Common situations
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Common situations">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#a-consumer-stops-advancing-and-no-dead-letter-records-appear" class="md-nav__link">
+    <span class="md-ellipsis">
+      A consumer stops advancing and no dead-letter records appear
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#nothing-from-the-adapter-in-the-trace-at-all" class="md-nav__link">
+    <span class="md-ellipsis">
+      Nothing from the adapter in the trace at all
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#producerheartbeat" class="md-nav__link">
+    <span class="md-ellipsis">
+      producer.heartbeat
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#runemitcycle-alive" class="md-nav__link">
+    <span class="md-ellipsis">
+      runEmitCycle: alive
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#poll-closing-consumer-for-reconnect" class="md-nav__link">
+    <span class="md-ellipsis">
+      poll: closing consumer for reconnect
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#poll-detected-invalid-osgi-bundle-wiring" class="md-nav__link">
+    <span class="md-ellipsis">
+      poll: detected invalid OSGi bundle wiring
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#adaptermplunavailable" class="md-nav__link">
+    <span class="md-ellipsis">
+      adapter.mpl.unavailable
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#producerinitfailed" class="md-nav__link">
+    <span class="md-ellipsis">
+      producer.init.failed
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#producermetadataprewarm-outcomefailed" class="md-nav__link">
+    <span class="md-ellipsis">
+      producer.metadata.prewarm outcome=FAILED
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#message-processing-log-enrichment" class="md-nav__link">
+    <span class="md-ellipsis">
+      Message Processing Log enrichment
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Message Processing Log enrichment">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#custom-header-properties" class="md-nav__link">
+    <span class="md-ellipsis">
+      Custom header properties
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#status-event" class="md-nav__link">
+    <span class="md-ellipsis">
+      Status event
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#attachment-with-the-full-error-block" class="md-nav__link">
+    <span class="md-ellipsis">
+      Attachment with the full error block
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#diagnostics-level" class="md-nav__link">
+    <span class="md-ellipsis">
+      Diagnostics level
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../changelog/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Changelog
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#why-the-adapter-logs-the-way-it-does" class="md-nav__link">
+    <span class="md-ellipsis">
+      Why the adapter logs the way it does
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#error-codes" class="md-nav__link">
+    <span class="md-ellipsis">
+      Error codes
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#exception-classification" class="md-nav__link">
+    <span class="md-ellipsis">
+      Exception classification
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#finding-the-adapters-lines" class="md-nav__link">
+    <span class="md-ellipsis">
+      Finding the adapter's lines
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Finding the adapter&#39;s lines">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#which-node-produced-a-line" class="md-nav__link">
+    <span class="md-ellipsis">
+      Which node produced a line
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reading-a-failure-line" class="md-nav__link">
+    <span class="md-ellipsis">
+      Reading a failure line
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Reading a failure line">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#field-reference" class="md-nav__link">
+    <span class="md-ellipsis">
+      Field reference
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#choosing-what-to-investigate" class="md-nav__link">
+    <span class="md-ellipsis">
+      Choosing what to investigate
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#illegalmonitorstateexception-current-thread-is-not-owner" class="md-nav__link">
+    <span class="md-ellipsis">
+      IllegalMonitorStateException: current thread is not owner
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#node-fault-escalation" class="md-nav__link">
+    <span class="md-ellipsis">
+      Node fault escalation
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#producer-rebuild-tracking" class="md-nav__link">
+    <span class="md-ellipsis">
+      Producer rebuild tracking
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dead-letter-producer-rebuild-tracking" class="md-nav__link">
+    <span class="md-ellipsis">
+      Dead-letter producer rebuild tracking
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#common-situations" class="md-nav__link">
+    <span class="md-ellipsis">
+      Common situations
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Common situations">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#a-consumer-stops-advancing-and-no-dead-letter-records-appear" class="md-nav__link">
+    <span class="md-ellipsis">
+      A consumer stops advancing and no dead-letter records appear
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#nothing-from-the-adapter-in-the-trace-at-all" class="md-nav__link">
+    <span class="md-ellipsis">
+      Nothing from the adapter in the trace at all
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#producerheartbeat" class="md-nav__link">
+    <span class="md-ellipsis">
+      producer.heartbeat
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#runemitcycle-alive" class="md-nav__link">
+    <span class="md-ellipsis">
+      runEmitCycle: alive
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#poll-closing-consumer-for-reconnect" class="md-nav__link">
+    <span class="md-ellipsis">
+      poll: closing consumer for reconnect
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#poll-detected-invalid-osgi-bundle-wiring" class="md-nav__link">
+    <span class="md-ellipsis">
+      poll: detected invalid OSGi bundle wiring
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#adaptermplunavailable" class="md-nav__link">
+    <span class="md-ellipsis">
+      adapter.mpl.unavailable
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#producerinitfailed" class="md-nav__link">
+    <span class="md-ellipsis">
+      producer.init.failed
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#producermetadataprewarm-outcomefailed" class="md-nav__link">
+    <span class="md-ellipsis">
+      producer.metadata.prewarm outcome=FAILED
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#message-processing-log-enrichment" class="md-nav__link">
+    <span class="md-ellipsis">
+      Message Processing Log enrichment
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Message Processing Log enrichment">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#custom-header-properties" class="md-nav__link">
+    <span class="md-ellipsis">
+      Custom header properties
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#status-event" class="md-nav__link">
+    <span class="md-ellipsis">
+      Status event
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#attachment-with-the-full-error-block" class="md-nav__link">
+    <span class="md-ellipsis">
+      Attachment with the full error block
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#diagnostics-level" class="md-nav__link">
+    <span class="md-ellipsis">
+      Diagnostics level
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+    <a href="https://github.com/finkeflo/cpi-kafka-adapter-plus/edit/main/docs/troubleshooting.md" title="Edit this page" class="md-content__button md-icon">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="troubleshooting">Troubleshooting<a class="headerlink" href="#troubleshooting" title="Permanent link">&para;</a></h1>
+<p>This page is written for the situation where something has already gone wrong. It describes what the
+adapter writes, where to find it, and how to read it. This is the <em>how</em>; see
+<a href="../adrs/0004-diagnostic-logging-contract/">ADR 0004</a> for the <em>why</em>.</p>
+<p>Two diagnostic channels are available: the <strong>tenant trace file</strong> (always) and the <strong>Message
+Processing Log</strong> (per-message, when a failure occurs during an exchange). Both are described here.</p>
+<h2 id="why-the-adapter-logs-the-way-it-does">Why the adapter logs the way it does<a class="headerlink" href="#why-the-adapter-logs-the-way-it-does" title="Permanent link">&para;</a></h2>
+<p>Three properties of the SAP Cloud Integration runtime shape every logging decision in this adapter.
+They are not obvious, and each one has previously caused a real incident to go undiagnosed.</p>
+<p><strong>Only <code>ERROR</code> reaches the tenant trace file.</strong> <code>WARN</code>, <code>INFO</code> and <code>DEBUG</code> are invisible in
+production. In one analysed corpus of 870,613 trace lines, 32,708 came from this adapter and <em>all</em>
+of them were <code>ERROR</code> — including a <code>LOG.warn</code> statement that was known to execute. The practical
+consequence for an investigation: <strong>the absence of a <code>WARN</code> in the trace proves nothing at all.</strong>
+Anything that matters when something fails is therefore logged at <code>ERROR</code>, even when a lower level
+would look more tasteful.</p>
+<p><strong>The trace appender discards the <code>Throwable</code>.</strong> A conventional <code>LOG.error("...", exception)</code> keeps
+the rendered message and throws the stack trace away. The adapter therefore serialises the exception
+— class, message, frames, the whole cause chain and any suppressed exceptions — <em>into the message
+text</em>. That is why failure lines are long.</p>
+<p><strong><code>#</code> is not a safe field delimiter.</strong> Trace records are <code>#</code>-separated, but the thread name itself
+contains a <code>#</code> (for example <code>... thread #429917</code>), so a record splits into a variable number of
+fields. Parse from the end of the line, or with a regular expression — never by fixed column index.</p>
+<h2 id="error-codes">Error codes<a class="headerlink" href="#error-codes" title="Permanent link">&para;</a></h2>
+<p>Every failure line carries a stable error code in the form <code>KP-AREA-NNN</code>. Quote this code in support
+tickets: it identifies the failure class precisely and survives copy-paste better than a stack trace.</p>
+<table>
+<thead>
+<tr>
+<th>Code</th>
+<th>Symbol</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>KP-PROD-001</code></td>
+<td><code>producer.init.failed</code></td>
+<td>Producer initialisation failed</td>
+</tr>
+<tr>
+<td><code>KP-PROD-002</code></td>
+<td><code>producer.send.timeout</code></td>
+<td>Send timed out</td>
+</tr>
+<tr>
+<td><code>KP-PROD-003</code></td>
+<td><code>producer.send.record_too_large</code></td>
+<td>Record too large for the broker's <code>message.max.bytes</code></td>
+</tr>
+<tr>
+<td><code>KP-PROD-004</code></td>
+<td><code>producer.send.serialization_failed</code></td>
+<td>Serialisation failed</td>
+</tr>
+<tr>
+<td><code>KP-TXN-001</code></td>
+<td><code>txn.fenced</code></td>
+<td>Producer fenced (another instance took over the transactional id)</td>
+</tr>
+<tr>
+<td><code>KP-TXN-002</code></td>
+<td><code>txn.failed</code></td>
+<td>Transaction failed</td>
+</tr>
+<tr>
+<td><code>KP-SEC-001</code></td>
+<td><code>security.authentication_failed</code></td>
+<td>Authentication failed (wrong credentials, expired token)</td>
+</tr>
+<tr>
+<td><code>KP-SEC-002</code></td>
+<td><code>security.authorization_denied</code></td>
+<td>Authorisation denied (ACL blocks the operation)</td>
+</tr>
+<tr>
+<td><code>KP-CFG-001</code></td>
+<td><code>config.invalid_topic</code></td>
+<td>Invalid topic (does not exist, auto-create disabled)</td>
+</tr>
+<tr>
+<td><code>KP-CFG-002</code></td>
+<td><code>config.json_schema_validation_failed</code></td>
+<td>JSON schema validation failed</td>
+</tr>
+<tr>
+<td><code>KP-META-001</code></td>
+<td><code>metadata.fetch_timeout</code></td>
+<td>Metadata fetch timed out</td>
+</tr>
+<tr>
+<td><code>KP-META-002</code></td>
+<td><code>metadata.monitor_state_fault</code></td>
+<td>KAFKA-10902 monitor fault (see below)</td>
+</tr>
+<tr>
+<td><code>KP-DLQ-001</code></td>
+<td><code>dlq.delivery_failed</code></td>
+<td>Dead-letter queue delivery failed</td>
+</tr>
+<tr>
+<td><code>KP-SR-001</code></td>
+<td><code>schema_registry.failed</code></td>
+<td>Schema Registry call failed</td>
+</tr>
+<tr>
+<td><code>KP-GEN-001</code></td>
+<td><code>unclassified</code></td>
+<td>No code matched. Treated as unknown rather than guessed — see <em>Exception classification</em> below</td>
+</tr>
+</tbody>
+</table>
+<p>The symbol is not the operation token at the start of the log line; the two are separate
+namespaces. Grep for the code (<code>KP-META-002</code>), which appears on every line that carries it, rather
+than for the symbol.
+| <code>KP-SR-001</code> | <code>schema_registry.failed</code> | Schema Registry operation failed |
+| <code>KP-GEN-001</code> | <code>unclassified</code> | Unclassified error |</p>
+<p><code>KP-GEN-001</code> means the adapter did not recognise the exception. It is not necessarily fatal — the
+full cause chain in <code>error=</code> is the evidence. If the same <code>KP-GEN-001</code> recurs, report it so the
+classification can be extended.</p>
+<h2 id="exception-classification">Exception classification<a class="headerlink" href="#exception-classification" title="Permanent link">&para;</a></h2>
+<p>Failure lines carry a <code>classification</code> field with one of four values. These drive the adapter's
+automatic mitigation and tell you what to try next.</p>
+<table>
+<thead>
+<tr>
+<th>Classification</th>
+<th>Meaning</th>
+<th>What to do</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>RETRIABLE</code></td>
+<td>Transient failure (timeout, network blip). The adapter will retry automatically.</td>
+<td>Wait. If it persists, check broker connectivity.</td>
+</tr>
+<tr>
+<td><code>FATAL_PRODUCER_UNUSABLE</code></td>
+<td>The producer cannot recover without being rebuilt (fenced, auth revoked, bad broker version).</td>
+<td>The adapter rebuilds the producer automatically. Check credentials, ACLs, broker version.</td>
+</tr>
+<tr>
+<td><code>FATAL_DATA_ERROR</code></td>
+<td>A problem with the record itself (too large, invalid topic, serialisation failure). No producer rebuild will help.</td>
+<td>Fix the payload or configuration.</td>
+</tr>
+<tr>
+<td><code>UNKNOWN_FATAL</code></td>
+<td>The adapter does not recognise this exception.</td>
+<td>Read the full <code>error=</code> field. Report it so the classification can be improved.</td>
+</tr>
+</tbody>
+</table>
+<p><code>UNKNOWN_FATAL</code> is deliberately conservative: the adapter does not guess. If you see it, the cause
+chain is the evidence. A rebuild is not triggered automatically because it might be pointless.</p>
+<h2 id="finding-the-adapters-lines">Finding the adapter's lines<a class="headerlink" href="#finding-the-adapters-lines" title="Permanent link">&para;</a></h2>
+<p>Every line the adapter writes carries one marker and only one:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>[CPI-KAFKA-PLUS-DIAG]
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>grep<span class="w"> </span><span class="s1">'\[CPI-KAFKA-PLUS-DIAG\]'</span><span class="w"> </span>trace.log
+</code></pre></div>
+<p>There is deliberately no second marker. An earlier version used a different one on four lines, which
+happened to be the adapter start failures — so the single most useful grep missed exactly the lines
+worth finding.</p>
+<h3 id="which-node-produced-a-line">Which node produced a line<a class="headerlink" href="#which-node-produced-a-line" title="Permanent link">&para;</a></h3>
+<p>The node address is the <strong>second-to-last</strong> <code>#</code>-separated field of a trace record, and the node index
+is the last. This is not adapter output; the platform adds it. It is worth knowing about: in the
+incident that motivated this page, every occurrence of a failure turned out to sit on <strong>one worker
+node out of seven</strong>, which is what ruled out the broker, the topic configuration and the adapter's
+own logic in a single step.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># Distribution of failures across nodes</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>grep<span class="w"> </span><span class="s1">'\[CPI-KAFKA-PLUS-DIAG\]'</span><span class="w"> </span>trace.log<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-E<span class="w"> </span><span class="s1">'producer\.batch\.record\.(send|await)'</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">  </span><span class="p">|</span><span class="w"> </span>awk<span class="w"> </span>-F<span class="s1">'#'</span><span class="w"> </span><span class="s1">'{print $(NF-1)}'</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>sort<span class="w"> </span><span class="p">|</span><span class="w"> </span>uniq<span class="w"> </span>-c<span class="w"> </span><span class="p">|</span><span class="w"> </span>sort<span class="w"> </span>-rn
+</code></pre></div>
+<p>Compare that against the distribution of <em>all</em> lines. A failure count that is concentrated on one
+node while overall traffic is spread evenly is a node-local problem, not a Kafka problem.</p>
+<h2 id="reading-a-failure-line">Reading a failure line<a class="headerlink" href="#reading-a-failure-line" title="Permanent link">&para;</a></h2>
+<p>Failure lines are flat <code>key=value</code> sequences. A value is wrapped in single quotes if it is empty or
+contains a space, an <code>=</code> or a quote; a quote inside such a value is <strong>doubled</strong>. So a lone <code>'</code> always
+ends the value and <code>''</code> always means a literal quote — which matters here, because Kafka quotes topic
+names in its own exception messages and those messages end up inside <code>error=</code>.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>[CPI-KAFKA-PLUS-DIAG] producer.batch.record.send producerPath=SHARED phase=SYNC_SEND
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>  clientId=… topic=… recordIndex=0 batchSize=3 bufferedRecords=0 elapsedMs=12
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>  thread=… error='…' STACK …
+</code></pre></div>
+<h3 id="field-reference">Field reference<a class="headerlink" href="#field-reference" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><em>(first token after the marker)</em></td>
+<td>The operation, e.g. <code>producer.batch.record.send</code>, <code>producer.init.failed</code>, <code>producer.send.monitorFaultRetry</code></td>
+</tr>
+<tr>
+<td><code>phase</code></td>
+<td><code>SYNC_SEND</code> — <code>send()</code> threw synchronously, the record never entered the accumulator. <code>AWAIT_FUTURE</code> — the record was accepted and failed later. Only the first is safe to retry</td>
+</tr>
+<tr>
+<td><code>producerPath</code></td>
+<td><code>SHARED</code> (non-transactional) or <code>TRANSACTIONAL</code>. Check this before investigating anything transactional</td>
+</tr>
+<tr>
+<td><code>topic</code></td>
+<td>Target topic</td>
+</tr>
+<tr>
+<td><code>recordIndex</code></td>
+<td>Position in the batch. A failure at <code>0</code> typically means the metadata wait, not the payload</td>
+</tr>
+<tr>
+<td><code>batchSize</code></td>
+<td>Size of the batch</td>
+</tr>
+<tr>
+<td><code>elapsedMs</code></td>
+<td>Time since the batch started</td>
+</tr>
+<tr>
+<td><code>thread</code></td>
+<td>Worker thread. Several distinct threads failing points at a node-wide condition rather than one poisoned thread</td>
+</tr>
+<tr>
+<td><code>mplId</code>, <code>applicationId</code>, <code>exchangeId</code></td>
+<td>Correlation to one integration-flow message; <code>mplId</code> is what the monitor is searchable by</td>
+</tr>
+<tr>
+<td><code>consecutiveFailures</code></td>
+<td>Consecutive failures on this producer. Governs reconnect only, never whether something is logged</td>
+</tr>
+<tr>
+<td><code>classification</code></td>
+<td>One of <code>RETRIABLE</code>, <code>FATAL_PRODUCER_UNUSABLE</code>, <code>FATAL_DATA_ERROR</code>, <code>UNKNOWN_FATAL</code> (see above)</td>
+</tr>
+<tr>
+<td><code>errorCode</code></td>
+<td>Stable error code, e.g. <code>KP-PROD-002</code> (see above)</td>
+</tr>
+<tr>
+<td><code>producerRecreated</code>, <code>durationMs</code>, <code>attemptsSinceLastSuccess</code></td>
+<td>Emitted on the separate <code>producer.rebuild.outcome</code> line, not on the failure line. A rebuild is not reported inline — correlate by <code>clientId</code>, then look for <code>producer.rebuild.effect</code> with <code>outcome=RECOVERED</code> to see whether it actually helped</td>
+</tr>
+<tr>
+<td><code>retryOutcome</code>, <code>retryCount</code>, <code>batchRetriesLeft</code>, <code>stopReason</code></td>
+<td>Outcome of the bounded retry described below</td>
+</tr>
+<tr>
+<td><code>error</code></td>
+<td>Serialised exception: class, message, frames, then <code>CAUSED_BY</code> per cause level and <code>SUPPRESSED</code> where present</td>
+</tr>
+</tbody>
+</table>
+<h3 id="choosing-what-to-investigate">Choosing what to investigate<a class="headerlink" href="#choosing-what-to-investigate" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong><code>producerPath</code> first.</strong> It costs nothing and rules out half the code. An earlier investigation
+   spent its effort on the transactional path for failures that had all occurred on the shared one.</li>
+<li><strong><code>phase</code> next.</strong> <code>SYNC_SEND</code> means nothing was ever handed to Kafka. <code>AWAIT_FUTURE</code> means it was.</li>
+<li><strong><code>thread</code> and the node field.</strong> One thread suggests a local problem; many threads on one node
+   suggest the node; all nodes suggest the broker or the configuration.</li>
+<li><strong><code>error</code> last.</strong> By then you know where to read it.</li>
+</ol>
+<h2 id="illegalmonitorstateexception-current-thread-is-not-owner"><code>IllegalMonitorStateException: current thread is not owner</code><a class="headerlink" href="#illegalmonitorstateexception-current-thread-is-not-owner" title="Permanent link">&para;</a></h2>
+<p>This one has a specific, known cause and the adapter handles it, so it is worth recognising.</p>
+<p>It comes from <a href="https://issues.apache.org/jira/browse/KAFKA-10902">KAFKA-10902</a>, which is open and
+unfixed. <code>ProducerMetadata.awaitUpdate</code> is <code>synchronized</code> and passes <code>this</code> to
+<code>SystemTime.waitObject</code>, which enters the same monitor again and calls <code>Object.wait()</code> at monitor
+recursion depth 2. Under conditions the JDK does not guarantee, the thread loses ownership and the
+wait throws.</p>
+<p>Two details make it identifiable from the message alone:</p>
+<ul>
+<li><code>Object.wait()</code> is the <strong>only</strong> construct that produces the bare text <code>current thread is not
+  owner</code>. <code>ReentrantLock</code> and the other <code>java.util.concurrent</code> locks throw the same exception type
+  with a <code>null</code> message, so they cannot be confused with it.</li>
+<li>The adapter contains no <code>wait</code>, <code>notify</code> or <code>synchronized</code> block on the send path, so an occurrence
+  did not originate in adapter code.</li>
+</ul>
+<p><strong>What the adapter does about it.</strong> The metadata for each topic is fetched once up front and
+<code>metadata.max.idle.ms</code> is raised to one hour, so the vulnerable path is normally not entered at all.
+The client default of five minutes discards the metadata of an idle topic, which meant a flow
+producing less often than that hit the blocking metadata wait on <em>every</em> message. If the fault does
+occur on a synchronous <code>send()</code>, it is retried — safely, because <code>KafkaProducer.doSend()</code> calls
+<code>waitOnMetadata()</code> <em>before</em> <code>accumulator.append(...)</code>, so the record was never queued and cannot be
+duplicated.</p>
+<p><strong>How often it retries.</strong> Three bounds apply and the first one reached stops it:</p>
+<table>
+<thead>
+<tr>
+<th>Bound</th>
+<th>Limit</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Per record</td>
+<td>3 retries</td>
+</tr>
+<tr>
+<td>Per batch</td>
+<td>5 retries in total, regardless of how many records the batch holds</td>
+</tr>
+<tr>
+<td>Wall clock</td>
+<td>Never past the existing batch deadline</td>
+</tr>
+</tbody>
+</table>
+<p>Worst case is five extra attempts and roughly 250 ms for a whole batch.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1"># Did the adapter recover from it, and how often?</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>grep<span class="w"> </span><span class="s1">'producer.send.monitorFaultRetry'</span><span class="w"> </span>trace.log<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-o<span class="w"> </span><span class="s1">'retryOutcome=[A-Z]*'</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>sort<span class="w"> </span><span class="p">|</span><span class="w"> </span>uniq<span class="w"> </span>-c
+</code></pre></div>
+<p><code>stopReason=BATCH_BUDGET_EXHAUSTED</code> or a run of <code>retryOutcome=FAILED</code> means the node is not merely
+glitching. Redeploying or restarting the integration flow causes the workers to be placed again, and
+the node field above is the evidence to attach to a ticket.</p>
+<h2 id="node-fault-escalation">Node fault escalation<a class="headerlink" href="#node-fault-escalation" title="Permanent link">&para;</a></h2>
+<p>When the same fault (keyed by exception class and error code) recurs <strong>5 times within 20 minutes</strong>
+on one JVM despite the adapter's mitigation, a <code>producer.node.fault.escalation</code> line is emitted.
+This is the single most actionable diagnostic line the adapter can produce: it means the node is
+experiencing a persistent problem that automatic recovery cannot fix.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>[CPI-KAFKA-PLUS-DIAG] producer.node.fault.escalation faultClass=TimeoutException
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>  errorCode=KP-PROD-002 classification=RETRIABLE countInWindow=5 windowMinutes=20
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>  producerPath=SHARED topic=… thread=… advice='The same fault has recurred 5 times
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>  within 20 minutes on this JVM despite mitigation…'
+</code></pre></div>
+<p><strong>What to do:</strong></p>
+<ol>
+<li>Extract the node address from the trace record's second-to-last <code>#</code>-separated field.</li>
+<li>Compare it against the distribution of all failures (see the grep recipe above). If the fault is
+   concentrated on one node while traffic is spread evenly, the problem is node-local, not Kafka.</li>
+<li>Collect the evidence (error code, classification, node address) and open a support ticket
+   requesting that the node be recycled or the integration flow redeployed.</li>
+</ol>
+<p>The escalation fires once per fault identity per 20-minute window. If the fault stops and returns,
+it fires again. Successful sends reset the window.</p>
+<h2 id="producer-rebuild-tracking">Producer rebuild tracking<a class="headerlink" href="#producer-rebuild-tracking" title="Permanent link">&para;</a></h2>
+<p>When the adapter rebuilds its producer (after a <code>FATAL_PRODUCER_UNUSABLE</code> classification or repeated
+failures), two events report the outcome:</p>
+<ul>
+<li>
+<p><code>producer.rebuild.outcome</code> — emitted immediately after the rebuild attempt, reporting whether a
+  new producer was successfully constructed (<code>producerRecreated=true/false</code>), how long it took
+  (<code>durationMs</code>), and how many rebuild attempts have occurred since the last successful send
+  (<code>attemptsSinceLastSuccess</code>).</p>
+</li>
+<li>
+<p><code>producer.rebuild.effect</code> — emitted on the <strong>next successful send</strong> after a rebuild, confirming
+  that the rebuild actually helped (<code>outcome=RECOVERED</code>).</p>
+</li>
+</ul>
+<p>If a <code>producer.rebuild.outcome</code> is followed immediately by another failure (rather than by a
+<code>producer.rebuild.effect</code>), the rebuild did not help. Check the error code and classification on the
+subsequent failure line.</p>
+<h2 id="dead-letter-producer-rebuild-tracking">Dead-letter producer rebuild tracking<a class="headerlink" href="#dead-letter-producer-rebuild-tracking" title="Permanent link">&para;</a></h2>
+<p>The dead-letter producer heals itself the same way, and the equivalent events are
+<code>dlq.producer.rebuild.outcome</code> and <code>dlq.producer.rebuild.effect</code>. Read them the same way: an
+<code>outcome</code> line followed by <code>effect outcome=RECOVERED</code> means the record reached the dead-letter topic
+on the replacement client; <code>effect outcome=STILL_FAILING</code> means it did not, and the exception on
+that line is the one to investigate.</p>
+<p>Two fields on <code>dlq.send.failed</code> decide what to do next:</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>rebuildJustified</code></td>
+<td>Whether the classification says a fresh client could help. <code>false</code> for <code>RETRIABLE</code> and <code>FATAL_DATA_ERROR</code> — a record the broker rejects will be rejected by a new client too, so no rebuild is attempted</td>
+</tr>
+<tr>
+<td><code>rebuildEscalated</code></td>
+<td><code>true</code> when the classification did <em>not</em> ask for a rebuild but three consecutive sends have failed, so one is attempted anyway. This is what stops a "retriable" verdict from becoming a permanent stall</td>
+</tr>
+<tr>
+<td><code>consecutiveFailures</code></td>
+<td>Consecutive dead-letter send failures. Any value above 1 means the partition is not advancing</td>
+</tr>
+<tr>
+<td><code>rebuildBackoffElapsed</code></td>
+<td><code>false</code> means a rebuild was skipped only because one happened moments ago. A run of these is a record being redelivered, not a new fault</td>
+</tr>
+<tr>
+<td><code>rebuildTriggered</code></td>
+<td>The decision all of the above produce. If this stays <code>false</code> while sends keep failing, the cause is in the record or the broker, not in the client</td>
+</tr>
+<tr>
+<td><code>duplicateRisk</code></td>
+<td><code>true</code> when the first attempt failed after the record had already been accepted (<code>phase=AWAIT_FUTURE</code>), so the retry may have written the record twice. Deduplicate on <code>CpiKafkaPlusDlqOriginalTopic</code> + <code>Partition</code> + <code>Offset</code></td>
+</tr>
+</tbody>
+</table>
+<h2 id="common-situations">Common situations<a class="headerlink" href="#common-situations" title="Permanent link">&para;</a></h2>
+<h3 id="a-consumer-stops-advancing-and-no-dead-letter-records-appear">A consumer stops advancing and no dead-letter records appear<a class="headerlink" href="#a-consumer-stops-advancing-and-no-dead-letter-records-appear" title="Permanent link">&para;</a></h3>
+<p>This is the shape of a stalled consumer, and it is worth recognising because the symptom and the
+cause sit far apart. A dead-letter send is what allows the offset to be committed: if the send
+throws, nothing is committed, the same record is polled again on the next cycle, and every later
+message is stuck behind a record that can never succeed. What you observe is a partition whose
+committed offset does not move and a dead-letter topic that has stopped receiving anything — while
+the integration flow keeps producing one failed message per delivery, which looks like a <em>processing</em>
+problem rather than a <em>dead-letter</em> problem.</p>
+<p>Confirm it in this order:</p>
+<ol>
+<li>Grep the trace for <code>dlq.send.failed</code>. The line carries the original <code>topic</code>, <code>partition</code> and
+   <code>offset</code>, the serialised cause, and <code>consequence='offset not committed, record will be
+   reprocessed'</code>. The repeated offset in successive lines is the stalled one.</li>
+<li>Compare the group's committed offset with the partition's high watermark. A constant gap that
+   equals the number of deliveries since the stall began confirms it.</li>
+<li>Check whether a rebuild was attempted and what it achieved, using the fields above.</li>
+</ol>
+<p>Note when counting dead-letter records that the adapter partitions them by the original record key,
+so a multi-partition dead-letter topic spreads them across all partitions. Reading only partition 0
+will make records look lost that are not.</p>
+<h3 id="nothing-from-the-adapter-in-the-trace-at-all">Nothing from the adapter in the trace at all<a class="headerlink" href="#nothing-from-the-adapter-in-the-trace-at-all" title="Permanent link">&para;</a></h3>
+<p>Check the marker spelling first, then whether the flow ran at all. A <em>successful</em> send now produces
+a periodic heartbeat line (<code>producer.heartbeat status=HEALTHY</code>) at most once every 5 minutes, so a
+healthy producer is provably alive. If neither failures nor heartbeats appear, the flow did not run.</p>
+<h3 id="producerheartbeat"><code>producer.heartbeat</code><a class="headerlink" href="#producerheartbeat" title="Permanent link">&para;</a></h3>
+<p>The throttled success heartbeat. Emitted at most once per 5 minutes when sends are succeeding, and
+immediately on recovery after a failure. It carries <code>sendsSinceLastHeartbeat</code> so you can gauge
+throughput. If the heartbeat is present but failures are absent, the producer is healthy.</p>
+<h3 id="runemitcycle-alive"><code>runEmitCycle: alive</code><a class="headerlink" href="#runemitcycle-alive" title="Permanent link">&para;</a></h3>
+<p>The consumer's counterpart, and it behaves differently on purpose. Only <code>reason=STATE_CHANGE</code>
+reaches the tenant trace file — it is written when the consumer's <code>initialized</code> state flips, so at
+startup and whenever the consumer is torn down or rebuilt. The recurring <code>reason=INTERVAL</code> tick is
+logged at INFO and is therefore visible on a local run but not on a tenant.</p>
+<p>Do not use the absence of this line as an alarm, and do not use its presence as an all-clear. It
+reports that the scheduler called <code>poll()</code>, which stays true while a partition does not advance at
+all — the stall in the 1.2.7 dead-letter incident would have been accompanied by an unbroken series
+of <code>alive</code> lines. To judge a consumer, use <code>closing consumer for reconnect</code>, the poll failure lines
+and the committed offsets. Older adapter versions wrote the tick at ERROR, which is why they
+contribute several hundred red lines per day and endpoint that mean nothing.</p>
+<h3 id="poll-closing-consumer-for-reconnect"><code>poll: closing consumer for reconnect</code><a class="headerlink" href="#poll-closing-consumer-for-reconnect" title="Permanent link">&para;</a></h3>
+<p>Repeated poll failures crossed either the count threshold (5 consecutive) or the duration threshold
+(60 s), so the consumer is closed and rebuilt on the next poll. <code>reason</code> says which threshold fired,
+and both counters restart afterwards — the line therefore appears once per reconnect, not once per
+failed poll, and seeing it repeat at a steady cadence means the outage is ongoing rather than that
+the adapter is thrashing. The individual poll failures are logged separately with the cause.</p>
+<h3 id="poll-detected-invalid-osgi-bundle-wiring"><code>poll: detected invalid OSGi bundle wiring</code><a class="headerlink" href="#poll-detected-invalid-osgi-bundle-wiring" title="Permanent link">&para;</a></h3>
+<p>This line means Kafka class loading failed with the CPI hot-update signature
+<code>bundle wiring ... no longer valid</code> (typically wrapped in <code>NoClassDefFoundError</code> or
+<code>ClassNotFoundException</code>). In this state the route can still tick "alive" while poll/assignment
+logic is broken.</p>
+<p>From this version onward, the adapter treats that signature as a dedicated recoverable state: it
+closes the current consumer immediately and rebuilds it on the next poll cycle, rather than waiting
+for the generic failure thresholds. If wiring remains stale, it additionally tries a bounded
+automatic restart of the affected Camel route (<code>stopRoute</code>/<code>startRoute</code>, max 2 attempts, 15-minute
+cooldown), which mirrors the manual "restart iFlow" fix path.</p>
+<p>If the line keeps repeating even after those attempts, the tenant runtime still serves a stale class
+space and needs platform-side runtime recovery.</p>
+<h3 id="adaptermplunavailable"><code>adapter.mpl.unavailable</code><a class="headerlink" href="#adaptermplunavailable" title="Permanent link">&para;</a></h3>
+<p>The Message Processing Log binding could not be resolved, so MPL traces will not be written for this
+endpoint. It is reported once per endpoint rather than per message. The adapter itself continues to
+work; only the MPL enrichment is lost.</p>
+<h3 id="producerinitfailed"><code>producer.init.failed</code><a class="headerlink" href="#producerinitfailed" title="Permanent link">&para;</a></h3>
+<p>Initialisation failed. <code>bootstrapServers</code> and <code>securityProtocol</code> are in the line, and the serialised
+cause chain usually names the problem directly — a rejected credential, a TLS handshake failure, or
+an unreachable broker.</p>
+<h3 id="producermetadataprewarm-outcomefailed"><code>producer.metadata.prewarm outcome=FAILED</code><a class="headerlink" href="#producermetadataprewarm-outcomefailed" title="Permanent link">&para;</a></h3>
+<p>The up-front metadata fetch did not succeed. This is not itself a failure: the send path performs the
+same fetch and will report a more precise error. Treat it as a hint that the broker was slow or
+unreachable at that moment.</p>
+<h2 id="message-processing-log-enrichment">Message Processing Log enrichment<a class="headerlink" href="#message-processing-log-enrichment" title="Permanent link">&para;</a></h2>
+<p>When a failure occurs during an exchange, the adapter enriches the Message Processing Log with
+structured information. This is available in the CPI monitor even when MPL <em>tracing</em> is disabled
+(which is the default). Two channels are used, both trace-independent:</p>
+<h3 id="custom-header-properties">Custom header properties<a class="headerlink" href="#custom-header-properties" title="Permanent link">&para;</a></h3>
+<p>Four custom header properties are attached to the failed message's MPL entry:</p>
+<table>
+<thead>
+<tr>
+<th>Property</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>KafkaAdapterErrorCode</code></td>
+<td>The stable error code, e.g. <code>KP-PROD-002</code></td>
+</tr>
+<tr>
+<td><code>KafkaAdapterTopic</code></td>
+<td>The target topic</td>
+</tr>
+<tr>
+<td><code>KafkaAdapterProducerPath</code></td>
+<td><code>SHARED</code> or <code>TRANSACTIONAL</code></td>
+</tr>
+<tr>
+<td><code>KafkaAdapterRetryable</code></td>
+<td><code>true</code> if the classification was <code>RETRIABLE</code>, otherwise <code>false</code></td>
+</tr>
+</tbody>
+</table>
+<p>These properties are visible in the monitor's message detail view and are searchable. They do <strong>not</strong>
+require MPL tracing to be enabled — they are attached via <code>addCustomHeaderProperty</code>, which works
+regardless of trace level.</p>
+<h3 id="status-event">Status event<a class="headerlink" href="#status-event" title="Permanent link">&para;</a></h3>
+<p>If the adapter can obtain an MPL handle with status support (<code>getMessageLogWithStatus</code>), it fires a
+<code>FAILED</code> status event with the error code and a truncated error message. This marks the message as
+failed in the monitor, making failures visible at a glance without opening each message.</p>
+<h3 id="attachment-with-the-full-error-block">Attachment with the full error block<a class="headerlink" href="#attachment-with-the-full-error-block" title="Permanent link">&para;</a></h3>
+<p>When <code>writeMplErrorAttachment=true</code> (default), the adapter attaches the complete error diagnostic —
+including the full Java stack trace and all nested causes — to the message's monitor entry under
+the name <code>KafkaAdapterError</code>. This is the one channel that is not subject to the
+8,000-character line limit
+of the tenant trace file, so when a cause chain is deep this is where to read it in full.</p>
+<p>When a failed consume record is successfully routed to DLQ, the MPL status message now also
+states that outcome directly (<code>moved to dead-letter topic &lt;topic&gt;</code>), so the routing result is
+visible in the main MPL error text and not only in the attachment.</p>
+<p>A second trace-independent channel writes the same four facts as adapter attributes
+(<code>errorCode</code>, <code>topic</code>, <code>producerPath</code>, <code>retryable</code>) via <code>putAdapterAttribute</code>. It is redundant on
+purpose: the two APIs surface in different places in the monitor depending on tenant configuration,
+and neither had ever been verified to be visible, so the adapter writes both rather than betting on
+one.</p>
+<h2 id="diagnostics-level">Diagnostics level<a class="headerlink" href="#diagnostics-level" title="Permanent link">&para;</a></h2>
+<p>The adapter's <code>diagnosticsLevel</code> option controls the verbosity of diagnostic output. Two levels are
+supported:</p>
+<table>
+<thead>
+<tr>
+<th>Level</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>STANDARD</code> (default)</td>
+<td>All failure paths log the full serialised cause chain. Sufficient for root-causing most production incidents.</td>
+</tr>
+<tr>
+<td><code>FULL</code></td>
+<td>Adds one thing: a bounded thread dump attached to <code>producer.node.fault.escalation</code>, capped at 20 threads and 10 frames each, with lock owners resolved. That dump is the only evidence that can settle a monitor-ownership question, and it is the reason <code>FULL</code> exists.</td>
+</tr>
+</tbody>
+</table>
+<p><code>STANDARD</code> is fully diagnostic on its own. Do not run at <code>FULL</code> permanently: the extra output adds
+volume and latency on every send. Switch to <code>FULL</code> only when you need the additional detail, then
+switch back.</p>
+<p>See <a href="../configuration/">Configuration</a> for how to set this option.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    <script id="__config" type="application/json">{"base": "..", "features": ["navigation.tabs", "navigation.sections", "search.highlight", "content.code.copy", "content.action.edit"], "search": "../assets/javascripts/workers/search.f8cc74c7.min.js", "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.c8b220af.min.js"></script>
+      
+    
+  </body>
+</html>

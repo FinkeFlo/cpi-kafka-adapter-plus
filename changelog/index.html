@@ -1,0 +1,3386 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Custom Apache Kafka adapter for SAP Cloud Integration (CPI)">
+      
+      
+      
+      
+        <link rel="prev" href="../troubleshooting/">
+      
+      
+      
+      <link rel="icon" href="../assets/branding/icon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.6.7">
+    
+    
+      
+        <title>Changelog - Kafka Adapter Plus</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.8608ea7d.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.06af60db.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="teal">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#changelog" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Kafka Adapter Plus" class="md-header__button md-logo" aria-label="Kafka Adapter Plus" data-md-component="logo">
+      
+  <img src="../assets/branding/icon.png" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Kafka Adapter Plus
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Changelog
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="teal"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="teal"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      <label class="md-header__button md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+      </label>
+      <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/finkeflo/cpi-kafka-adapter-plus" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../getting-started/" class="md-tabs__link">
+        
+  
+    
+  
+  Getting Started
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../configuration/" class="md-tabs__link">
+        
+  
+    
+  
+  Configuration
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../features/batch-processing/" class="md-tabs__link">
+          
+  
+  Features
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../security/authentication/" class="md-tabs__link">
+          
+  
+  Security
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../adrs/0001-transactional-producer-concurrency/" class="md-tabs__link">
+          
+  
+  Architecture Decisions
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../faq/" class="md-tabs__link">
+        
+  
+    
+  
+  FAQ
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../troubleshooting/" class="md-tabs__link">
+        
+  
+    
+  
+  Troubleshooting
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+    
+  
+  
+    <li class="md-tabs__item md-tabs__item--active">
+      <a href="./" class="md-tabs__link">
+        
+  
+    
+  
+  Changelog
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Kafka Adapter Plus" class="md-nav__button md-logo" aria-label="Kafka Adapter Plus" data-md-component="logo">
+      
+  <img src="../assets/branding/icon.png" alt="logo">
+
+    </a>
+    Kafka Adapter Plus
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/finkeflo/cpi-kafka-adapter-plus" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Home
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Getting Started
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Configuration
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Features
+    
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            Features
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../features/batch-processing/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Batch Processing
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../features/avro-schema-registry/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Avro / Schema Registry
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../features/producer-batch/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Producer Batch Send
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../features/producer-retry/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Producer Retry
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../features/json-schema-validation/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    JSON Schema Validation
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../features/kafka-headers/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Kafka Headers
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../features/dead-letter-queue/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Dead Letter Queue
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Security
+    
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            Security
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../security/authentication/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Authentication
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Architecture Decisions
+    
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            Architecture Decisions
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../adrs/0001-transactional-producer-concurrency/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    ADR 0001: Transactional Concurrency
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../adrs/0002-confluent-client-ersetzen/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    ADR 0002: JDK-only Schema Registry Client
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../adrs/0003-kafka-clients-unpack/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    ADR 0003: Unpacked kafka-clients
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../adrs/0004-diagnostic-logging-contract/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    ADR 0004: Diagnostic Logging Contract
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../faq/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    FAQ
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../troubleshooting/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Troubleshooting
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  <span class="md-ellipsis">
+    Changelog
+    
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  <span class="md-ellipsis">
+    Changelog
+    
+  </span>
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#132-2026-08-20" class="md-nav__link">
+    <span class="md-ellipsis">
+      [1.3.2] - 2026-08-20
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[1.3.2] - 2026-08-20">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fixed" class="md-nav__link">
+    <span class="md-ellipsis">
+      Fixed
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#131-2026-08-20" class="md-nav__link">
+    <span class="md-ellipsis">
+      [1.3.1] - 2026-08-20
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[1.3.1] - 2026-08-20">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#changed" class="md-nav__link">
+    <span class="md-ellipsis">
+      Changed
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#130-2026-08-20" class="md-nav__link">
+    <span class="md-ellipsis">
+      [1.3.0] - 2026-08-20
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[1.3.0] - 2026-08-20">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#added" class="md-nav__link">
+    <span class="md-ellipsis">
+      Added
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fixed_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      Fixed
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#127-2026-08-18" class="md-nav__link">
+    <span class="md-ellipsis">
+      [1.2.7] - 2026-08-18
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[1.2.7] - 2026-08-18">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fixed_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      Fixed
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#added_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      Added
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changed_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      Changed
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#126-2026-08-18" class="md-nav__link">
+    <span class="md-ellipsis">
+      [1.2.6] - 2026-08-18
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[1.2.6] - 2026-08-18">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#removed" class="md-nav__link">
+    <span class="md-ellipsis">
+      Removed
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changed_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      Changed
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#compatibility" class="md-nav__link">
+    <span class="md-ellipsis">
+      Compatibility
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#125-2026-08-17" class="md-nav__link">
+    <span class="md-ellipsis">
+      [1.2.5] - 2026-08-17
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[1.2.5] - 2026-08-17">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fixed_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      Fixed
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changed_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      Changed
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#note" class="md-nav__link">
+    <span class="md-ellipsis">
+      Note
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#124-2026-08-17" class="md-nav__link">
+    <span class="md-ellipsis">
+      [1.2.4] - 2026-08-17
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[1.2.4] - 2026-08-17">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#added_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      Added
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fixed_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      Fixed
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changed_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      Changed
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#123-2026-08-11" class="md-nav__link">
+    <span class="md-ellipsis">
+      [1.2.3] - 2026-08-11
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[1.2.3] - 2026-08-11">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fixed_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      Fixed
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changed_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      Changed
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#122-2026-08-10" class="md-nav__link">
+    <span class="md-ellipsis">
+      [1.2.2] - 2026-08-10
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[1.2.2] - 2026-08-10">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#changed_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      Changed
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#121-2026-08-10" class="md-nav__link">
+    <span class="md-ellipsis">
+      [1.2.1] - 2026-08-10
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[1.2.1] - 2026-08-10">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#added_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      Added
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fixed_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      Fixed
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changed_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      Changed
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#120-2026-07-30" class="md-nav__link">
+    <span class="md-ellipsis">
+      [1.2.0] - 2026-07-30
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[1.2.0] - 2026-07-30">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#added_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      Added
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changed_8" class="md-nav__link">
+    <span class="md-ellipsis">
+      Changed
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fixed_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      Fixed
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#111-2026-07-30" class="md-nav__link">
+    <span class="md-ellipsis">
+      [1.1.1] - 2026-07-30
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[1.1.1] - 2026-07-30">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#changed_9" class="md-nav__link">
+    <span class="md-ellipsis">
+      Changed
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#added_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      Added
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#110-2026-07-29" class="md-nav__link">
+    <span class="md-ellipsis">
+      [1.1.0] - 2026-07-29
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[1.1.0] - 2026-07-29">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#removed_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      Removed
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changed_10" class="md-nav__link">
+    <span class="md-ellipsis">
+      Changed
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#added_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      Added
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#removed_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      Removed
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1019-2026-07-28" class="md-nav__link">
+    <span class="md-ellipsis">
+      [1.0.19] - 2026-07-28
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[1.0.19] - 2026-07-28">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fixed_8" class="md-nav__link">
+    <span class="md-ellipsis">
+      Fixed
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1018-2026-07-28" class="md-nav__link">
+    <span class="md-ellipsis">
+      [1.0.18] - 2026-07-28
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[1.0.18] - 2026-07-28">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fixed_9" class="md-nav__link">
+    <span class="md-ellipsis">
+      Fixed
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1017-2026-07-28" class="md-nav__link">
+    <span class="md-ellipsis">
+      [1.0.17] - 2026-07-28
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[1.0.17] - 2026-07-28">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fixed_10" class="md-nav__link">
+    <span class="md-ellipsis">
+      Fixed
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1016-2026-07-28" class="md-nav__link">
+    <span class="md-ellipsis">
+      [1.0.16] - 2026-07-28
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[1.0.16] - 2026-07-28">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#added_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      Added
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changed_11" class="md-nav__link">
+    <span class="md-ellipsis">
+      Changed
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1015-2026-07-23" class="md-nav__link">
+    <span class="md-ellipsis">
+      [1.0.15] - 2026-07-23
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[1.0.15] - 2026-07-23">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#added_8" class="md-nav__link">
+    <span class="md-ellipsis">
+      Added
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1014-2026-07-23" class="md-nav__link">
+    <span class="md-ellipsis">
+      [1.0.14] - 2026-07-23
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[1.0.14] - 2026-07-23">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fixed_11" class="md-nav__link">
+    <span class="md-ellipsis">
+      Fixed
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1013-2026-07-21" class="md-nav__link">
+    <span class="md-ellipsis">
+      [1.0.13] - 2026-07-21
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[1.0.13] - 2026-07-21">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fixed_12" class="md-nav__link">
+    <span class="md-ellipsis">
+      Fixed
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1012-2026-07-20" class="md-nav__link">
+    <span class="md-ellipsis">
+      [1.0.12] - 2026-07-20
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[1.0.12] - 2026-07-20">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#added_9" class="md-nav__link">
+    <span class="md-ellipsis">
+      Added
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fixed_13" class="md-nav__link">
+    <span class="md-ellipsis">
+      Fixed
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changed_12" class="md-nav__link">
+    <span class="md-ellipsis">
+      Changed
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1011-2026-07-20" class="md-nav__link">
+    <span class="md-ellipsis">
+      [1.0.11] - 2026-07-20
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[1.0.11] - 2026-07-20">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fixed_14" class="md-nav__link">
+    <span class="md-ellipsis">
+      Fixed
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1010-2026-07-20" class="md-nav__link">
+    <span class="md-ellipsis">
+      [1.0.10] - 2026-07-20
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[1.0.10] - 2026-07-20">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#added_10" class="md-nav__link">
+    <span class="md-ellipsis">
+      Added
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#109-2026-07-20" class="md-nav__link">
+    <span class="md-ellipsis">
+      [1.0.9] - 2026-07-20
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[1.0.9] - 2026-07-20">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#changed_13" class="md-nav__link">
+    <span class="md-ellipsis">
+      Changed
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#108-2026-07-20" class="md-nav__link">
+    <span class="md-ellipsis">
+      [1.0.8] - 2026-07-20
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[1.0.8] - 2026-07-20">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fixed_15" class="md-nav__link">
+    <span class="md-ellipsis">
+      Fixed
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#107-2026-07-14" class="md-nav__link">
+    <span class="md-ellipsis">
+      [1.0.7] - 2026-07-14
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[1.0.7] - 2026-07-14">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#added_11" class="md-nav__link">
+    <span class="md-ellipsis">
+      Added
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changed_14" class="md-nav__link">
+    <span class="md-ellipsis">
+      Changed
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#106-2026-07-13" class="md-nav__link">
+    <span class="md-ellipsis">
+      [1.0.6] - 2026-07-13
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[1.0.6] - 2026-07-13">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#added_12" class="md-nav__link">
+    <span class="md-ellipsis">
+      Added
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changed_15" class="md-nav__link">
+    <span class="md-ellipsis">
+      Changed
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#105-2026-07-13" class="md-nav__link">
+    <span class="md-ellipsis">
+      [1.0.5] - 2026-07-13
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[1.0.5] - 2026-07-13">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#changed_16" class="md-nav__link">
+    <span class="md-ellipsis">
+      Changed
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fixed_16" class="md-nav__link">
+    <span class="md-ellipsis">
+      Fixed
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#104-2026-07-07" class="md-nav__link">
+    <span class="md-ellipsis">
+      [1.0.4] - 2026-07-07
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[1.0.4] - 2026-07-07">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#changed_17" class="md-nav__link">
+    <span class="md-ellipsis">
+      Changed
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fixed_17" class="md-nav__link">
+    <span class="md-ellipsis">
+      Fixed
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#added_13" class="md-nav__link">
+    <span class="md-ellipsis">
+      Added
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#103-2026-07-02" class="md-nav__link">
+    <span class="md-ellipsis">
+      [1.0.3] - 2026-07-02
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[1.0.3] - 2026-07-02">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#added_14" class="md-nav__link">
+    <span class="md-ellipsis">
+      Added
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#132-2026-08-20" class="md-nav__link">
+    <span class="md-ellipsis">
+      [1.3.2] - 2026-08-20
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[1.3.2] - 2026-08-20">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fixed" class="md-nav__link">
+    <span class="md-ellipsis">
+      Fixed
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#131-2026-08-20" class="md-nav__link">
+    <span class="md-ellipsis">
+      [1.3.1] - 2026-08-20
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[1.3.1] - 2026-08-20">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#changed" class="md-nav__link">
+    <span class="md-ellipsis">
+      Changed
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#130-2026-08-20" class="md-nav__link">
+    <span class="md-ellipsis">
+      [1.3.0] - 2026-08-20
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[1.3.0] - 2026-08-20">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#added" class="md-nav__link">
+    <span class="md-ellipsis">
+      Added
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fixed_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      Fixed
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#127-2026-08-18" class="md-nav__link">
+    <span class="md-ellipsis">
+      [1.2.7] - 2026-08-18
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[1.2.7] - 2026-08-18">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fixed_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      Fixed
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#added_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      Added
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changed_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      Changed
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#126-2026-08-18" class="md-nav__link">
+    <span class="md-ellipsis">
+      [1.2.6] - 2026-08-18
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[1.2.6] - 2026-08-18">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#removed" class="md-nav__link">
+    <span class="md-ellipsis">
+      Removed
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changed_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      Changed
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#compatibility" class="md-nav__link">
+    <span class="md-ellipsis">
+      Compatibility
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#125-2026-08-17" class="md-nav__link">
+    <span class="md-ellipsis">
+      [1.2.5] - 2026-08-17
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[1.2.5] - 2026-08-17">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fixed_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      Fixed
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changed_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      Changed
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#note" class="md-nav__link">
+    <span class="md-ellipsis">
+      Note
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#124-2026-08-17" class="md-nav__link">
+    <span class="md-ellipsis">
+      [1.2.4] - 2026-08-17
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[1.2.4] - 2026-08-17">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#added_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      Added
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fixed_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      Fixed
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changed_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      Changed
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#123-2026-08-11" class="md-nav__link">
+    <span class="md-ellipsis">
+      [1.2.3] - 2026-08-11
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[1.2.3] - 2026-08-11">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fixed_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      Fixed
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changed_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      Changed
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#122-2026-08-10" class="md-nav__link">
+    <span class="md-ellipsis">
+      [1.2.2] - 2026-08-10
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[1.2.2] - 2026-08-10">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#changed_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      Changed
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#121-2026-08-10" class="md-nav__link">
+    <span class="md-ellipsis">
+      [1.2.1] - 2026-08-10
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[1.2.1] - 2026-08-10">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#added_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      Added
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fixed_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      Fixed
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changed_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      Changed
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#120-2026-07-30" class="md-nav__link">
+    <span class="md-ellipsis">
+      [1.2.0] - 2026-07-30
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[1.2.0] - 2026-07-30">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#added_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      Added
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changed_8" class="md-nav__link">
+    <span class="md-ellipsis">
+      Changed
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fixed_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      Fixed
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#111-2026-07-30" class="md-nav__link">
+    <span class="md-ellipsis">
+      [1.1.1] - 2026-07-30
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[1.1.1] - 2026-07-30">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#changed_9" class="md-nav__link">
+    <span class="md-ellipsis">
+      Changed
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#added_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      Added
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#110-2026-07-29" class="md-nav__link">
+    <span class="md-ellipsis">
+      [1.1.0] - 2026-07-29
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[1.1.0] - 2026-07-29">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#removed_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      Removed
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changed_10" class="md-nav__link">
+    <span class="md-ellipsis">
+      Changed
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#added_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      Added
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#removed_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      Removed
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1019-2026-07-28" class="md-nav__link">
+    <span class="md-ellipsis">
+      [1.0.19] - 2026-07-28
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[1.0.19] - 2026-07-28">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fixed_8" class="md-nav__link">
+    <span class="md-ellipsis">
+      Fixed
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1018-2026-07-28" class="md-nav__link">
+    <span class="md-ellipsis">
+      [1.0.18] - 2026-07-28
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[1.0.18] - 2026-07-28">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fixed_9" class="md-nav__link">
+    <span class="md-ellipsis">
+      Fixed
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1017-2026-07-28" class="md-nav__link">
+    <span class="md-ellipsis">
+      [1.0.17] - 2026-07-28
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[1.0.17] - 2026-07-28">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fixed_10" class="md-nav__link">
+    <span class="md-ellipsis">
+      Fixed
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1016-2026-07-28" class="md-nav__link">
+    <span class="md-ellipsis">
+      [1.0.16] - 2026-07-28
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[1.0.16] - 2026-07-28">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#added_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      Added
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changed_11" class="md-nav__link">
+    <span class="md-ellipsis">
+      Changed
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1015-2026-07-23" class="md-nav__link">
+    <span class="md-ellipsis">
+      [1.0.15] - 2026-07-23
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[1.0.15] - 2026-07-23">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#added_8" class="md-nav__link">
+    <span class="md-ellipsis">
+      Added
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1014-2026-07-23" class="md-nav__link">
+    <span class="md-ellipsis">
+      [1.0.14] - 2026-07-23
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[1.0.14] - 2026-07-23">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fixed_11" class="md-nav__link">
+    <span class="md-ellipsis">
+      Fixed
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1013-2026-07-21" class="md-nav__link">
+    <span class="md-ellipsis">
+      [1.0.13] - 2026-07-21
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[1.0.13] - 2026-07-21">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fixed_12" class="md-nav__link">
+    <span class="md-ellipsis">
+      Fixed
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1012-2026-07-20" class="md-nav__link">
+    <span class="md-ellipsis">
+      [1.0.12] - 2026-07-20
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[1.0.12] - 2026-07-20">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#added_9" class="md-nav__link">
+    <span class="md-ellipsis">
+      Added
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fixed_13" class="md-nav__link">
+    <span class="md-ellipsis">
+      Fixed
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changed_12" class="md-nav__link">
+    <span class="md-ellipsis">
+      Changed
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1011-2026-07-20" class="md-nav__link">
+    <span class="md-ellipsis">
+      [1.0.11] - 2026-07-20
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[1.0.11] - 2026-07-20">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fixed_14" class="md-nav__link">
+    <span class="md-ellipsis">
+      Fixed
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1010-2026-07-20" class="md-nav__link">
+    <span class="md-ellipsis">
+      [1.0.10] - 2026-07-20
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[1.0.10] - 2026-07-20">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#added_10" class="md-nav__link">
+    <span class="md-ellipsis">
+      Added
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#109-2026-07-20" class="md-nav__link">
+    <span class="md-ellipsis">
+      [1.0.9] - 2026-07-20
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[1.0.9] - 2026-07-20">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#changed_13" class="md-nav__link">
+    <span class="md-ellipsis">
+      Changed
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#108-2026-07-20" class="md-nav__link">
+    <span class="md-ellipsis">
+      [1.0.8] - 2026-07-20
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[1.0.8] - 2026-07-20">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fixed_15" class="md-nav__link">
+    <span class="md-ellipsis">
+      Fixed
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#107-2026-07-14" class="md-nav__link">
+    <span class="md-ellipsis">
+      [1.0.7] - 2026-07-14
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[1.0.7] - 2026-07-14">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#added_11" class="md-nav__link">
+    <span class="md-ellipsis">
+      Added
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changed_14" class="md-nav__link">
+    <span class="md-ellipsis">
+      Changed
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#106-2026-07-13" class="md-nav__link">
+    <span class="md-ellipsis">
+      [1.0.6] - 2026-07-13
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[1.0.6] - 2026-07-13">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#added_12" class="md-nav__link">
+    <span class="md-ellipsis">
+      Added
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changed_15" class="md-nav__link">
+    <span class="md-ellipsis">
+      Changed
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#105-2026-07-13" class="md-nav__link">
+    <span class="md-ellipsis">
+      [1.0.5] - 2026-07-13
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[1.0.5] - 2026-07-13">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#changed_16" class="md-nav__link">
+    <span class="md-ellipsis">
+      Changed
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fixed_16" class="md-nav__link">
+    <span class="md-ellipsis">
+      Fixed
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#104-2026-07-07" class="md-nav__link">
+    <span class="md-ellipsis">
+      [1.0.4] - 2026-07-07
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[1.0.4] - 2026-07-07">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#changed_17" class="md-nav__link">
+    <span class="md-ellipsis">
+      Changed
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fixed_17" class="md-nav__link">
+    <span class="md-ellipsis">
+      Fixed
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#added_13" class="md-nav__link">
+    <span class="md-ellipsis">
+      Added
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#103-2026-07-02" class="md-nav__link">
+    <span class="md-ellipsis">
+      [1.0.3] - 2026-07-02
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[1.0.3] - 2026-07-02">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#added_14" class="md-nav__link">
+    <span class="md-ellipsis">
+      Added
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+    <a href="https://github.com/finkeflo/cpi-kafka-adapter-plus/edit/main/docs/changelog.md" title="Edit this page" class="md-content__button md-icon">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="changelog">Changelog<a class="headerlink" href="#changelog" title="Permanent link">&para;</a></h1>
+<p>All notable changes to this project are documented here.</p>
+<p>The format is based on <a href="https://keepachangelog.com/en/1.1.0/">Keep a Changelog</a>
+and the project follows <a href="https://semver.org/">Semantic Versioning</a>. See
+<a href="https://github.com/finkeflo/cpi-kafka-adapter-plus/blob/main/VERSIONING.md">VERSIONING.md</a> for how the adapter version maps to SAP CPI
+iFlow compatibility.</p>
+<h2 id="132-2026-08-20">[1.3.2] - 2026-08-20<a class="headerlink" href="#132-2026-08-20" title="Permanent link">&para;</a></h2>
+<h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Switching the producer retry on made a transactional channel undeployable unless its delivery timeout had been lowered by hand. The adapter never set <code>transaction.timeout.ms</code>, so the client default of 60 s applied, and rather than fixing that it rejected any <code>deliveryTimeoutSeconds</code> at or above 60 — while shipping 120 as the default for that very parameter. Every channel that had not been retuned therefore failed at deployment with a message naming a broker limit the operator had never configured, and the parameter to change sits on a different tab from the retry that triggered the check. The transaction timeout is now derived from the delivery timeout: delivery plus up to 30 s of commit headroom, floored at the 60 s client default so an upgrade cannot narrow a window that was already working, and capped at the broker's <code>transaction.max.timeout.ms</code> of 15 minutes. A delivery timeout beyond that cap is still rejected, but at start-up and by name, instead of surfacing later as an <code>InvalidTxnTimeoutException</code> on the first send. The old rule had it backwards: a transaction that must outlive the send it contains is a property the adapter controls, not a constraint to push onto the configuration.</li>
+<li><code>producerRetryTotalBudgetSeconds</code> now accepts up to 900 s instead of 300. With the shipped delivery timeout of 120 s one transactional attempt costs roughly 215 s in the worst case, so two attempts could not be expressed inside the old bound at all — the budget check rejected a configuration that the newly permitted delivery timeout had just made legitimate. The 300 s bound assumed a synchronous HTTP caller; a Kafka-to-Kafka or scheduled channel has none, and it is precisely those channels that can afford to wait. The guidance is unchanged and still the important part: the budget plus the rest of the integration flow must stay below the caller's timeout, because a caller that gives up and resends duplicates the message outside the adapter's control.</li>
+</ul>
+<h2 id="131-2026-08-20">[1.3.1] - 2026-08-20<a class="headerlink" href="#131-2026-08-20" title="Permanent link">&para;</a></h2>
+<h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
+<ul>
+<li>The receiver's <strong>Retry</strong> and <strong>Diagnostics</strong> option groups moved out of the <strong>Advanced</strong> tab into a tab of their own, <strong>Error Handling</strong>, mirroring the sender direction where dead-letter queue and auto-pause already live there. Advanced had become the drawer everything that was not connection or producing ended up in: transactions, performance tuning, retry and diagnostics side by side, four groups that are consulted at four different moments. Retry and diagnostics are what an operator opens during or after an incident, and they are now one click away from where the sender keeps the same class of settings, so the two directions of one adapter no longer disagree about where failure handling is configured. Nothing else changed — same parameters, same names, same defaults, same descriptions, same validation. Because a tab is presentation only and not part of the metadata variant's identity, this is a micro version: existing integration flows keep every configured value and pick the new layout up without an "Update Version" click.</li>
+</ul>
+<h2 id="130-2026-08-20">[1.3.0] - 2026-08-20<a class="headerlink" href="#130-2026-08-20" title="Permanent link">&para;</a></h2>
+<h3 id="added">Added<a class="headerlink" href="#added" title="Permanent link">&para;</a></h3>
+<ul>
+<li>The receiver direction can now repeat a failed send with a brand-new producer (<code>producerRetryMaxAttempts</code>, default <code>1</code> — off). Kafka's own <code>retries</code> and <code>delivery.timeout.ms</code> only repeat <em>inside</em> one producer instance, so after a <code>NetworkException: Disconnected from node 3</code> the transactional producer is left in a state where nothing on it can succeed and the send fails after roughly 400 ms with no second chance; only a throw-away producer recovers from that. The core of the feature is what it refuses to do: an attempt is only repeated where the previous one provably wrote nothing. A transactional batch that failed <em>before</em> the commit qualifies — the aborted transaction is invisible to <code>read_committed</code> consumers, and the successor producer with the same <code>transactional.id</code> fences the old epoch. A failure <em>inside</em> the commit does not, and never will: <code>KafkaProducer.close()</code> aborts an ongoing transaction only "if it's not already completing" and <code>initTransactions()</code> "awaits its completion" of a commit that has begun, so the batch does get committed and a retry would write it twice. That is documented client behaviour, not a residual risk, so the transaction phase is tracked explicitly and the loop stops with <code>stopReason=COMMIT_OUTCOME_UNKNOWN</code>. A non-transactional single message is repeated on the <em>same</em> producer, because the broker deduplicates on <code>(PID, sequence)</code> and a fresh producer would get a new PID; without <code>enableIdempotence</code> it is not repeated at all rather than silently duplicated. A partially sent non-transactional batch is never repeated, and configuring the retry on such a channel now says so at start-up instead of doing nothing. The parameters are deliberately separate from the consumer's <code>retryDelaySeconds</code> / <code>retryOnlyTransientErrors</code>, which carry exponential-backoff semantics — one option meaning two things depending on channel direction is a support trap. The delay is constant with a one-second floor, because the client has already exhausted an exponential backoff and three sub-second retries only hammer the node that just disappeared. <code>producerRetryTotalBudgetSeconds</code> (default 30 s) bounds all attempts of one message together, and a start-up check rejects a configuration whose worst case cannot fit inside it — the arithmetic is roughly four times <code>deliveryTimeoutSeconds</code> per transactional attempt, not once, because <code>initTransactions()</code>, the metadata block in <code>send()</code> and <code>commitTransaction()</code> are each bounded by <code>max.block.ms</code> on top of the wait for acknowledgements. A retry that could never reach its second attempt is a promise to operations that would only be discovered during the outage it was configured for. Every attempt is reported at ERROR — WARN and INFO never reach the tenant trace, the same invisibility defect fixed in a dozen places in 1.2.7 — via <code>producer.retry.attempt</code>, <code>producer.retry.effect</code>, <code>producer.retry.exhausted</code> and <code>producer.retry.skipped</code>, with <code>effect</code> and <code>exhausted</code> sharing <code>attempts</code> and <code>recovered</code> so "how often does the retry actually rescue a message" is a ratio of two greppable lines. The failure handlers still fire exactly once per message, so three attempts do not count as three failures against the auto-pause and node-fault escalation thresholds. The retry history appears in the MPL status text and attachment, a successful recovery is filterable in Message Monitoring via <code>KafkaRetryAttempts</code>, and the iFlow sees <code>CamelKafkaPlusRetryAttempts</code>.</li>
+<li>The outer retry treats the KAFKA-10902 monitor fault as retriable even under the default <code>producerRetryOnlyTransientErrors=true</code>. <code>IllegalMonitorStateException: current thread is not owner</code> matches no Kafka exception hierarchy, so the classifier reports <code>UNKNOWN_FATAL</code> and the retry would have refused the one failure it was built after — a production trace from 2026-08-20 shows it on two channels of one tenant, in bursts on individual worker nodes, while the same broker served everything else. The classifier has no category for a defect in the client itself, and treating "I do not recognise this" as "the broker has ruled" is how a retry ends up declining the case it exists for. Retrying cannot duplicate: before the commit the failed attempt's transaction is aborted and invisible to <code>read_committed</code>, and on the single path idempotence is a precondition so the broker deduplicates on <code>(PID, sequence)</code>. The exemption is narrow on purpose — it needs a Kafka frame in the stack trace, and it does not reach past the phase rule, so a monitor fault inside the commit still stops with <code>COMMIT_OUTCOME_UNKNOWN</code>. It remains a second line of defence behind the metadata pre-warm and the raised <code>metadata.max.idle.ms</code>, which are what keep the client out of the defective path.</li>
+</ul>
+<h3 id="fixed_1">Fixed<a class="headerlink" href="#fixed_1" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>abortTransaction()</code> after a failed transactional batch has been replaced by a bounded <code>close()</code>. After a network disconnect the abort throws itself — it is exactly the broken state it was meant to clean up — and the suppressed exception it added obscured the original cause. <code>close(Duration)</code> aborts an ongoing transaction that is not already completing, and the next producer with the same <code>transactional.id</code> cleans up whatever is left, so the explicit abort bought nothing.</li>
+<li>The consumer's liveness heartbeat was written to the tenant trace file at ERROR every 5 minutes, roughly 288 red lines per day and endpoint that reported only that nothing had happened. The recurring <code>reason=INTERVAL</code> tick is now INFO; the <code>reason=STATE_CHANGE</code> line stays at ERROR because it reports an event rather than a pulse and is bounded. The tick proves only that the scheduler called <code>poll()</code> — not a failure anyone investigates, since an unreachable broker, a rejected credential, a rebalance storm and a stalled partition each already emit their own ERROR — and it cannot even be absent when it matters, because it keeps reporting "alive" while a partition does not advance. At ERROR it therefore bought no evidence while competing with real failures for attention in a file shared with every other integration flow on the tenant. Before 1.2.7 it fired once per poll cycle, where it was every single line the adapter contributed.</li>
+<li>Closing the consumer for a reconnect was logged at WARN, which does not reach the tenant trace file, and the rebuild that follows logs at INFO. A consumer being destroyed and recreated therefore left no visible record at all and was indistinguishable from one that had simply gone quiet — the same WARN-invisibility defect fixed in three other places in 1.2.7. Now ERROR, keeping <code>consecutiveFailures</code>, <code>durationMs</code> and <code>reason</code>.</li>
+<li>The consumer was destroyed and rebuilt on <em>every</em> failed poll once an outage passed the fifth consecutive failure. Neither the failure counter nor the duration window was reset when a reconnect fired, so both thresholds stayed exceeded for as long as the outage lasted — a rebuild storm of the same shape the shared producer was rate-limited against in 1.2.7, only unbounded, and with a 15-second polling interval it meant a fresh <code>KafkaConsumer</code> every 15 seconds for the whole outage. Both counters now reset on reconnect, so they measure failures since the last reconnect and a rebuild happens at most once per five polls or once per 60 seconds.</li>
+<li>Removed an orphaned Javadoc block above <code>logEmitCycleHeartbeat()</code> that still described <code>runEmitCycle()</code>, from which the method had been extracted.</li>
+<li>Consumer poll failures caused by stale OSGi class wiring after hot runtime updates (for example <code>NoClassDefFoundError</code> / <code>ClassNotFoundException</code> with <code>bundle wiring ... no longer valid</code>) now trigger an immediate consumer rebuild instead of waiting for generic reconnect thresholds, and class resolution now falls back to the thread's original context class loader before the system class loader. If wiring is still stale, the adapter now additionally performs a bounded automatic restart of the affected Camel route (max 2 attempts, 15-minute cooldown), mirroring the manual iFlow restart recovery without requiring customers to restart every consumer route themselves.</li>
+<li>MPL error diagnostics now include the full Java stack trace in both trace messages and <code>KafkaAdapterError</code> attachments (instead of a bounded top-stack summary), attachment writing is configurable via <code>writeMplErrorAttachment</code> (default <code>true</code>) on both sender and receiver channels, and successful DLQ routing is now written directly into the MPL status text (<code>moved to dead-letter topic ...</code>) so the outcome is visible without opening attachments.</li>
+</ul>
+<h2 id="127-2026-08-18">[1.2.7] - 2026-08-18<a class="headerlink" href="#127-2026-08-18" title="Permanent link">&para;</a></h2>
+<h3 id="fixed_2">Fixed<a class="headerlink" href="#fixed_2" title="Permanent link">&para;</a></h3>
+<ul>
+<li>A dead-letter producer that became unusable stalled the consumer indefinitely. The producer was created once into a final field with no health check, rebuild or reconnect, so a client that had been fenced, had lost authentication or had hit the KAFKA-10902 monitor fault could never recover. That is worse than it sounds: the dead-letter send is what permits the offset commit, so a failing send meant no commit, the same record polled again forever, and every later message blocked behind it. Observed on a test tenant as a partition that did not advance for over an hour and only recovered when the integration flow was redeployed by hand — the identical failure class the shared producer had already been given <code>producer.rebuild</code> for, left unfixed on the path where its consequence is a stopped consumer rather than one failed message. The client is now rebuilt once and the record retried once when the classification says a fresh client could help, bounded by the same rate limit the shared producer uses so a redelivered record cannot cause a rebuild storm, and <code>RETRIABLE</code> and <code>FATAL_DATA_ERROR</code> deliberately do not rebuild. Because a classification is only a prediction, and <code>RETRIABLE</code> predicts a recovery that a partition standing still has already disproven, three consecutive failures force a rebuild regardless of classification — data errors excepted, where the prediction is not a guess. A rebuild that cannot construct a replacement no longer leaves the helper permanently broken: the next delivery recreates lazily and fails with a named error instead of a <code>NullPointerException</code>. <code>dlq.producer.rebuild.outcome</code> reports what was rebuilt and <code>dlq.producer.rebuild.effect</code> reports whether the retry actually recovered.</li>
+<li>The KAFKA-10902 bounded retry was applied to every producer path except the dead-letter one, which is the path where an unrecovered monitor fault stops a partition. It now wraps the synchronous send there too — and only the synchronous send, never the wait for the acknowledgement, because the duplicate-freedom argument depends on the record never having been appended.</li>
+<li>Three dead-letter failure sites in <code>RecordProcessor</code> still handed the exception to SLF4J as a trailing argument, which the CPI trace appender discards. The one thing an operator needed in order to know <em>why</em> a record could not be dead-lettered — the cause chain — was therefore the one thing missing from the trace, and the failure could only be described as "the send failed". All three now serialise the cause through <code>AdapterDiagnostics</code>, and the retry-exhausted site also states the consequence, that the offset is not committed and the record will be reprocessed, so the stall is readable from the log line rather than inferred from broker offsets days later.</li>
+<li>Eight further log statements carried the marker but still lost their stack trace, in <code>AvroDeserializerHelper</code>, <code>AvroSerializerHelper</code>, <code>CredentialHelper</code>, <code>DlqProducerHelper</code> and <code>RecordProcessor</code>. Each passed <code>e.getMessage()</code> into the text and the exception itself as a trailing SLF4J argument, which the CPI trace appender discards — the same defect that made the original incident undiagnosable, in five files nobody had looked at. All now serialise the cause chain through <code>AdapterDiagnostics</code>.</li>
+<li><code>diagnosticsLevel</code> was offered on sender channels as well, but only the producer reads it, so selecting <code>Full (Verbose)</code> on a sender changed nothing at all. Removed from the sender metadata and from the sender's configuration reference. A control that lies is the same failure mode as instrumentation that never emits, moved into the configuration layer; a conditional test now permits the option on the sender exactly when a consumer-side class reads it.</li>
+<li>The option's description — the tooltip shown in the integration flow editor — claimed <code>FULL</code> adds success baselines, JVM/thread state and per-record detail. It gates exactly one thing: a bounded thread dump attached to the node-fault escalation. Corrected in the metadata and in the configuration reference, where the same false sentence had been copied.</li>
+<li>A quote inside a diagnostic value was not escaped, so a value was wrapped in quotes it also contained. Kafka quotes topic names in its own exception messages and so does this adapter, so the record that motivated the whole contract — <code>Failed to send batch to Kafka topic '…'</code> — would itself have been rendered with three quotes in one field and no way to tell where the value ended. Quotes are now doubled, the rule is documented, and the incident's own message shape is pinned by a test.</li>
+<li>The runbook claimed a <code>KafkaAdapterError</code> header property that is in fact an attachment name, and described the attachment as requiring trace to be enabled when it is written unconditionally. Both corrected, and the second trace-independent channel it never mentioned is now documented.</li>
+<li>The iFlow monitoring publish failure was logged at WARN under a comment explaining that it had to stay visible so a future ADK API change would surface rather than hide. WARN does not reach the tenant trace file, so the stated intent was defeated by the level; it is now reported once at ERROR.</li>
+<li>A failure while closing the DLQ producer was logged at WARN without a marker, although it can mean buffered records were never flushed.</li>
+<li>Enriching a failure with Message Processing Log context could itself throw and replace the exception it was meant to describe: the context map was dereferenced without a null check and the topic default was evaluated eagerly, both outside the <code>try</code>. A <code>finally</code> block performing reflection could also displace an in-flight exception, so a close failure would be reported instead of the binding defect that actually mattered.</li>
+<li>A single flag suppressed <em>every</em> subsequent ADK binding failure once any one of them had been reported, so a second, unrelated binding going dead after a platform upgrade would never be reported at all. Suppression is now per distinct failure, keeping the one-line-per-kind guarantee.</li>
+<li>The producer is now rebuilt when the exception classification says it is unusable, rather than only after a consecutive-failure counter happens to trip. A <code>RETRIABLE</code> or <code>FATAL_DATA_ERROR</code> outcome deliberately does not rebuild — a record that is too large will be exactly as too large on a fresh producer, and rebuilding on a poison message would be a self-inflicted outage. Rebuilds are rate-limited so a failing batch cannot cause a rebuild storm, and their effect is now measured: <code>producer.rebuild.outcome</code> reports what was rebuilt and <code>producer.rebuild.effect</code> reports whether the <em>next</em> send actually recovered, because rebuilding and then having no idea whether it helped was the previous state of affairs.</li>
+<li>
+<p>A transactional send recovering after failures was logged at INFO and therefore invisible in the tenant trace, so recovery looked identical to continued failure.</p>
+</li>
+<li>
+<p>Producer initialisation failures are now always logged at ERROR. The first nine attempts used to be WARN, which does not reach the CPI tenant trace file — so the most common real failure class (credentials, TLS, an unreachable broker) produced nothing visible until the tenth attempt.</p>
+</li>
+<li>Every adapter log line now carries one marker. <code>[CPI-KAFKA-PLUS]</code> competed with <code>[CPI-KAFKA-PLUS-DIAG]</code> on exactly the four most valuable lines, the adapter start failures and endpoint validation messages, so a single grep could not retrieve an incident. <code>CredentialHelper</code> and <code>SecurityConfigHelper</code> carried no marker at all, which excluded the whole credential and TLS failure class from any marker-based search.</li>
+<li>Message Processing Log tracing now works at all. The ADK message-log factory was fetched with <code>camelContext.getRegistry().lookupByName("com.sap.it.api.msglog.adapter.AdapterMessageLogFactory")</code>, but ADK APIs are not Camel registry beans — <code>ITApiFactory</code> resolves them through an OSGi Declarative Services component that binds handlers by an <code>apiType</code> service property, with no named bean involved. The lookup therefore always returned <code>null</code>, tracing was permanently disabled, and that was reported at DEBUG, which never reaches the tenant trace file. It now uses <code>ITApiFactory.getApi(...)</code>, the documented path already used successfully by <code>CredentialHelper</code>, resolved per exchange because the exchange is the context argument.</li>
+<li>Three reflective ADK lookups could never have succeeded, all masked by the same swallowed exception. <code>getMessageLog</code> was looked up with <code>Exchange.class</code> where the ADK declares <code>Object</code>, and <code>Class.getMethod</code> requires an exact parameter-type match — the same defect class as the historical <code>setException(Exception.class)</code> bug. <code>isTraceActive</code>, <code>createTraceMessage</code>, <code>writeTrace</code> and <code>setEncoding</code> were resolved on the platform's internal implementation classes rather than on the interfaces, which fails at <code>invoke</code> with <code>IllegalAccessException</code> for a non-public class. All are now resolved on the ADK interfaces with the declared parameter types, and a new test asserts every signature against the real ADK jars.</li>
+<li>A dead Message Processing Log binding is now reported once at ERROR instead of silently at DEBUG. At DEBUG a broken binding is indistinguishable from a working one, which is exactly how the above stayed unnoticed.</li>
+<li>Error traces now use the <code>RECEIVER_INBOUND_FAULT</code> trace type and carry the full serialised stack trace rather than only the messages of the cause chain.</li>
+<li>Producer send failures are now always logged at ERROR, with the full cause chain and stack trace serialised into the message text. Previously a failure was logged only when its cause matched a three-entry "fatal" allow-list, or after three <em>consecutive</em> failures; an unclassified exception with successful sends in between reset the counter and produced no log line at all. Analysis of a production tenant trace found five send failures across three topics and eighteen minutes for which the adapter emitted exactly zero log lines. The consecutive-failure threshold now governs only whether the producer reconnects — which is what it was for — and both that decision and the classification are reported as fields (<code>fatalClassification</code>, <code>reconnectTriggered</code>, <code>consecutiveFailures</code>).</li>
+<li>Transactional send failures now log the throwable itself instead of only <code>getClass().getSimpleName()</code>, which discarded the message, the cause chain and the stack trace.</li>
+</ul>
+<h3 id="added_1">Added<a class="headerlink" href="#added_1" title="Permanent link">&para;</a></h3>
+<ul>
+<li>New <code>diagnosticsLevel</code> adapter option (<code>STANDARD</code> by default, <code>FULL</code>) with a corresponding field in both the sender and receiver metadata, so verbose extras can be switched on during an investigation. <code>STANDARD</code> remains fully diagnostic on its own: no failure information was moved behind <code>FULL</code>, only genuinely expensive extras such as a bounded thread dump.</li>
+<li>Stable, greppable error codes (<code>CpiKafkaPlusErrorCode</code>, <code>KP-AREA-NNN</code>) that a support ticket can quote, emitted both in the ERROR log line and as an MPL header property so the same fault yields the same code regardless of which path reports it.</li>
+<li>Three-way exception classification (<code>RETRIABLE</code>, <code>FATAL_PRODUCER_UNUSABLE</code>, <code>FATAL_DATA_ERROR</code>, <code>UNKNOWN_FATAL</code>) replacing a three-entry allow-list that let nearly every real failure fall through as "not fatal", including the exception behind the incident. It classifies on the Kafka 4.x <code>ApplicationRecoverableException</code> and <code>RefreshRetriableException</code> base classes rather than enumerating leaf exceptions, so a future client version adding a new leaf is classified correctly without a code change, and tests pin each hierarchy relationship it depends on. An unrecognised exception is reported as <code>UNKNOWN_FATAL</code> rather than being given a confident label, because a classifier that guesses silently is the failure mode this work exists to remove.</li>
+<li>Failures now reach the Message Processing Log independently of whether trace is switched on, via custom header properties (<code>KafkaAdapterErrorCode</code>, <code>KafkaAdapterTopic</code>, <code>KafkaAdapterProducerPath</code>, <code>KafkaAdapterRetryable</code>), the full error block as an attachment, and a <code>FAILED</code> status event so a failed message is marked failed in the monitor instead of appearing successful. MPL tracing was never active in the analysed corpus, which is why the trace-independent channel is the primary one. Error traces are also now written from the consumer and record-processing paths, not only from the producer, and use the fault-specific trace types.</li>
+<li><code>producer.node.fault.escalation</code>: when the same fault — keyed by exception class and error code — recurs five times within twenty minutes on one JVM despite the mitigation, the adapter says so explicitly and names where the node address can be found in the trace record, because the decisive fact in the analysed incident was that every occurrence sat on one worker node out of seven. The counter is guarded so concurrent worker threads cannot lose increments, which matters because multiple threads failing at once is the signal it exists to detect.</li>
+<li>Producer diagnostics now carry the producer path on every line, the resolved <code>client.id</code>, and the measured metadata wait, so a slow or blocking metadata fetch is visible before it becomes a failure — that wait is the exact place the incident occurred. A throttled success heartbeat distinguishes "healthy and quiet" from "not running at all", which previously looked identical in the trace.</li>
+<li><code>DiagnosticContractTest</code> enforces the logging contract mechanically by scanning the sources: one marker, no <code>Throwable</code> handed to SLF4J as a parameter, no second marker, and no ADK reflection resolved on implementation classes. The contract was previously only a written promise. The test found ten violations on its first run.</li>
+<li>Two further contract rules guarding against dead instrumentation: every instrumentation entry point must have a caller outside the class that declares it, and every reflectively resolved ADK method must also be invoked. Both were verified by deliberately breaking them, because a guard that cannot fail is the exact defect it is meant to prevent. The second rule matters more than it looks: resolving a <code>Method</code> and never invoking it compiles, runs, throws nothing and writes nothing.</li>
+<li>
+<p>New ADR 0004 recording the diagnostic logging contract, the runtime facts that forced it, and the alternatives rejected along the way.</p>
+</li>
+<li>
+<p>New docs page <code>docs/troubleshooting.md</code>: how the adapter logs and why, a field reference for the structured failure lines, grep recipes for the tenant trace (including how to read the node field, which is what identified the incident as node-local), the retry bounds, and what the KAFKA-10902 signature means.</p>
+</li>
+<li>Adapter failure lines now carry the identifiers that tie them to one integration-flow message: <code>mplId</code> (<code>SAP_MessageProcessingLogID</code>), <code>applicationId</code> and <code>exchangeId</code>. The tenant trace format reserves four correlation fields per record and all four were empty on every adapter line in the analysed corpus, so a failure could be seen but not attributed to a message, a sender or a payload.</li>
+<li>The producer now avoids the KAFKA-10902 code path instead of only recovering from it. <code>KafkaProducer.waitOnMetadata()</code> blocks in the defective <code>ProducerMetadata.awaitUpdate()</code> only when a topic's partition count is missing from the client's metadata cache, so two changes keep it present: the metadata for each topic is fetched once up front, before any record is submitted, and <code>metadata.max.idle.ms</code> is raised from the client default of 5 minutes to 1 hour. That default mattered more than it appears — it discards the metadata of a topic that has not been produced to for five minutes, so an integration flow producing less often than that entered the vulnerable blocking path on <em>every</em> message. Freshness is unchanged, being governed by <code>metadata.max.age.ms</code>, whose refresh runs on the client's network thread and does not block senders. A failed pre-warm never fails the exchange.</li>
+<li>The producer now survives KAFKA-10902, an open, unfixed defect in the Kafka client that is present in the embedded <code>kafka-clients</code> version. <code>ProducerMetadata.awaitUpdate</code> is <code>synchronized</code> and hands <code>this</code> to <code>SystemTime.waitObject</code>, which re-enters the same monitor and calls <code>Object.wait()</code> at recursion depth 2; when the thread loses ownership the send fails with <code>IllegalMonitorStateException: current thread is not owner</code>. A synchronous failure of that kind is retried, which provably cannot duplicate a record: <code>KafkaProducer.doSend()</code> calls <code>waitOnMetadata(...)</code> before <code>accumulator.append(...)</code>, so the record never entered the accumulator. Retrying is bounded three ways and the first bound reached stops it — at most 3 retries per record, at most 5 across an entire batch regardless of record count, and never past the existing batch deadline. Worst case is 5 extra attempts and about 250 ms per batch. Every outcome is logged, including successful recovery, with <code>retryOutcome</code>, <code>retryCount</code>, <code>batchRetriesLeft</code> and <code>stopReason</code>.</li>
+<li>Producer batch failures now report which of the two throw sites they came from (<code>phase=SYNC_SEND</code> or <code>phase=AWAIT_FUTURE</code>), plus <code>recordIndex</code>, <code>batchSize</code> and <code>elapsedMs</code>. The two previously produced byte-identical messages and could not be told apart in a trace, which matters because only the synchronous one is safe to retry.</li>
+<li>New internal <code>AdapterDiagnostics</code> helper producing single-line, greppable <code>key=value</code> diagnostics under one marker. It serialises the throwable — cause chain, suppressed exceptions and stack frames — into the message text, because the CPI tenant trace appender discards the <code>Throwable</code> argument of a log call and keeps only the rendered message. It also centralises the SLF4J call itself: <code>log.error(text, throwable)</code> would treat a <code>{}</code> occurring inside an exception message as a placeholder and silently drop the stack trace.</li>
+<li>New docs page <code>docs/features/kafka-headers.md</code> listing all consumer, producer, and DLQ Kafka headers with descriptions, types, and conditions.</li>
+</ul>
+<h3 id="changed_1">Changed<a class="headerlink" href="#changed_1" title="Permanent link">&para;</a></h3>
+<ul>
+<li>
+<p><code>transaction.two.phase.commit.enable</code> is no longer described as controlling "Kafka Transaction Protocol V2 (KIP-890)". It is KIP-939 (Two-Phase Commit), a client-side opt-in; KIP-890 is negotiated between client and broker and has no client config of that name. The behaviour of the <code>transactionV2Enabled</code> option is deliberately unchanged — correcting the name would break existing iFlow configurations — and the mismatch is now recorded with the repository's <code>TODO [tech-debt]</code> convention instead of an incorrect comment.</p>
+</li>
+<li>
+<p>The consumer emit-cycle heartbeat is now throttled to at most one line every 5 minutes instead of one line per poll cycle, and is always emitted immediately when the initialisation state changes. Analysis of a production tenant trace showed this single statement produced 32,708 of 32,708 adapter log lines — 3.76% of the entire shared-tenant log — while carrying no information beyond "still alive", and while not a single genuine send failure was logged. It stays at ERROR on purpose, because only ERROR reaches the CPI tenant trace file; the per-cycle detail remains available at DEBUG.</p>
+</li>
+<li>The Java 11 API level is now enforced by the compiler instead of only being documented. <code>pom.xml</code> uses <code>maven.compiler.release=11</code> rather than <code>maven.compiler.source</code>/<code>target</code>, so javac links against the Java 11 API signatures. Previously the compiler linked against the JDK 17 class library, so a Java 12+ API (for example <code>String.formatted</code>) compiled cleanly and only failed at runtime on the tenant with <code>NoSuchMethodError</code> — a gap that <code>CHANGELOG</code> 1.2.2 described but did not close. Verified: a <code>String.formatted</code> call now fails the build. Bytecode remains class-file version 55; the <code>compile-jgss-stubs</code> execution keeps its own <code>release</code> 8 override.</li>
+<li>Standardized pull request quality gates: enforce Conventional Commit format for PR titles in CI, set squash merge to use PR title and body, add repository-managed local Git hooks (<code>commit-msg</code> for Conventional Commits validation, <code>pre-push</code> for fast unit tests + secret scans).</li>
+<li>Added setup script and documentation for local hook and commit-template activation in CONTRIBUTING.md.</li>
+<li>Enforce <code>REVIEW_REQUIRED</code> and <code>CODEOWNER_REVIEW</code> on main branch protection; disallow force push and branch deletion.</li>
+</ul>
+<h2 id="126-2026-08-18">[1.2.6] - 2026-08-18<a class="headerlink" href="#126-2026-08-18" title="Permanent link">&para;</a></h2>
+<h3 id="removed">Removed<a class="headerlink" href="#removed" title="Permanent link">&para;</a></h3>
+<ul>
+<li>The <code>Enable Transaction Protocol V2 (KIP-890)</code> option was removed from the receiver channel UI. It could not do what its label said, and after 1.2.5 it could no longer do anything at all: with the option set it pinned <code>transaction.two.phase.commit.enable</code> to <code>false</code>, and without it the Kafka client default <code>false</code> applied — the same outcome in both positions. Its description was wrong on all three counts it made: it never controlled KIP-890 (the client derives Transaction Protocol V2 solely from the broker's finalized <code>transaction.version</code> feature), it never forced Protocol V1, and it was not a workaround for the <code>IllegalMonitorStateException</code> — that fix is the metadata monitor-fault retry shipped in 1.2.5.</li>
+<li>Measured, not assumed: the <code>enable2_pc</code> field exists only in <code>InitProducerId</code> <strong>v6</strong>, and no released broker advertises it — Confluent 7.9.5 (Kafka 3.9), Apache Kafka 4.0.0, 4.1.0 and 4.2.0 all cap the API at v5. A transactional send succeeds identically with the flag set to <code>true</code> or <code>false</code>, including against a broker with an active authorizer and no <code>TWO_PHASE_COMMIT</code> ACL. The setting never reached a broker.</li>
+</ul>
+<h3 id="changed_2">Changed<a class="headerlink" href="#changed_2" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>transaction.two.phase.commit.enable=false</code> is now pinned unconditionally for every producer, rather than being conditional on the retired option. The safe default no longer depends on a parameter nobody should be setting.</li>
+</ul>
+<h3 id="compatibility">Compatibility<a class="headerlink" href="#compatibility" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Existing iFlows are unaffected and need no rework. The endpoint setter is retained as deprecated, so channel URIs that still carry <code>transactionV2Enabled</code> continue to resolve; the value is ignored. The field itself will be dropped at the next major version.</li>
+</ul>
+<h2 id="125-2026-08-17">[1.2.5] - 2026-08-17<a class="headerlink" href="#125-2026-08-17" title="Permanent link">&para;</a></h2>
+<h3 id="fixed_3">Fixed<a class="headerlink" href="#fixed_3" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Transactional producers no longer request Kafka two-phase commit (KIP-939). In 1.2.4 the default <code>transactionV2Enabled=true</code> was written straight into <code>transaction.two.phase.commit.enable</code>, so transactional producers asked the broker for 2PC — a mode that requires explicit broker support plus a <code>TWO_PHASE_COMMIT</code> ACL and makes transactions non-expiring. The adapter now only ever pins the config to <code>false</code> and never enables 2PC.</li>
+</ul>
+<h3 id="changed_3">Changed<a class="headerlink" href="#changed_3" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>transaction.two.phase.commit.enable=false</code> is applied in <code>ProducerConfigFactory.buildProducerProperties()</code> for <strong>all</strong> producers (regular and transactional) when <code>transactionV2Enabled=false</code>, instead of only in the transactional path.</li>
+</ul>
+<h3 id="note">Note<a class="headerlink" href="#note" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>transactionV2Enabled</code> cannot actually switch off Kafka Transaction Protocol V2 (KIP-890): the client derives V2 usage exclusively from the broker's finalized <code>transaction.version</code> feature, and <code>transaction.two.phase.commit.enable</code> (default <code>false</code>) is an unrelated KIP-939 switch. Do not rely on this parameter as a workaround for <code>IllegalMonitorStateException</code>; that issue is still under investigation.</li>
+</ul>
+<h2 id="124-2026-08-17">[1.2.4] - 2026-08-17<a class="headerlink" href="#124-2026-08-17" title="Permanent link">&para;</a></h2>
+<h3 id="added_2">Added<a class="headerlink" href="#added_2" title="Permanent link">&para;</a></h3>
+<ul>
+<li>New adapter parameter <code>transactionV2Enabled</code> (default <code>true</code>) to disable Kafka Transaction Protocol V2 (KIP-890). Set to <code>false</code> as a workaround for <code>IllegalMonitorStateException</code> in Kafka 4.x clients when a transactional producer is fenced during <code>initTransactions()</code>. V1 behavior (Kafka ≤ 3.x compatible) is stable and avoids the race condition in the <code>TransactionManager</code> sender thread.</li>
+<li>Topic hash in <code>transactional.id</code> schema: the computed ID now includes an 8-character SHA-256 prefix of the target topic name (<code>{prefix}-{topicHash}-{instanceIndex}-{slotId}</code>). This structurally prevents two iFlows with the same <code>transactionalIdPrefix</code> but different target topics from sharing a transactional producer ID and fencing each other.</li>
+<li><code>AdapterTracingHelper.traceError()</code>: enriched MPL error tracing with structured context fields (topic, transactionalId, batchSize, errorType). Called in transactional batch, regular batch, and single-send failure paths. No-op unless CPI Trace level is active.</li>
+</ul>
+<h3 id="fixed_4">Fixed<a class="headerlink" href="#fixed_4" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>InvalidProducerEpochException</code> and <code>IllegalMonitorStateException</code> on transactional producer iFlows sharing the same <code>transactionalIdPrefix</code> across multiple topics.</li>
+<li><code>CAMEL_CONTEXT_NOT_STARTED</code> caused by leading/trailing whitespace in adapter config fields (e.g. topic name). SAP CPI does not URL-encode field values; spaces in query parameter values now trimmed automatically before Camel parses the URI.</li>
+<li>Startup failures now logged as <code>[CPI-KAFKA-PLUS] Adapter failed to start (topic='...') : &lt;cause&gt;</code> before re-throwing, making <code>CAMEL_CONTEXT_NOT_STARTED</code> diagnosable from the trace log.</li>
+</ul>
+<h3 id="changed_4">Changed<a class="headerlink" href="#changed_4" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Startup log now includes the full computed <code>transactional.id</code> example and the effective <code>transactionV2Enabled</code> flag for diagnostics.</li>
+<li><code>transactional.id</code> length is validated at startup; throws <code>IllegalArgumentException</code> if the computed ID exceeds 249 characters (Kafka broker limit).</li>
+</ul>
+<h2 id="123-2026-08-11">[1.2.3] - 2026-08-11<a class="headerlink" href="#123-2026-08-11" title="Permanent link">&para;</a></h2>
+<h3 id="fixed_5">Fixed<a class="headerlink" href="#fixed_5" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Prevented <code>Node Crashed</code> on a plaintext Security Protocol against TLS-only brokers by probing bootstrap listeners for TLS before creating Kafka clients (producer, transactional producer, consumer).</li>
+<li>Detect TLS listeners that reject the probe handshake with a TLS alert before sending a certificate, avoiding false inconclusive results for TLS-version, cipher-suite or fronting-device mismatches.</li>
+<li>Cache TLS listener-probe results per bootstrap/security configuration so transactional batches do not open probe connections and wait on silent endpoints for every message.</li>
+<li>Bounded producer send waits (<code>delivery.timeout.ms</code> + guard margin) so a dead Kafka sender thread cannot block CPI worker threads indefinitely; applies to single-send, batch and DLQ paths.</li>
+<li>Bounded topic-existence checks and removed unbounded <code>flush()</code> on batch abort paths to avoid hangs in the same sender-thread failure mode.</li>
+</ul>
+<h3 id="changed_5">Changed<a class="headerlink" href="#changed_5" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Added <code>scripts/build-esa.sh</code> for CI-parity local ESA builds via Docker and hardened it against macOS <code>.DS_Store</code> clean-step interference.</li>
+<li>Added a <code>tls-mismatch</code> scenario to the producer E2E suite that points a plaintext Security Protocol at a TLS-only listener on the test tenant and fails if the adapter ever lets the node crash again. CI-only; no effect on the adapter runtime.</li>
+</ul>
+<h2 id="122-2026-08-10">[1.2.2] - 2026-08-10<a class="headerlink" href="#122-2026-08-10" title="Permanent link">&para;</a></h2>
+<h3 id="changed_6">Changed<a class="headerlink" href="#changed_6" title="Permanent link">&para;</a></h3>
+<ul>
+<li>CI now fails a pull request that leaves <code>CHANGELOG.md</code> untouched, enforcing a rule that was documented but unchecked. Add the <code>no-changelog</code> label to a pull request that genuinely needs no entry. <code>CONTRIBUTING.md</code> states the rule per pull request instead of per commit, since merges are squashed into a single commit on <code>main</code>.</li>
+<li>Regenerated <code>THIRD-PARTY.txt</code>: the Confluent test dependencies are pinned to 7.9.9 in <code>pom.xml</code>, but the generated license list still named 7.9.8. No dependency change.</li>
+<li>CI now fails when <code>THIRD-PARTY.txt</code> no longer matches the resolved dependencies. Dependency bumps change the versions without regenerating the file, which is how it drifted twice.</li>
+<li>Corrected the documented bytecode target from Java 8 to Java 11 in <code>CONTRIBUTING.md</code>, <code>README.md</code> and the PR template. <code>maven.compiler.source</code>/<code>target</code> have been <code>11</code> since the initial release, so the "Java 8 bytecode" claim was never accurate — class-file version 55 cannot load on a Java 8 JVM at all. The API constraint is retained and restated: <code>source</code>/<code>target</code> link against the JDK 17 class library, so a Java 12+ API compiles but fails at runtime.</li>
+</ul>
+<h2 id="121-2026-08-10">[1.2.1] - 2026-08-10<a class="headerlink" href="#121-2026-08-10" title="Permanent link">&para;</a></h2>
+<h3 id="added_3">Added<a class="headerlink" href="#added_3" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Added a maintainer-only, manually triggered <code>Deploy to CPI (E2E tenant)</code> GitHub Actions workflow (<code>workflow_dispatch</code>, environment-protected, restricted to the maintainer) to build and deploy a chosen branch/tag directly to the CPI E2E test tenant via the Integration Content OData API (<code>IntegrationAdapterDesigntimeArtifacts</code> + <code>DeployIntegrationAdapterDesigntimeArtifact</code>), enabling pre-release E2E testing without needing a full release cycle first. No effect on the adapter runtime; CI-only tooling.</li>
+<li>Chained the existing <code>e2e-consumer-tests.yml</code> / <code>e2e-producer-tests.yml</code> suites (now also callable as reusable workflows via <code>workflow_call</code>) as an automated post-deploy round-trip smoke test in <code>Deploy to CPI (E2E tenant)</code>, closing #15.</li>
+</ul>
+<h3 id="fixed_6">Fixed<a class="headerlink" href="#fixed_6" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Fixed silent message loss when an iFlow swallowed a processing error internally — for example via an exception subprocess, or an Error End event in a sub-iFlow called with ProcessDirect. Camel's error handler clears the exception once it is marked as handled, so <code>exchange.getException()</code> came back <code>null</code> and the record looked successfully processed: the consumer committed the Kafka offset and the message was dropped without ever reaching its destination and without an error in the MPL. The consumer now additionally checks Camel's <code>Exchange.FAILURE_HANDLED</code> flag and raises a <code>CamelExchangeException</code> (chaining the original cause from <code>Exchange.EXCEPTION_CAUGHT</code>, so the DLQ record and the MPL entry still show the real root cause), which blocks the offset commit so the record is redelivered or routed to the DLQ. Because a swallowed error is deterministic and would fail identically on retry, it is classified as a permanent error and — with the default <code>retryOnlyTransientErrors=true</code> — goes straight to the DLQ instead of burning <code>dlqMaxRetries</code> attempts.</li>
+<li><strong>Behaviour change, no opt-in:</strong> iFlows that deliberately catch an error and complete via an exception subprocess were previously treated as success and had their offset committed. They are now treated as failures and will be redelivered (or routed to the DLQ once <code>dlqMaxRetries</code> is exhausted). If an iFlow is <em>meant</em> to absorb certain errors and acknowledge the record anyway, handle them so the route completes normally instead of terminating in the exception subprocess. Routes using <code>continued(true)</code> semantics — where the error is ignored and the original route runs to completion — are deliberately <strong>not</strong> affected and still commit their offsets.</li>
+<li>Fixed connection failures being reported only as <code>TimeoutException: Topic ... not present in metadata after N ms</code>. Kafka uses that one message whenever no topic metadata arrives, so rejected credentials, a failed TLS handshake and a security protocol that does not match the broker's listener all looked like a missing topic. The producer's topic probe already detected them but discarded the exception; it now keeps the cause, and the send error carries it in the message text and as a suppressed exception. Rejected authentication and TLS handshake failures fail the exchange immediately (354 ms instead of a full timeout in a local test) because they would recur; a probe that merely timed out does not, since the send may still succeed. Authorization errors are excluded — a missing DESCRIBE permission says nothing about producing.</li>
+<li><strong>Behaviour change, no opt-in:</strong> a send to a topic that does not exist is now rejected by the adapter. On clusters with <code>auto.create.topics.enable=true</code> — the Apache Kafka default, switched off on Confluent Cloud and most managed offerings — the first send previously created the topic implicitly; such topics must now be created explicitly. A topic that was only just created is not affected: a missing topic is re-checked briefly before the send fails, so "create the topic, then send" keeps working.</li>
+<li>Fixed a non-TLS <code>securityProtocol</code> against a TLS-only broker being undiagnosable: the adapter now names the protocol as the likely cause. Kafka cannot report this as a handshake error, because a <code>PLAINTEXT</code>/<code>SASL_PLAINTEXT</code> client is dropped before any negotiation. Also logged at deployment time, and by the Sender on repeated poll failures.</li>
+</ul>
+<h3 id="changed_7">Changed<a class="headerlink" href="#changed_7" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Security Protocol</strong> dropdown entries now state whether TLS is used: <code>SASL_SSL (SASL over TLS)</code>, <code>SSL (TLS, certificate authentication)</code>, <code>SASL_PLAINTEXT (no TLS)</code>, <code>PLAINTEXT (no TLS, no authentication)</code>. Values are unchanged.</li>
+<li><strong>SSL Keystore Alias</strong> help text now leads with the common case: empty is correct for brokers with a publicly trusted certificate (e.g. Confluent Cloud) and TLS stays fully active — the alias is only for a private CA, a self-signed certificate, or mTLS.</li>
+<li>Both ship as micro bumps edited in place per SAP's versioning rules (<code>metadata-receiver-1.1.1.xml</code> → <code>1.1.2</code>, <code>metadata-sender-1.2.0.xml</code> → <code>1.2.1</code>), so existing channels in <strong>both</strong> directions pick them up automatically with all settings preserved.</li>
+<li>Docs: the security protocols now have a "when to use" column, plus a troubleshooting section for the <code>Topic ... not present in metadata</code> symptom in <a href="docs/security/authentication.md">Authentication</a>.</li>
+<li><code>VERSIONING.md</code> now records the ADK rule that a micro bump must edit its variant file in place — a second file for the same direction is rejected with <em>"All Receivers should have different significant version (X.X. Micro version ignored)"</em>.</li>
+<li><code>.gitignore</code> now covers local AI coding agent state; shared instruction files stay tracked.</li>
+<li>Test infrastructure: <code>KafkaTestInfrastructure.createTopic</code>/<code>createSaslTopic</code> now poll until the broker serves the new topic in metadata, instead of returning as soon as the controller accepted the request.</li>
+</ul>
+<h2 id="120-2026-07-30">[1.2.0] - 2026-07-30<a class="headerlink" href="#120-2026-07-30" title="Permanent link">&para;</a></h2>
+<h3 id="added_4">Added<a class="headerlink" href="#added_4" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Added a <strong>Streaming (Continuous) consumption mode</strong> for the Sender (Consumer) adapter via the new <code>consumptionMode</code> option (<code>SCHEDULED</code> default | <code>STREAMING</code>). In <code>STREAMING</code> mode the consumer uses Camel's greedy scheduling: as long as a <code>poll()</code> returns records the next poll fires immediately with no delay, so records are consumed continuously with minimal latency; when the topic is idle the consumer only waits out the poll timeout (<code>batchTimeout</code>) plus a fixed 1 second heartbeat delay before retrying (no latency cost — <code>poll()</code> returns as soon as records arrive). This mirrors the standard SAP Kafka adapter's continuous behaviour and eliminates the up-to-<code>pollingIntervalSeconds</code> latency of scheduled polling. Delivered as the new <code>metadata-sender-1.2.0.xml</code> variant (Consumption tab → "Consumption Mode"); existing iFlows keep the frozen <code>metadata-sender-1.1.0.xml</code> until "Update Version". In <code>STREAMING</code> mode the <code>pollingIntervalSeconds</code> and <code>drainEnabled</code> fields are ignored (greedy scheduling replaces the interval/drain mechanism) and are greyed out in the UI. Streaming is freely combinable with batch mode. In <code>STREAMING</code> the start-up validations for the drain-related fields (<code>drainEnabled</code> + <code>AUTO</code> commit, <code>minBacklogToDrain</code> bounds) and for <code>pollingIntervalSeconds</code> are skipped, so a stale value left over from a <code>SCHEDULED</code> configuration cannot block the iFlow from starting. Consumer-only; the Receiver line is unchanged.</li>
+</ul>
+<h3 id="changed_8">Changed<a class="headerlink" href="#changed_8" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Removed <strong>Individual Exchanges (No Batching)</strong> (<code>SPLIT_EXCHANGES</code>) from the Batch Output Format dropdown in <code>metadata-sender-1.2.0.xml</code>. <code>batchMode = false</code> is fully equivalent and is the recommended way to process records individually. Existing iFlow channel configs that already store <code>SPLIT_EXCHANGES</code> continue to work unchanged — the runtime still handles the value for backward compatibility.</li>
+</ul>
+<h3 id="fixed_7">Fixed<a class="headerlink" href="#fixed_7" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Fixed a consumer shutdown race where <code>doStop()</code> could close the <code>KafkaConsumer</code> on the shutdown thread while the scheduler's poll thread was still inside <code>poll()</code>/commit, logging <code>KafkaConsumer is not safe for multi-threaded access</code> and skipping a clean close (missed <code>LeaveGroup</code>, slower rebalance after undeploy/redeploy). <code>doStop()</code> now waits (bounded) until Camel reports polling has ceased before closing, guaranteeing single-threaded access. Pre-existing behaviour for scheduled polling too; surfaced and validated by the new greedy-streaming integration test.</li>
+</ul>
+<h2 id="111-2026-07-30">[1.1.1] - 2026-07-30<a class="headerlink" href="#111-2026-07-30" title="Permanent link">&para;</a></h2>
+<h3 id="changed_9">Changed<a class="headerlink" href="#changed_9" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Reorganized the Sender (Consumer) adapter UI into a clearer, data-flow-oriented tab layout (Connection · Consumption · Advanced · Message Handling · Avro/Schema Registry · Error Handling). The new fetch-tuning fields (<code>fetchMinBytes</code>, <code>fetchMaxWaitMs</code>) now live under Advanced → Fetch Tuning next to <code>maxPartitionFetchSizeKb</code>. Pure re-layout: all <code>ReferenceName</code>s and defaults are unchanged, so existing iFlow channels keep working after "Update Version".</li>
+<li>Reorganized the Receiver (Producer) adapter UI symmetrically (Connection · Producing · Advanced · Message Handling · Avro/Schema Registry), moving Header Mapping onto the Producing tab and Transactions + Performance Tuning onto Advanced. Delivered as the new <code>metadata-receiver-1.1.1.xml</code> variant; the frozen <code>metadata-receiver-1.0.0.xml</code> is untouched. No <code>ReferenceName</code>/default changes.</li>
+<li>Relabeled the consumer <code>batchSize</code> field to <strong>"Max Records per IFlow Run (MPL)"</strong> to clarify that it groups Kafka records into a single IFlow execution (one MPL per batch).</li>
+<li>Relabeled the consumer <code>batchTimeout</code> field to <strong>"Poll Timeout (ms)"</strong>, moved it to Consumption → Polling, and removed its <code>batchMode</code> edit condition. It is the per-poll <code>poll()</code> blocking timeout and applies to every poll cycle regardless of batch mode; the previous label/placement were misleading.</li>
+<li>Relabeled the producer <code>producerBatchSizeKb</code> field to <strong>"Producer Batch Size (KB)"</strong> to distinguish it from the "Batch Send Mode" (<code>producerBatchMode</code>) option.</li>
+</ul>
+<h3 id="added_5">Added<a class="headerlink" href="#added_5" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Added default-value assertions for <code>fetchMinBytes</code> (1) and <code>fetchMaxWaitMs</code> (500) in <code>CpiKafkaPlusComponentTest</code>, closing the CONTRIBUTING gap for the endpoint options introduced in 1.1.0. Test-only; no runtime change.</li>
+</ul>
+<h2 id="110-2026-07-29">[1.1.0] - 2026-07-29<a class="headerlink" href="#110-2026-07-29" title="Permanent link">&para;</a></h2>
+<h3 id="removed_1">Removed<a class="headerlink" href="#removed_1" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Removed the dead legacy <code>metadata.xml</code> (superseded by the <code>metadata-sender-*.xml</code> / <code>metadata-receiver-*.xml</code> split; unreferenced by the build). No adapter behavior change.</li>
+</ul>
+<h3 id="changed_10">Changed<a class="headerlink" href="#changed_10" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Breaking (headers only):</strong> The single-message producer no longer sets <code>CamelKafkaTopic</code>, <code>CamelKafkaPartition</code>, <code>CamelKafkaOffset</code>, or <code>CamelKafkaTimestamp</code> response headers. It now sets the adapter-native <code>CpiKafkaPlusTopic</code>, <code>CpiKafkaPlusPartition</code>, <code>CpiKafkaPlusOffset</code>, <code>CpiKafkaPlusTimestamp</code>, and <code>CpiKafkaPlusStatus</code> (<code>"OK"</code>) headers instead, consistent with the batch producer and consumer. <code>SAP_Receiver</code> is unchanged. <strong>Action required:</strong> any iFlow reading the old <code>CamelKafka*</code> headers after a single-message Kafka Adapter (Out) step (e.g. the E2E producer test iFlows) must be updated to read the new <code>CpiKafkaPlus*</code> headers. (#84, #85)</li>
+</ul>
+<h3 id="added_6">Added<a class="headerlink" href="#added_6" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Added <code>fetchMinBytes</code> (<code>fetch.min.bytes</code>) and <code>fetchMaxWaitMs</code> (<code>fetch.max.wait.ms</code>) consumer endpoint properties, exposed in the adapter UI, to enable true broker-side batching and reduce small/frequent CPI executions under low load. Defaults (1 / 500) match the Kafka client defaults, so existing configurations are unaffected unless explicitly changed. UI-visible via the new <code>metadata-sender-1.1.0.xml</code> variant (minor bump to <code>1.1.0</code>); existing iFlow channels stay on <code>1.0.19</code> until "Update Version" is used. (#88)</li>
+<li>Added <code>CpiKafkaPlusStatus</code> header (value <code>"OK"</code>) to the batch producer response, alongside the existing <code>&lt;status&gt;OK&lt;/status&gt;</code> XML summary body, for consistent success signaling. (#85)</li>
+</ul>
+<h3 id="removed_2">Removed<a class="headerlink" href="#removed_2" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Removed the dead <code>embedXmlValues</code> endpoint property, which was never wired into the <code>XML_LIST</code> batch formatting code path and had no UI exposure. The actual behavior (auto-detecting and embedding XML-looking values, falling back to CDATA text otherwise) is unchanged. (#89)</li>
+</ul>
+<h2 id="1019-2026-07-28">[1.0.19] - 2026-07-28<a class="headerlink" href="#1019-2026-07-28" title="Permanent link">&para;</a></h2>
+<h3 id="fixed_8">Fixed<a class="headerlink" href="#fixed_8" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Re-released to fix broken versions inside metadata resulting from a CI bug.</li>
+</ul>
+<h2 id="1018-2026-07-28">[1.0.18] - 2026-07-28<a class="headerlink" href="#1018-2026-07-28" title="Permanent link">&para;</a></h2>
+<h3 id="fixed_9">Fixed<a class="headerlink" href="#fixed_9" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Fixed bug in GitHub Actions release workflow that wiped uncommitted version bumps.</li>
+</ul>
+<h2 id="1017-2026-07-28">[1.0.17] - 2026-07-28<a class="headerlink" href="#1017-2026-07-28" title="Permanent link">&para;</a></h2>
+<h3 id="fixed_10">Fixed<a class="headerlink" href="#fixed_10" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Updated GitHub Actions release workflow to only target active minor version variants and avoid replacing <code>version::</code> in frozen metadata files.</li>
+</ul>
+<h2 id="1016-2026-07-28">[1.0.16] - 2026-07-28<a class="headerlink" href="#1016-2026-07-28" title="Permanent link">&para;</a></h2>
+<h3 id="added_7">Added<a class="headerlink" href="#added_7" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Receiver UI</strong>: Exposed transactional producer settings (<code>enableTransactions</code>, <code>transactionalIdPrefix</code>, <code>maxConcurrentTransactions</code>) in the adapter variant metadata so they are configurable via the Integration Suite UI.</li>
+</ul>
+<h3 id="changed_11">Changed<a class="headerlink" href="#changed_11" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Java Upgrade</strong>: Upgraded compiler source/target compatibility from Java 8 to <strong>Java 11</strong>.</li>
+<li><strong>Kafka Upgrade</strong>: Upgraded Apache Kafka client library from 3.x to <strong>4.x</strong> (<code>kafka-clients 4.3.1</code>).</li>
+<li><strong>Dependency Optimization</strong>: Excluded default multi-platform <code>zstd-jni</code> from <code>kafka-clients</code> and replaced it with a targeted <code>linux_amd64</code> variant, significantly reducing the final <code>.esa</code> archive size.</li>
+<li><strong>Deprecation Cleanup</strong>: Removed deprecated <code>ProducerConfig.RETRIES_CONFIG</code> from DLQ producer (now managed via <code>delivery.timeout.ms</code>) and <code>SslConfigs.SSL_PROTOCOL_CONFIG</code> (relying on Kafka 4.x TLSv1.3 default).</li>
+<li><strong>OSGi Compatibility</strong>: Refactored <code>org.ietf.jgss</code> empty security stubs into an isolated compiler execution block (<code>src/stubs/java</code> under JDK 8 release target) to avoid JPMS split-package errors on Java 11+.</li>
+<li><strong>CI Workflows</strong>: Renamed manual ESA preview workflow to "Build ESA Preview" to resolve a GitHub Actions sidebar display bug.</li>
+<li><strong>Documentation</strong>: Aligned <code>CONTRIBUTING.md</code> with FlowMate toolkit standards, including rules for Conventional Commits and Changelog Enforcement.</li>
+</ul>
+<h2 id="1015-2026-07-23">[1.0.15] - 2026-07-23<a class="headerlink" href="#1015-2026-07-23" title="Permanent link">&para;</a></h2>
+<h3 id="added_8">Added<a class="headerlink" href="#added_8" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Producer (Receiver adapter)</strong>: Added optional Transactional Batching mode (ADR 0001). When <code>enableTransactions</code> is enabled, each batch is sent within an isolated Kafka transaction (<code>producer.beginTransaction()</code>, <code>commitTransaction()</code>). A bounded number of transaction IDs (<code>transactionalIdPrefix</code>) are reused across worker nodes to avoid producer fencing and coordinator bloat.</li>
+</ul>
+<h2 id="1014-2026-07-23">[1.0.14] - 2026-07-23<a class="headerlink" href="#1014-2026-07-23" title="Permanent link">&para;</a></h2>
+<h3 id="fixed_11">Fixed<a class="headerlink" href="#fixed_11" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Producer (Receiver adapter)</strong>: Configured Kafka topics are now resolved at runtime from Camel Simple expressions, including header and exchange-property lookups (e.g. <code>${header.topic}</code>, <code>${property.topic}</code>). Property-alias expressions are normalized to exchange properties for CPI compatibility, and the adapter fails fast when an expression cannot be resolved to a concrete topic.</li>
+</ul>
+<h2 id="1013-2026-07-21">[1.0.13] - 2026-07-21<a class="headerlink" href="#1013-2026-07-21" title="Permanent link">&para;</a></h2>
+<h3 id="fixed_12">Fixed<a class="headerlink" href="#fixed_12" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>JSON Batch Parser</strong>: Fixed parsing of BadgerFish-style JSON arrays generated by the standard SAP CPI XML to JSON Converter for <code>headers</code> objects containing duplicate keys.</li>
+</ul>
+<h2 id="1012-2026-07-20">[1.0.12] - 2026-07-20<a class="headerlink" href="#1012-2026-07-20" title="Permanent link">&para;</a></h2>
+<h3 id="added_9">Added<a class="headerlink" href="#added_9" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Producer (Receiver adapter)</strong>: Support for configurable header mapping (<code>allowedHeaders</code>). Headers matching the pattern will be sent to Kafka.</li>
+<li><strong>Producer (Receiver adapter)</strong>: Batch records (JSON/XML) can now contain explicit <code>headers</code> that bypass the exchange filter and overwrite exchange headers of the same name.</li>
+</ul>
+<h3 id="fixed_13">Fixed<a class="headerlink" href="#fixed_13" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>XML Batch Parser</strong>: Fixed a critical bug where <code>&lt;headers&gt;</code> tags nested inside the XML payload of a record were falsely extracted.</li>
+</ul>
+<h3 id="changed_12">Changed<a class="headerlink" href="#changed_12" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Dependencies</strong>: Bumped <code>awaitility</code> to 4.3.0 and <code>jacoco-maven-plugin</code> to 0.8.15.</li>
+</ul>
+<h2 id="1011-2026-07-20">[1.0.11] - 2026-07-20<a class="headerlink" href="#1011-2026-07-20" title="Permanent link">&para;</a></h2>
+<h3 id="fixed_14">Fixed<a class="headerlink" href="#fixed_14" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Producer (Receiver adapter)</strong>: Fixed an issue where the batch mode would reject a single JSON object. It now correctly wraps a single object into an array, accommodating SAP CPI's standard XML-to-JSON conversion behavior where arrays of size 1 are flattened to single objects.</li>
+</ul>
+<h2 id="1010-2026-07-20">[1.0.10] - 2026-07-20<a class="headerlink" href="#1010-2026-07-20" title="Permanent link">&para;</a></h2>
+<h3 id="added_10">Added<a class="headerlink" href="#added_10" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Producer (Receiver adapter) now also sets <code>CpiKafkaPlusTopic</code> on the response, mirroring the consumer's header name (same value as the existing <code>CamelKafkaTopic</code>/<code>SAP_Receiver</code>). Lets the same downstream mapping script read the topic on both consumer and producer sides. <code>CpiKafkaPlusConsumerGroup</code> remains consumer-only (no such concept on the producer side).</li>
+</ul>
+<h2 id="109-2026-07-20">[1.0.9] - 2026-07-20<a class="headerlink" href="#109-2026-07-20" title="Permanent link">&para;</a></h2>
+<h3 id="changed_13">Changed<a class="headerlink" href="#changed_13" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Breaking (runtime headers only, no channel/metadata impact):</strong> renamed the producer (Receiver adapter) response headers to match the consumer's naming convention, dropping the redundant <code>Batch</code> infix: <code>CpiKafkaPlusBatchRecordCount</code> → <code>CpiKafkaPlusRecordCount</code>, <code>CpiKafkaPlusBatchFirstOffset</code> → <code>CpiKafkaPlusFirstOffset</code>, <code>CpiKafkaPlusBatchLastOffset</code> → <code>CpiKafkaPlusLastOffset</code>, <code>CpiKafkaPlusBatchPartitions</code> → <code>CpiKafkaPlusPartitions</code>. <code>CpiKafkaPlusBatchInputFormat</code>/<code>CpiKafkaPlusBatchOutputFormat</code> are unaffected. If any downstream flow step (Groovy, Mapping, Router) reads the old names, update it to the new ones.</li>
+</ul>
+<h2 id="108-2026-07-20">[1.0.8] - 2026-07-20<a class="headerlink" href="#108-2026-07-20" title="Permanent link">&para;</a></h2>
+<h3 id="fixed_15">Fixed<a class="headerlink" href="#fixed_15" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Receiver variant was missing the ADK <code>IsRequestResponse</code> flag, so SAP Cloud Integration rejected the adapter with "is not supported for the adapter" on <strong>Send</strong> and <strong>Request-Reply</strong> steps. It only worked on a plain End Message Event channel. Now works on Send/Request-Reply too, and the Request-Reply call returns the producer result in the response body.</li>
+</ul>
+<h2 id="107-2026-07-14">[1.0.7] - 2026-07-14<a class="headerlink" href="#107-2026-07-14" title="Permanent link">&para;</a></h2>
+<h3 id="added_11">Added<a class="headerlink" href="#added_11" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Design-time validation for <code>pollingIntervalSeconds</code> (sender): the configuration dialog in the Web UI now rejects values outside 1-21600 immediately, instead of only at IFlow start. (#44)</li>
+<li>Design-time validation for <code>credentialAlias</code> (sender + receiver): now enforced as non-empty when Security Protocol is <code>SASL_SSL</code> or <code>SASL_PLAINTEXT</code>.</li>
+</ul>
+<h3 id="changed_14">Changed<a class="headerlink" href="#changed_14" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Renamed the <code>credentialAlias</code> GUI label from "SASL Credential Alias" to "Credential Alias" (sender + receiver). Cosmetic only; the underlying parameter name and existing channel configurations are unaffected.</li>
+<li>Increased producer default <code>maxRequestSizeKb</code> from 1024 KB (1 MB) to 5120 KB (5 MB).</li>
+<li>Increased producer default <code>producerBatchSizeKb</code> from 249 KB to 1024 KB (1 MB); removed a stale in-code comment referencing a 250 KB CPI message-size tier that does not currently apply.</li>
+</ul>
+<h2 id="106-2026-07-13">[1.0.6] - 2026-07-13<a class="headerlink" href="#106-2026-07-13" title="Permanent link">&para;</a></h2>
+<p>Test and CI hardening release; no runtime behavior changes.</p>
+<h3 id="added_12">Added<a class="headerlink" href="#added_12" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Real OSGi resolution integration test that verifies the ESA standalone bundles resolve in an isolated OSGi runtime, including a negative guard for unresolvable input.</li>
+</ul>
+<h3 id="changed_15">Changed<a class="headerlink" href="#changed_15" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Scoped the ESA-producing OSGi resolution check to a dedicated <code>osgi-resolution</code> Maven profile and CI job, so regular builds and integration-test shards are not slowed.</li>
+<li>Made ESA selection in the resolution test deterministic (fails fast on an ambiguous <code>target/</code> state) and clean up the OSGi framework storage directory after each run.</li>
+</ul>
+<h2 id="105-2026-07-13">[1.0.5] - 2026-07-13<a class="headerlink" href="#105-2026-07-13" title="Permanent link">&para;</a></h2>
+<p>Release focused on runtime dependency maintenance and CI stability.</p>
+<h3 id="changed_16">Changed<a class="headerlink" href="#changed_16" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Updated runtime dependencies: <code>avro</code> 1.11.5 → 1.12.1, <code>confluent</code> 7.9.5 → 7.9.8, and <code>json-schema-validator</code> 1.0.87 → 1.5.9.</li>
+<li>Updated build tooling: enforcer, license plugin, compiler, animal-sniffer, surefire/failsafe, dependency, antrun, and ASM.</li>
+<li>Sharded integration tests across 3 CI jobs to reduce wall-clock build time.</li>
+</ul>
+<h3 id="fixed_16">Fixed<a class="headerlink" href="#fixed_16" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Hardened the OSGi bundle test to validate the current build artifact instead of stale jars in <code>target/</code>.</li>
+<li>Pinned <code>commons-io:2.22.0</code> for Testcontainers/Ryuk compatibility.</li>
+</ul>
+<h2 id="104-2026-07-07">[1.0.4] - 2026-07-07<a class="headerlink" href="#104-2026-07-07" title="Permanent link">&para;</a></h2>
+<p>Dependency maintenance release. Keeps the adapter deployable on SAP CPI while
+updating third-party libraries surfaced by dependency scanning.</p>
+<h3 id="changed_17">Changed<a class="headerlink" href="#changed_17" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Updated <code>kafka-clients</code> 3.9.1 → 3.9.2.</li>
+<li>Updated Jackson (core/databind/dataformats/datatypes) 2.16.0 → 2.22.0.</li>
+<li>Updated test dependency <code>commons-lang3</code> 3.14.0 → 3.20.0.</li>
+</ul>
+<h3 id="fixed_17">Fixed<a class="headerlink" href="#fixed_17" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Restored CPI-compatible LZ4 compression after the Kafka 3.9.2 bump: excluded the
+  <code>at.yawk.lz4:lz4-java</code> fork (broken OSGi manifest that fails the CPI OSGi resolver)
+  and pinned the well-behaved <code>org.lz4:lz4-java:1.8.0</code>, embedded in the fat bundle.</li>
+</ul>
+<h3 id="added_13">Added<a class="headerlink" href="#added_13" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>maven-enforcer</code> build guard that fails early if a known CPI-incompatible transitive
+  dependency is pulled in.</li>
+<li>ESA content check in the preview build: fails if any stray standalone jar escapes the
+  fat bundle.</li>
+<li>Dependabot configuration for Maven and GitHub Actions (Camel excluded — provided by CPI).</li>
+</ul>
+<h2 id="103-2026-07-02">[1.0.3] - 2026-07-02<a class="headerlink" href="#103-2026-07-02" title="Permanent link">&para;</a></h2>
+<p>First public release.</p>
+<h3 id="added_14">Added<a class="headerlink" href="#added_14" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Kafka Sender adapter</strong> (Consumer → CPI) and <strong>Kafka Receiver adapter</strong> (CPI → Kafka Producer).</li>
+<li><strong>Batch processing</strong> in JSON_ARRAY, XML_LIST and SPLIT_EXCHANGES modes.</li>
+<li><strong>Avro / Confluent Schema Registry</strong> serialization and deserialization.</li>
+<li><strong>Security:</strong> SASL/PLAIN, SASL/SCRAM, SSL/TLS and mTLS.</li>
+<li><strong>At-least-once delivery</strong> via manual offset commit after successful processing, with
+  durable per-partition offset tracking that survives consumer-group rebalances.</li>
+<li><strong>Dead Letter Queue</strong> routing for deserialization / poison-pill failures.</li>
+<li><strong>CPI MPL tracing</strong> and IFlow connection-status monitoring.</li>
+<li><strong>Configurable polling</strong> with rebalance-safe consumer-group handling.</li>
+<li><strong>Header-based routing</strong> — dynamic topic, key and partition override via exchange headers.</li>
+<li><strong>Semantic adapter versioning</strong> aligned with SAP CPI's compatibility model.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    <script id="__config" type="application/json">{"base": "..", "features": ["navigation.tabs", "navigation.sections", "search.highlight", "content.code.copy", "content.action.edit"], "search": "../assets/javascripts/workers/search.f8cc74c7.min.js", "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.c8b220af.min.js"></script>
+      
+    
+  </body>
+</html>

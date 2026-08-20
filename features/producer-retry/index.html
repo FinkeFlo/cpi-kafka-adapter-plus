@@ -1,0 +1,1609 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Custom Apache Kafka adapter for SAP Cloud Integration (CPI)">
+      
+      
+      
+      
+        <link rel="prev" href="../producer-batch/">
+      
+      
+        <link rel="next" href="../json-schema-validation/">
+      
+      
+      <link rel="icon" href="../../assets/branding/icon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.6.7">
+    
+    
+      
+        <title>Producer Retry - Kafka Adapter Plus</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.8608ea7d.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.06af60db.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="teal">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#producer-retry" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Kafka Adapter Plus" class="md-header__button md-logo" aria-label="Kafka Adapter Plus" data-md-component="logo">
+      
+  <img src="../../assets/branding/icon.png" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Kafka Adapter Plus
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Producer Retry
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="teal"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="teal"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      <label class="md-header__button md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+      </label>
+      <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/finkeflo/cpi-kafka-adapter-plus" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../getting-started/" class="md-tabs__link">
+        
+  
+    
+  
+  Getting Started
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../configuration/" class="md-tabs__link">
+        
+  
+    
+  
+  Configuration
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../batch-processing/" class="md-tabs__link">
+          
+  
+  Features
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../security/authentication/" class="md-tabs__link">
+          
+  
+  Security
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../adrs/0001-transactional-producer-concurrency/" class="md-tabs__link">
+          
+  
+  Architecture Decisions
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../faq/" class="md-tabs__link">
+        
+  
+    
+  
+  FAQ
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../troubleshooting/" class="md-tabs__link">
+        
+  
+    
+  
+  Troubleshooting
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../changelog/" class="md-tabs__link">
+        
+  
+    
+  
+  Changelog
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Kafka Adapter Plus" class="md-nav__button md-logo" aria-label="Kafka Adapter Plus" data-md-component="logo">
+      
+  <img src="../../assets/branding/icon.png" alt="logo">
+
+    </a>
+    Kafka Adapter Plus
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/finkeflo/cpi-kafka-adapter-plus" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Home
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Getting Started
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../configuration/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Configuration
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  <span class="md-ellipsis">
+    Features
+    
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            Features
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../batch-processing/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Batch Processing
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../avro-schema-registry/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Avro / Schema Registry
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../producer-batch/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Producer Batch Send
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  <span class="md-ellipsis">
+    Producer Retry
+    
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  <span class="md-ellipsis">
+    Producer Retry
+    
+  </span>
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#the-rule-that-governs-everything-no-duplicates" class="md-nav__link">
+    <span class="md-ellipsis">
+      The rule that governs everything: no duplicates
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#parameters" class="md-nav__link">
+    <span class="md-ellipsis">
+      Parameters
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Parameters">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#one-exception-the-kafka-10902-monitor-fault" class="md-nav__link">
+    <span class="md-ellipsis">
+      One exception: the KAFKA-10902 monitor fault
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#producerretryonlytransienterrorsfalse" class="md-nav__link">
+    <span class="md-ellipsis">
+      producerRetryOnlyTransientErrors=false
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sizing-the-budget" class="md-nav__link">
+    <span class="md-ellipsis">
+      Sizing the budget
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#effect-on-transaction-slots-and-worker-threads" class="md-nav__link">
+    <span class="md-ellipsis">
+      Effect on transaction slots and worker threads
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-you-see-when-it-happens" class="md-nav__link">
+    <span class="md-ellipsis">
+      What you see when it happens
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="What you see when it happens">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#in-message-monitoring" class="md-nav__link">
+    <span class="md-ellipsis">
+      In Message Monitoring
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#related" class="md-nav__link">
+    <span class="md-ellipsis">
+      Related
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../json-schema-validation/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    JSON Schema Validation
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../kafka-headers/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Kafka Headers
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dead-letter-queue/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Dead Letter Queue
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Security
+    
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            Security
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../security/authentication/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Authentication
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Architecture Decisions
+    
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            Architecture Decisions
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../adrs/0001-transactional-producer-concurrency/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    ADR 0001: Transactional Concurrency
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../adrs/0002-confluent-client-ersetzen/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    ADR 0002: JDK-only Schema Registry Client
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../adrs/0003-kafka-clients-unpack/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    ADR 0003: Unpacked kafka-clients
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../adrs/0004-diagnostic-logging-contract/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    ADR 0004: Diagnostic Logging Contract
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../faq/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    FAQ
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../troubleshooting/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Troubleshooting
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Changelog
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#the-rule-that-governs-everything-no-duplicates" class="md-nav__link">
+    <span class="md-ellipsis">
+      The rule that governs everything: no duplicates
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#parameters" class="md-nav__link">
+    <span class="md-ellipsis">
+      Parameters
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Parameters">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#one-exception-the-kafka-10902-monitor-fault" class="md-nav__link">
+    <span class="md-ellipsis">
+      One exception: the KAFKA-10902 monitor fault
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#producerretryonlytransienterrorsfalse" class="md-nav__link">
+    <span class="md-ellipsis">
+      producerRetryOnlyTransientErrors=false
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sizing-the-budget" class="md-nav__link">
+    <span class="md-ellipsis">
+      Sizing the budget
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#effect-on-transaction-slots-and-worker-threads" class="md-nav__link">
+    <span class="md-ellipsis">
+      Effect on transaction slots and worker threads
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-you-see-when-it-happens" class="md-nav__link">
+    <span class="md-ellipsis">
+      What you see when it happens
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="What you see when it happens">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#in-message-monitoring" class="md-nav__link">
+    <span class="md-ellipsis">
+      In Message Monitoring
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#related" class="md-nav__link">
+    <span class="md-ellipsis">
+      Related
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+    <a href="https://github.com/finkeflo/cpi-kafka-adapter-plus/edit/main/docs/features/producer-retry.md" title="Edit this page" class="md-content__button md-icon">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="producer-retry">Producer Retry<a class="headerlink" href="#producer-retry" title="Permanent link">&para;</a></h1>
+<p>An outer retry for the receiver (producer) direction: when a send fails, the adapter can build a
+brand-new producer and try again.</p>
+<p>It exists because Kafka's own retry cannot help in the case that motivated it. <code>retries</code> and
+<code>delivery.timeout.ms</code> only repeat <em>inside</em> one producer instance, and after a
+<code>NetworkException: Disconnected from node 3</code> a transactional producer is left in a state where no
+further call on it can succeed. Only a throw-away producer recovers from that.</p>
+<p>The feature is <strong>off by default</strong> (<code>producerRetryMaxAttempts=1</code>). It lengthens how long a
+transaction slot and an HTTP worker thread are held, and it changes the timing of existing
+integration flows, so it is opt-in.</p>
+<h2 id="the-rule-that-governs-everything-no-duplicates">The rule that governs everything: no duplicates<a class="headerlink" href="#the-rule-that-governs-everything-no-duplicates" title="Permanent link">&para;</a></h2>
+<p>A retry is only permitted where the previous attempt provably wrote <strong>nothing</strong>.</p>
+<table>
+<thead>
+<tr>
+<th>Path</th>
+<th>Retried?</th>
+<th>Why</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Transactional, failure <strong>before</strong> the commit</td>
+<td>:material-check: yes</td>
+<td>The aborted transaction is never visible to <code>read_committed</code> consumers. The successor producer uses the same <code>transactional.id</code>, fences the old epoch and has the broker clean up.</td>
+</tr>
+<tr>
+<td>Transactional, failure <strong>during</strong> the commit</td>
+<td>:material-close: no</td>
+<td>The outcome is unknowable. The commit may have succeeded broker-side with only the response lost, so a retry would commit the batch a second time.</td>
+</tr>
+<tr>
+<td>Non-transactional <strong>single</strong> message</td>
+<td>:material-check: yes</td>
+<td>One record, one acknowledgement. Requires <code>enableIdempotence=true</code>, and the shared producer is reused so the broker can still deduplicate on <code>(PID, sequence)</code>.</td>
+</tr>
+<tr>
+<td>Non-transactional <strong>batch</strong></td>
+<td>:material-close: no</td>
+<td>Records <code>0..k-1</code> may already be committed when <code>k</code> fails. Resending the batch would duplicate them, and a new producer would get a new PID, disabling broker-side deduplication.</td>
+</tr>
+</tbody>
+</table>
+<p>This is not a judgement call. The Kafka client documents both clean-up mechanisms the transactional
+case relies on, and both carry the same exemption for a commit that has already begun:</p>
+<ul>
+<li><code>KafkaProducer.close(Duration)</code>: "It will also abort the ongoing transaction <strong>if it's not already
+  completing</strong>."</li>
+<li><code>KafkaProducer.initTransactions()</code>: "If the previous instance had failed with a transaction in
+  progress, <strong>it will be aborted</strong>. If the last transaction had begun completion, but not yet
+  finished, <strong>this method awaits its completion</strong>."</li>
+</ul>
+<p>So a failure inside the commit is not a residual risk — it is documented behaviour that the batch
+gets committed. That is why the adapter tracks the transaction phase explicitly and refuses to
+retry from <code>COMMIT</code> onwards, with <code>stopReason=COMMIT_OUTCOME_UNKNOWN</code>.</p>
+<p>If <code>producerRetryMaxAttempts &gt; 1</code> is configured on a non-transactional batch channel, the adapter
+writes a warning at start-up saying the setting has no effect there. Enable transactions to use the
+retry for batches.</p>
+<h2 id="parameters">Parameters<a class="headerlink" href="#parameters" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Default</th>
+<th>Range</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>producerRetryMaxAttempts</code></td>
+<td><code>1</code></td>
+<td>1–5</td>
+<td><strong>Total</strong> attempts, not additional ones. <code>1</code> switches the feature off.</td>
+</tr>
+<tr>
+<td><code>producerRetryDelaySeconds</code></td>
+<td><code>2</code></td>
+<td>1–30</td>
+<td>Constant wait between attempts.</td>
+</tr>
+<tr>
+<td><code>producerRetryOnlyTransientErrors</code></td>
+<td><code>true</code></td>
+<td>—</td>
+<td><code>true</code>: only <code>RETRIABLE</code>. <code>false</code>: also an unusable transactional producer.</td>
+</tr>
+<tr>
+<td><code>producerRetryTotalBudgetSeconds</code></td>
+<td><code>30</code></td>
+<td>5–300</td>
+<td>Hard bound for all attempts of one message together.</td>
+</tr>
+</tbody>
+</table>
+<p>These are <strong>separate</strong> from the sender-side <code>retryDelaySeconds</code> / <code>retryOnlyTransientErrors</code>, which
+belong to the consumer's dead-letter path and use exponential backoff. One option meaning two
+different things depending on channel direction would be a support trap.</p>
+<p>The delay is constant, not exponential, on purpose: the Kafka client has already exhausted an
+exponential backoff before giving up. A second exponential wait on top only blocks the worker
+thread. And it has a floor of one second, because three immediate retries finish inside a second
+and hit the same broker node that just disappeared.</p>
+<p>Data errors (<code>RecordTooLargeException</code>, serialization failures, an invalid topic) and unclassified
+errors are <strong>never</strong> retried, whatever the configuration says. A record that is too large will be
+exactly as too large on the next attempt.</p>
+<h3 id="one-exception-the-kafka-10902-monitor-fault">One exception: the KAFKA-10902 monitor fault<a class="headerlink" href="#one-exception-the-kafka-10902-monitor-fault" title="Permanent link">&para;</a></h3>
+<p><code>IllegalMonitorStateException: current thread is not owner</code> is retried even under
+<code>producerRetryOnlyTransientErrors=true</code>, although it matches no Kafka exception hierarchy and is
+therefore classified <code>UNKNOWN_FATAL</code>. It is a transient JVM-level monitor state rather than a broker
+verdict — a production trace showed it arriving in bursts on individual worker nodes while the same
+broker served every other channel on the tenant — and the classifier simply has no category for a
+defect in the client itself.</p>
+<p>Retrying it cannot duplicate: in the transactional path the phase rule has already stopped
+everything from the commit onwards, so the failed attempt's transaction is aborted and never visible
+to <code>read_committed</code> consumers; in the single path idempotence is a precondition, so the broker
+deduplicates on <code>(PID, sequence)</code>. The exemption requires a Kafka frame in the stack trace, so the
+same exception raised by application code gets no special treatment.</p>
+<p>This is a second line of defence. The primary mitigation is the metadata pre-warm and the raised
+<code>metadata.max.idle.ms</code> that keep the client out of the defective code path, plus the bounded inner
+retry described in <a href="../../troubleshooting/">Troubleshooting</a>.</p>
+<h3 id="producerretryonlytransienterrorsfalse"><code>producerRetryOnlyTransientErrors=false</code><a class="headerlink" href="#producerretryonlytransienterrorsfalse" title="Permanent link">&para;</a></h3>
+<p><code>ProducerFencedException</code> and friends mean "this producer instance is finished, build a new one" —
+which is exactly what the transactional retry loop does anyway. So a retry would be technically
+sensible.</p>
+<p>It is still not the default, because a fencing error usually means a <em>different</em> instance has taken
+over the same <code>transactional.id</code>: two integration flows sharing a <code>transactionalIdPrefix</code>, or a
+deployment overlap. Retrying then becomes a contest for the <code>transactional.id</code> that both sides lose.
+Only switch this off when you can show the prefix is used exclusively by this channel.</p>
+<p>On the non-transactional single path an unusable producer is never retried regardless of this
+setting: that path reuses the shared producer, and a broken shared producer belongs in the existing
+rebuild path.</p>
+<h2 id="sizing-the-budget">Sizing the budget<a class="headerlink" href="#sizing-the-budget" title="Permanent link">&para;</a></h2>
+<p>The adapter runs inside the request thread of a synchronous HTTP call. The binding constraint is
+therefore not the transaction slot limit but the caller's patience.</p>
+<p><strong>One attempt costs roughly four times <code>deliveryTimeoutSeconds</code> on the transactional path</strong>, not
+once. <code>delivery.timeout.ms</code> only bounds the wait for acknowledgements; <code>initTransactions()</code>, the
+metadata block inside <code>send()</code> and <code>commitTransaction()</code> are each bounded by <code>max.block.ms</code>, which
+the adapter sets to <code>min(30s, deliveryTimeoutSeconds)</code>.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>blockSeconds = min(30, deliveryTimeoutSeconds)
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>perAttempt   = 3 x blockSeconds + deliveryTimeoutSeconds + 5s (producer close)
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>worstCase    = maxAttempts x perAttempt + (maxAttempts - 1) x producerRetryDelaySeconds
+</code></pre></div>
+<p>If <code>worstCase</code> exceeds <code>producerRetryTotalBudgetSeconds</code>, the channel <strong>fails to start</strong> with a
+message naming both numbers. A retry configuration that could never reach its second attempt is a
+promise to operations that the adapter cannot keep, and a warning would only be discovered during
+the outage it was configured for.</p>
+<table>
+<thead>
+<tr>
+<th><code>deliveryTimeoutSeconds</code></th>
+<th><code>producerRetryMaxAttempts</code></th>
+<th>Worst case</th>
+<th>Fits in 30 s?</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>120 (default)</td>
+<td>2</td>
+<td>~970 s</td>
+<td>no — start fails</td>
+</tr>
+<tr>
+<td>8</td>
+<td>2</td>
+<td>~76 s</td>
+<td>no — start fails</td>
+</tr>
+<tr>
+<td>3</td>
+<td>2</td>
+<td>~36 s</td>
+<td>no — just over</td>
+</tr>
+<tr>
+<td><strong>2</strong></td>
+<td><strong>2</strong></td>
+<td><strong>~28 s</strong></td>
+<td>yes</td>
+</tr>
+<tr>
+<td>2</td>
+<td>3</td>
+<td>~43 s</td>
+<td>no</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Recommended starting point:</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>producerRetryMaxAttempts=2
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>producerRetryDelaySeconds=2
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>deliveryTimeoutSeconds=2
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>producerRetryTotalBudgetSeconds=30
+</code></pre></div>
+<p>On a transactional channel the adapter derives <code>transaction.timeout.ms</code> from
+<code>deliveryTimeoutSeconds</code> (delivery timeout plus up to 30 s of commit headroom, never below the
+client default of 60 s), so the broker keeps the transaction open for at least as long as the client
+waits for acknowledgements. Up to and including 1.3.1 the option was left at its 60 s default and
+any <code>deliveryTimeoutSeconds &gt;= 60</code> was rejected instead — which made the shipped default of 120 s
+undeployable for exactly the channels the retry was built for. The remaining bound is the broker's
+<code>transaction.max.timeout.ms</code> (15 minutes by default), so <code>deliveryTimeoutSeconds</code> may not exceed
+870 s on a transactional channel.</p>
+<div class="admonition warning">
+<p class="admonition-title">The budget must stay below the caller's timeout</p>
+<p>If the calling system times out while the adapter is still retrying, it will consider the call
+failed and may resend the request — while the retry succeeds in the background. The result is
+two business messages in the topic. <strong>No exactly-once mechanism inside the adapter can prevent
+this</strong>, because the duplication happens outside it. Keep
+<code>producerRetryTotalBudgetSeconds</code> <strong>plus the processing time of the rest of the integration
+flow</strong> below the caller's timeout. The 30 s default is chosen to sit under the 60 s timeout
+common in clients and gateways.</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Trade-off of a low <code>deliveryTimeoutSeconds</code></p>
+<p>Shortening it also shortens Kafka's <em>internal</em> retry, which absorbs leader elections and short
+broker restarts. You are trading internal staying power for external attempts with a fresh
+producer. For a synchronous HTTP caller that trade is right — the caller will not wait minutes
+anyway. For asynchronous scenarios it is not, which is another reason the feature is off by
+default.</p>
+</div>
+<h2 id="effect-on-transaction-slots-and-worker-threads">Effect on transaction slots and worker threads<a class="headerlink" href="#effect-on-transaction-slots-and-worker-threads" title="Permanent link">&para;</a></h2>
+<p>The retry loop runs <strong>inside</strong> the transaction slot it acquired, because every attempt must use the
+same <code>transactional.id</code>. During a broker outage all sending threads therefore hold their slot for
+the whole retry duration, and the adapter blocks more broadly than it does today. With
+<code>maxConcurrentTransactions=1</code> a single retry blocks every other send on the node; the adapter warns
+about that combination at start-up. Size <code>maxConcurrentTransactions</code> accordingly.</p>
+<p>The same applies one level up: the retry blocks the HTTP worker thread, not just the slot. For
+callers that cannot tolerate the delay, the right answer is a decoupling buffer (a JMS queue in
+front of the Kafka call), not a longer retry budget.</p>
+<h2 id="what-you-see-when-it-happens">What you see when it happens<a class="headerlink" href="#what-you-see-when-it-happens" title="Permanent link">&para;</a></h2>
+<p>All retry events are written at <strong>ERROR</strong> with the single marker <code>[CPI-KAFKA-PLUS-DIAG]</code>. That is
+not a severity claim — the SAP CPI tenant trace file receives only ERROR, so anything lower would be
+invisible in production. They are bounded (at most 5 per message, and capped by the budget) and only
+occur during a real fault.</p>
+<table>
+<thead>
+<tr>
+<th>Event</th>
+<th>When</th>
+<th>Key fields</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>producer.retry.attempt</code></td>
+<td>before each repeated attempt</td>
+<td><code>attempt</code>, <code>maxAttempts</code>, <code>txnPhase</code>, <code>classification</code>, <code>delaySeconds</code>, <code>remainingBudgetMs</code></td>
+</tr>
+<tr>
+<td><code>producer.retry.effect</code></td>
+<td>success with <code>attempt &gt; 1</code></td>
+<td><code>attempts</code>, <code>totalElapsedMs</code>, <code>recovered=true</code></td>
+</tr>
+<tr>
+<td><code>producer.retry.exhausted</code></td>
+<td>all attempts used up</td>
+<td><code>attempts</code>, <code>stopReason</code>, <code>txnPhase</code>, <code>totalElapsedMs</code>, <code>recovered=false</code></td>
+</tr>
+<tr>
+<td><code>producer.retry.skipped</code></td>
+<td>failure was not retry-eligible</td>
+<td><code>stopReason</code>, <code>classification</code>, <code>txnPhase</code></td>
+</tr>
+</tbody>
+</table>
+<p>Nothing is written while the feature is off, so an ordinary failure does not gain a second,
+contentless line.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>grep<span class="w"> </span><span class="s1">'CPI-KAFKA-PLUS-DIAG producer.retry'</span><span class="w"> </span>trace.log
+</code></pre></div>
+<p><code>producer.retry.effect</code> and <code>producer.retry.exhausted</code> carry the same <code>attempts</code> and <code>recovered</code>
+fields, so "how often does the retry actually rescue a message" is a ratio of two greppable lines.</p>
+<p><code>stopReason</code> is always present on a stop and answers the question the log otherwise leaves open:</p>
+<table>
+<thead>
+<tr>
+<th><code>stopReason</code></th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ATTEMPTS_EXHAUSTED</code></td>
+<td>every configured attempt was used</td>
+</tr>
+<tr>
+<td><code>BUDGET_EXHAUSTED</code></td>
+<td>the next attempt would have exceeded <code>producerRetryTotalBudgetSeconds</code></td>
+</tr>
+<tr>
+<td><code>COMMIT_OUTCOME_UNKNOWN</code></td>
+<td>the failure was in or after the commit; a retry could duplicate</td>
+</tr>
+<tr>
+<td><code>PERMANENT</code></td>
+<td>a data error or an unclassifiable failure</td>
+</tr>
+<tr>
+<td><code>IDEMPOTENCE_DISABLED</code></td>
+<td>single path with <code>enableIdempotence=false</code></td>
+</tr>
+<tr>
+<td><code>RETRY_DISABLED</code></td>
+<td><code>producerRetryMaxAttempts=1</code></td>
+</tr>
+<tr>
+<td><code>INTERRUPTED</code></td>
+<td>the thread was interrupted while waiting between attempts</td>
+</tr>
+</tbody>
+</table>
+<h3 id="in-message-monitoring">In Message Monitoring<a class="headerlink" href="#in-message-monitoring" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Failure:</strong> the MPL status text carries <code>(after N retry attempts, stopReason=…)</code>, and
+  <code>retryAttempts</code>, <code>stopReason</code>, <code>txnPhase</code> and <code>totalElapsedMs</code> are added to the
+  <code>KafkaAdapterError</code> attachment (subject to <code>writeMplErrorAttachment</code>).</li>
+<li><strong>Success after a retry:</strong> the message gets the property and custom header property
+  <code>KafkaRetryAttempts</code>, so messages that only got through thanks to a retry are filterable.</li>
+<li><strong>In the integration flow:</strong> the header <code>CamelKafkaPlusRetryAttempts</code> is set when more than one
+  attempt was needed.</li>
+</ul>
+<h2 id="related">Related<a class="headerlink" href="#related" title="Permanent link">&para;</a></h2>
+<ul>
+<li><a href="../producer-batch/">Producer Batch Send</a> — transactional batching and <code>maxConcurrentTransactions</code></li>
+<li><a href="../dead-letter-queue/">Dead Letter Queue</a> — the <em>consumer</em> side retry, which is a different
+  mechanism with different parameters</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    <script id="__config" type="application/json">{"base": "../..", "features": ["navigation.tabs", "navigation.sections", "search.highlight", "content.code.copy", "content.action.edit"], "search": "../../assets/javascripts/workers/search.f8cc74c7.min.js", "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.c8b220af.min.js"></script>
+      
+    
+  </body>
+</html>
