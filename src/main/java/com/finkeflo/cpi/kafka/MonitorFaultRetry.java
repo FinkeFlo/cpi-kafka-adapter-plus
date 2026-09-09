@@ -42,23 +42,22 @@ import org.slf4j.LoggerFactory;
  *       passed.</li>
  * </ol>
  *
- * <p>The worst case for a batch is therefore five extra attempts and roughly 250 ms of added
+ * <p>The worst case for a batch is therefore eight extra attempts and roughly 400 ms of added
  * latency, after which the failure is reported instead of retried.
  *
- * <p>The batch allowance is deliberately small. In the incident this addresses, the fault occurred
- * five times in eighteen minutes across all threads of a node, so at most one occurrence per batch
- * is expected. A batch that burns through five of them is not experiencing a transient glitch, and
- * failing loudly with {@code stopReason=BATCH_BUDGET_EXHAUSTED} is the more useful outcome than
- * continuing to retry.
+ * <p>The batch allowance is kept proportionally small: it must comfortably exceed the per-record
+ * limit so one record exhausting its own retries cannot starve every other record in the batch, but
+ * a batch that burns through it is not experiencing a transient glitch, and failing loudly with
+ * {@code stopReason=BATCH_BUDGET_EXHAUSTED} is the more useful outcome than continuing to retry.
  */
 final class MonitorFaultRetry {
 
     private static final Logger LOG = LoggerFactory.getLogger(MonitorFaultRetry.class);
 
     /** Retries granted to a single call. */
-    static final int MAX_RETRIES_PER_RECORD = 3;
+    static final int MAX_RETRIES_PER_RECORD = 5;
     /** Retries granted to a whole batch, shared by all its records. */
-    static final int MAX_RETRIES_PER_BATCH = 5;
+    static final int MAX_RETRIES_PER_BATCH = 8;
     /** Pause between attempts, long enough for a transient monitor state to clear. */
     static final long BACKOFF_MS = 50L;
 

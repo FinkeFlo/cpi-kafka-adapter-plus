@@ -7,6 +7,10 @@ and the project follows [Semantic Versioning](https://semver.org/). See
 [VERSIONING.md](https://github.com/finkeflo/cpi-kafka-adapter-plus/blob/main/VERSIONING.md) for how the adapter version maps to SAP CPI
 iFlow compatibility.
 
+## [1.3.3] - 2026-09-09
+### Changed
+- Raised the KAFKA-10902 monitor-fault retry budget from 3 to 5 attempts per record, with the batch-wide budget scaled from 5 to 8 so a single record exhausting its own retries cannot starve every other record in the same batch. Backoff between attempts stays at 50 ms.
+
 ## [1.3.2] - 2026-08-20
 ### Fixed
 - Switching the producer retry on made a transactional channel undeployable unless its delivery timeout had been lowered by hand. The adapter never set `transaction.timeout.ms`, so the client default of 60 s applied, and rather than fixing that it rejected any `deliveryTimeoutSeconds` at or above 60 — while shipping 120 as the default for that very parameter. Every channel that had not been retuned therefore failed at deployment with a message naming a broker limit the operator had never configured, and the parameter to change sits on a different tab from the retry that triggered the check. The transaction timeout is now derived from the delivery timeout: delivery plus up to 30 s of commit headroom, floored at the 60 s client default so an upgrade cannot narrow a window that was already working, and capped at the broker's `transaction.max.timeout.ms` of 15 minutes. A delivery timeout beyond that cap is still rejected, but at start-up and by name, instead of surfacing later as an `InvalidTxnTimeoutException` on the first send. The old rule had it backwards: a transaction that must outlive the send it contains is a property the adapter controls, not a constraint to push onto the configuration.
