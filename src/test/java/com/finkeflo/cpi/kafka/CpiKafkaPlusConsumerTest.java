@@ -432,6 +432,27 @@ public class CpiKafkaPlusConsumerTest {
     }
 
     @Test
+    public void testIsFencedInstanceIdFailureWithDirectException() {
+        Assert.assertTrue(CpiKafkaPlusConsumer.isFencedInstanceIdFailure(
+                new org.apache.kafka.common.errors.FencedInstanceIdException(
+                        "The broker rejected this static consumer since another consumer with the same "
+                                + "group.instance.id has registered with a different member.id.")));
+    }
+
+    @Test
+    public void testIsFencedInstanceIdFailureWithWrappedCause() {
+        Assert.assertTrue(CpiKafkaPlusConsumer.isFencedInstanceIdFailure(
+                new RuntimeException("wrapped",
+                        new org.apache.kafka.common.errors.FencedInstanceIdException("fenced"))));
+    }
+
+    @Test
+    public void testIsFencedInstanceIdFailureFalseForUnrelatedException() {
+        Assert.assertFalse(CpiKafkaPlusConsumer.isFencedInstanceIdFailure(
+                new RuntimeException("unrelated")));
+    }
+
+    @Test
     public void testShouldAttemptWiringRouteRestartFirstAttempt() {
         Assert.assertTrue(CpiKafkaPlusConsumer.shouldAttemptWiringRouteRestart(
                 false, 0, 0L, 1_000L));
