@@ -20,8 +20,8 @@
         <camel.version>3.14.7</camel.version>
         <adk.version>2.3.0</adk.version>
         <kafka.version>4.3.1</kafka.version>
-        <avro.version>1.12.1</avro.version>
-        <jackson.version>2.22.1</jackson.version>
+        <avro.version>1.12.2</avro.version>
+        <jackson.version>2.22.2</jackson.version>
         <!-- CI toggle: when true, Surefire (unit tests) is skipped so the integration-test
              CI job can run *IT tests only, without re-running the unit tests. Default false. -->
         <skip.unit.tests>false</skip.unit.tests>
@@ -412,7 +412,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
-                <version>3.15.0</version>
+                <version>3.16.0</version>
                 <executions>
                     <execution>
                         <id>compile-jgss-stubs</id>
@@ -484,7 +484,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
-                <version>3.5.6</version>
+                <version>3.6.0</version>
                 <configuration>
                     <skip>${skip.unit.tests}</skip>
                 </configuration>
@@ -493,7 +493,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-failsafe-plugin</artifactId>
-                <version>3.5.6</version>
+                <version>3.6.0</version>
                 <configuration>
                     <excludes>
                         <exclude>**/FullVolumeIT.java</exclude>
