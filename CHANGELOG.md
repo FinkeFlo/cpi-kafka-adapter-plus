@@ -7,6 +7,14 @@ and the project follows [Semantic Versioning](https://semver.org/). See
 [VERSIONING.md](https://github.com/finkeflo/cpi-kafka-adapter-plus/blob/main/VERSIONING.md) for how the adapter version maps to SAP CPI
 iFlow compatibility.
 
+## [1.3.5] - 2026-09-17
+### Fixed
+- The consumer's poll-failure recovery now handles `FencedInstanceIdException` (KIP-345 static membership conflict) separately instead of falling into the generic reconnect path. Rebuilding the consumer immediately, with the same `group.instance.id`, usually collided with the still-registered stale session again — the broker only drops it after `session.timeout.ms` (30 s) — producing a rebuild storm roughly every 15-20 s instead of a single clean recovery. PRD trace analysis on 2026-09-17 showed this affecting up to 8 iFlows in the same tenant within a single incident window. The consumer now waits out a dedicated cooldown (base 40 s, jittered) before rebuilding, backing off exponentially on repeated fencing up to a 2-minute cap, and resets back to the base cooldown on the next successful poll. See issue #146.
+
+## [1.3.4] - 2026-09-17
+### Changed
+- Raised the KAFKA-10902 monitor-fault retry budget again, from 5 to 10 attempts per record, with the batch-wide budget scaled from 8 to 16 in tandem. PRD trace analysis over 2026-09-10 to 2026-09-16 showed 6,075 monitor-fault retries, 6,037 (99.4%) resolved by the existing budget and 38 exhausting `RECORD_BUDGET_EXHAUSTED` before succeeding — mostly clustered in a single burst on 2026-09-10. Backoff between attempts stays at 50 ms, so the added worst case is ~400 ms of extra latency per record; the fault is a JIT-level deoptimization issue rather than a timing race, so more attempts, not longer pauses, is what helps.
+
 ## [1.3.3] - 2026-09-09
 ### Changed
 - Raised the KAFKA-10902 monitor-fault retry budget from 3 to 5 attempts per record, with the batch-wide budget scaled from 5 to 8 so a single record exhausting its own retries cannot starve every other record in the same batch. Backoff between attempts stays at 50 ms.

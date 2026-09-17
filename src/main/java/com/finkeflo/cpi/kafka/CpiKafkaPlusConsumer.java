@@ -41,6 +41,7 @@ import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.errors.AuthenticationException;
 import org.apache.kafka.common.errors.AuthorizationException;
+import org.apache.kafka.common.errors.FencedInstanceIdException;
 import org.apache.kafka.common.errors.RecordDeserializationException;
 import org.apache.kafka.common.errors.SaslAuthenticationException;
 import org.apache.kafka.common.errors.SslAuthenticationException;
@@ -62,6 +63,25 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
     private static final String INVALID_BUNDLE_WIRING_SUFFIX = "no longer valid";
     private static final int MAX_ROUTE_RESTART_ATTEMPTS = 2;
     private static final long ROUTE_RESTART_COOLDOWN_MS = 15 * 60_000L;
+    /**
+     * Base cooldown before rebuilding the consumer after a {@link FencedInstanceIdException}
+     * (KIP-345 static membership conflict). Chosen as {@code SESSION_TIMEOUT_MS_CONFIG} (30s) plus
+     * a safety margin, so the broker has almost certainly already expired the stale static member
+     * registration by the time we rejoin with the same {@code group.instance.id} — rejoining
+     * sooner just collides with that same still-registered session again (see doc/PR notes on
+     * issue #146: rebuilds every ~15-20s instead of once).
+     */
+    private static final long FENCED_COOLDOWN_BASE_MS = 40_000L;
+    /**
+     * Upper bound for the exponential backoff below, in case the conflicting member never goes
+     * away (e.g. two long-lived deployments racing for the same instance id). Capped at 2 minutes
+     * instead of, say, 5: every fencing incident observed in production so far self-healed after a
+     * single cooldown cycle, so this cap is only a worst-case guard, not the expected path — it
+     * should stay short enough that a genuine stuck topic does not stall much longer than that.
+     */
+    private static final long FENCED_COOLDOWN_MAX_MS = 120_000L;
+    /** Randomised +/- spread added to the cooldown so multiple fenced consumers on the same node don't retry in lockstep. */
+    private static final long FENCED_COOLDOWN_JITTER_MS = 10_000L;
     /** Camel-Scheduler-Takt zwischen zwei poll()-Aufrufen, wenn pollingIntervalSeconds groesser ist. */
     private static final long KEEP_ALIVE_INTERVAL_SECONDS = 60L;
     /** Poll-Timeout des Keep-Alive-Polls — kurz, treibt nur den Coordinator-Roundtrip. */
@@ -84,6 +104,10 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
     private KafkaConsumer<byte[], byte[]> kafkaConsumer;
     private int consecutivePollFailures = 0;
     private long firstPollFailureMs = 0L;
+    /** 0 = not in a fenced-instance cooldown; otherwise the epoch ms until which poll() is skipped. */
+    private long fencedCooldownUntilMs = 0L;
+    /** Number of consecutive fenced-instance incidents since the last successful poll, for exponential backoff. */
+    private int fencedBackoffAttempt = 0;
     private volatile boolean initialized = false;
     private AvroDeserializerHelper avroHelper;
     private AdapterTracingHelper tracingHelper;
@@ -545,6 +569,10 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
             return 0;
         }
 
+        if (isFencedCooldownActive()) {
+            return 0;
+        }
+
         ensureInitialized();
         if (kafkaConsumer == null) {
             LOG.error("[CPI-KAFKA-PLUS-DIAG] poll: kafkaConsumer is null (init failed), skipping poll");
@@ -796,6 +824,8 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
         } catch (Exception e) {
             if (isNonRetryablePollFailure(e)) {
                 handleNonRetryablePollFailure(e);
+            } else if (isFencedInstanceIdFailure(e)) {
+                handleFencedInstanceIdFailure(e);
             } else if (isBundleWiringInvalidFailure(e)) {
                 handleBundleWiringInvalidFailure(e);
             } else {
@@ -820,6 +850,7 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
         // future independent wiring incident can self-heal again.
         routeRestartAttempts = 0;
         lastRouteRestartAttemptMs = 0L;
+        fencedBackoffAttempt = 0;
     }
 
     /**
@@ -904,6 +935,8 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
                     describeTopStack(t, 6));
             if (isNonRetryablePollFailure(t)) {
                 handleNonRetryablePollFailure(t);
+            } else if (isFencedInstanceIdFailure(t)) {
+                handleFencedInstanceIdFailure(t);
             } else if (isBundleWiringInvalidFailure(t)) {
                 handleBundleWiringInvalidFailure(t);
             } else {
@@ -1059,6 +1092,76 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
         tracingHelper.publishConnectionStatus(false, policyError);
         lastStoppedByErrorReminderMs = 0L;
         logStoppedByErrorReminderIfDue();
+    }
+
+    /**
+     * Detects a {@link FencedInstanceIdException} anywhere in the cause chain — the broker
+     * rejecting a poll/rebalance because another member already holds this consumer's static
+     * {@code group.instance.id} (KIP-345 conflict, issue #146).
+     */
+    static boolean isFencedInstanceIdFailure(Throwable failure) {
+        Throwable current = failure;
+        while (current != null) {
+            if (current instanceof FencedInstanceIdException) {
+                return true;
+            }
+            Throwable next = current.getCause();
+            if (next == current) {
+                break;
+            }
+            current = next;
+        }
+        return false;
+    }
+
+    /**
+     * {@code true} while a fenced-instance cooldown is active; also clears an expired cooldown so
+     * callers only need to check the return value.
+     */
+    private boolean isFencedCooldownActive() {
+        if (fencedCooldownUntilMs == 0L) {
+            return false;
+        }
+        if (System.currentTimeMillis() < fencedCooldownUntilMs) {
+            return true;
+        }
+        LOG.info("[CPI-KAFKA-PLUS-DIAG] poll: fenced-instance cooldown elapsed, resuming for topic='{}' group='{}'",
+                endpoint.getEffectiveTopic(), endpoint.getGroupId());
+        fencedCooldownUntilMs = 0L;
+        return false;
+    }
+
+    /**
+     * Handles a {@link FencedInstanceIdException} with a dedicated cooldown instead of the
+     * generic {@link #maybeReconnectAfterPollFailure()} path. Rebuilding immediately with the same
+     * {@code group.instance.id} usually collides with the still-registered stale session again
+     * (broker only drops it after {@code session.timeout.ms}), producing a rebuild storm every
+     * ~15-20s. Waiting out {@link #FENCED_COOLDOWN_BASE_MS} first lets that stale session expire,
+     * so the rejoin actually succeeds. Repeated fencing backs off exponentially up to
+     * {@link #FENCED_COOLDOWN_MAX_MS}; a successful poll (see {@link #reportConnectionHealthy()})
+     * resets the backoff.
+     */
+    private void handleFencedInstanceIdFailure(Throwable failure) {
+        long baseCooldown = Math.min(
+                FENCED_COOLDOWN_BASE_MS * (1L << Math.min(fencedBackoffAttempt, 10)),
+                FENCED_COOLDOWN_MAX_MS);
+        long jitter = (long) (Math.random() * FENCED_COOLDOWN_JITTER_MS);
+        long cooldownMs = baseCooldown + jitter;
+        fencedCooldownUntilMs = System.currentTimeMillis() + cooldownMs;
+        fencedBackoffAttempt++;
+
+        LOG.error("[CPI-KAFKA-PLUS-DIAG] poll: FencedInstanceIdException for topic='{}' group='{}' "
+                        + "(static member id conflict, KIP-345). Cooling down for {}ms (attempt={}) before "
+                        + "rebuilding the consumer, instead of rebuilding immediately, so the stale broker-side "
+                        + "session has time to expire. exMsg='{}'",
+                endpoint.getEffectiveTopic(), endpoint.getGroupId(), cooldownMs, fencedBackoffAttempt,
+                failure.getMessage());
+
+        reportConnectionError(failure);
+        initialized = false;
+        closeConsumerQuietly();
+        consecutivePollFailures = 0;
+        firstPollFailureMs = 0L;
     }
 
     private void handleBundleWiringInvalidFailure(Throwable failure) {
