@@ -112,6 +112,33 @@ final class OsgiBundleInfo {
         }
     }
 
+    /**
+     * {@code true} when the class loader of {@code anchor} is <em>not</em> the one behind the
+     * bundle's current wiring — i.e. the anchor lives in a revision that an adapter update has
+     * already replaced. Resource and native-library lookups over such a loader fail even after a
+     * complete class warm-up (issue #148). {@code null} when it cannot be determined (outside OSGi
+     * or wiring API not reachable).
+     */
+    static Boolean isClassSpaceStale(Class<?> anchor) {
+        OsgiBundleInfo info = of(anchor);
+        if (info.bundle == null) {
+            return null;
+        }
+        try {
+            Class<?> wiringType = Class.forName("org.osgi.framework.wiring.BundleWiring", false,
+                    info.bundleType.getClassLoader());
+            Object wiring = info.bundleType.getMethod("adapt", Class.class).invoke(info.bundle, wiringType);
+            if (wiring == null) {
+                // No current wiring at all: the bundle is uninstalled/unresolved — nothing is live.
+                return Boolean.TRUE;
+            }
+            Object currentLoader = wiringType.getMethod("getClassLoader").invoke(wiring);
+            return currentLoader != anchor.getClassLoader();
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
     String getHeader(String name) {
         if (bundle == null) {
             return null;
@@ -169,6 +196,7 @@ final class OsgiBundleInfo {
                 + " bundleId=" + info.getBundleId()
                 + " bundleLastModified=" + info.getLastModified()
                 + " revisions=" + info.getRevisionCount()
+                + " stale=" + isClassSpaceStale(anchor)
                 + " loader=" + System.identityHashCode(anchor.getClassLoader());
     }
 

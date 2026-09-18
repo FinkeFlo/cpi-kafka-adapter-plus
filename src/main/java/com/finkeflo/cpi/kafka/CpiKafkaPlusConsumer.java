@@ -818,7 +818,7 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
                 handleNonRetryablePollFailure(e);
             } else if (isFencedInstanceIdFailure(e)) {
                 handleFencedInstanceIdFailure(e);
-            } else if (isBundleWiringInvalidFailure(e)) {
+            } else if (isBundleWiringInvalidFailure(e) || isFailureOnStaleClassSpace(e)) {
                 handleBundleWiringInvalidFailure(e);
             } else {
                 LOG.warn("[CPI-KAFKA-PLUS-DIAG] keepAlivePoll: best-effort poll failed: {}", e.getMessage());
@@ -925,7 +925,7 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
                 handleNonRetryablePollFailure(t);
             } else if (isFencedInstanceIdFailure(t)) {
                 handleFencedInstanceIdFailure(t);
-            } else if (isBundleWiringInvalidFailure(t)) {
+            } else if (isBundleWiringInvalidFailure(t) || isFailureOnStaleClassSpace(t)) {
                 handleBundleWiringInvalidFailure(t);
             } else {
                 // A client without TLS against a TLS-only listener never gets far enough to see a
@@ -1021,6 +1021,38 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
                     && msg.contains(INVALID_BUNDLE_WIRING_SNIPPET)
                     && msg.contains(INVALID_BUNDLE_WIRING_SUFFIX);
             if (classLoadingFault && wiringSignature) {
+                return true;
+            }
+            Throwable next = current.getCause();
+            if (next == current) {
+                break;
+            }
+            current = next;
+        }
+        return false;
+    }
+
+    /**
+     * Second signature of the same break (issue #148): the poll died on a class, link or
+     * native-library load <em>and</em> the route's class loader belongs to a bundle revision that
+     * an adapter update has already replaced. Typical: {@code SnappyError
+     * FAILED_TO_LOAD_NATIVE_LIBRARY} on the first snappy batch after an update — a resource lookup
+     * over the dead loader that carries no "bundle wiring" text, later re-thrown by Kafka as
+     * {@code KafkaException → NoClassDefFoundError: Could not initialize class}.
+     */
+    private boolean isFailureOnStaleClassSpace(Throwable failure) {
+        return hasClassSpaceFaultSignature(failure)
+                && Boolean.TRUE.equals(OsgiBundleInfo.isClassSpaceStale(getClass()));
+    }
+
+    static boolean hasClassSpaceFaultSignature(Throwable failure) {
+        Throwable current = failure;
+        while (current != null) {
+            if (current instanceof LinkageError
+                    || current instanceof ClassNotFoundException
+                    || (current instanceof Error
+                        && !(current instanceof VirtualMachineError)
+                        && !(current instanceof ThreadDeath))) {
                 return true;
             }
             Throwable next = current.getCause();
