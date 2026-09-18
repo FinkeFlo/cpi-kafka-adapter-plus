@@ -256,8 +256,9 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
         endpoint.validateConfiguration();
 
         super.doStart();
-        LOG.info("[CPI-KAFKA-PLUS-DIAG] Starting CPI Kafka Producer for topic '{}' (lazy init — Kafka resources created on first send)",
-                endpoint.getEffectiveTopic());
+        BundleClassWarmup.ensureStarted(CpiKafkaPlusProducer.class, "producer.start");
+        LOG.info("[CPI-KAFKA-PLUS-DIAG] Starting CPI Kafka Producer for topic '{}' (lazy init — Kafka resources created on first send) {}",
+                endpoint.getEffectiveTopic(), OsgiBundleInfo.describeClassSpace(CpiKafkaPlusProducer.class));
 
         tracingHelper = new AdapterTracingHelper(endpoint);
 
