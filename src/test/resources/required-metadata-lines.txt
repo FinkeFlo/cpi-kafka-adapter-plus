@@ -1,0 +1,18 @@
+# Minor lines that have been released and must keep shipping a metadata file.
+#
+# An iFlow binds to the MAJOR.MINOR of the adapter component, not to the micro
+# version: the .iflw carries componentVersion=1.2 alongside a cmdVariantUri of
+# version::1.2.4. Micro bumps may therefore happen in place, but a minor line
+# that stops shipping leaves every iFlow bound to it permanently undeployable
+# with "This component ... is not supported in Cloud Integration profile".
+#
+# Grow-only: add a line when a new minor version is released; NEVER remove one.
+# Format: <direction>=<major>.<minor>
+receiver=1.0
+receiver=1.1
+receiver=1.2
+receiver=1.3
+sender=1.0
+sender=1.1
+sender=1.2
+sender=1.3

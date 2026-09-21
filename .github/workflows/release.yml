@@ -71,9 +71,45 @@ jobs:
           # 2. Update pom.xml
           mvn versions:set -DnewVersion=$VERSION -DgenerateBackupPoms=false
           
-          # 3. Update Metadata XMLs (ComponentId und VariantId) - only replace matching current version
-          find src/main/resources/metadata -name "metadata-*.xml" -type f -exec sed -i "s/\/version::$CURRENT_VERSION\"/\/version::$VERSION\"/g" {} +
-          find src/main/resources/metadata -name "metadata-*.xml" -type f -exec sed -i "s/\/version::$CURRENT_VERSION<\/Name>/\/version::$VERSION<\/Name>/g" {} +
+          # 3. Update Metadata XMLs (ComponentId and VariantId).
+          #    An iFlow binds to MAJOR.MINOR (componentVersion=1.2), so rewriting a metadata
+          #    file in place is only safe for micro bumps. A minor bump must ship a NEW file and
+          #    leave the outgoing line untouched, otherwise every iFlow bound to it breaks.
+          CURRENT_LINE="$(echo "$CURRENT_VERSION" | cut -d. -f1,2)"
+          NEW_LINE="$(echo "$VERSION" | cut -d. -f1,2)"
+          if [ "$CURRENT_LINE" = "$NEW_LINE" ]; then
+            echo "Micro bump within line $CURRENT_LINE — updating metadata in place"
+            find src/main/resources/metadata -name "metadata-*.xml" -type f -exec sed -i "s/\/version::$CURRENT_VERSION\"/\/version::$VERSION\"/g" {} +
+            find src/main/resources/metadata -name "metadata-*.xml" -type f -exec sed -i "s/\/version::$CURRENT_VERSION<\/Name>/\/version::$VERSION<\/Name>/g" {} +
+          else
+            echo "Minor/major bump $CURRENT_LINE -> $NEW_LINE — metadata must NOT be rewritten in place"
+            MISSING=""
+            for DIRECTION in receiver sender; do
+              if ! grep -rlq "version::$VERSION[\"<]" src/main/resources/metadata/metadata-$DIRECTION-*.xml 2>/dev/null; then
+                MISSING="$MISSING $DIRECTION"
+              fi
+            done
+            if [ -n "$MISSING" ]; then
+              echo "::error::Release $VERSION opens the new metadata line $NEW_LINE, but no$MISSING metadata file declares version::$VERSION."
+              echo "::error::Copy the current variant into a NEW file (e.g. metadata-receiver-$VERSION.xml), set component and variant to $VERSION there, and leave the $CURRENT_LINE files unchanged so existing iFlows keep deploying."
+              exit 1
+            fi
+            echo "New metadata files for line $NEW_LINE are present — leaving line $CURRENT_LINE untouched"
+
+            # Record the new line as required, so it can never be dropped by a later bump.
+            for DIRECTION in receiver sender; do
+              grep -qx "$DIRECTION=$NEW_LINE" src/test/resources/required-metadata-lines.txt \
+                || echo "$DIRECTION=$NEW_LINE" >> src/test/resources/required-metadata-lines.txt
+            done
+
+            # Freeze every metadata file that the bump turns into a prior version.
+            for FILE in src/main/resources/metadata/metadata-*.xml; do
+              grep -q "version::$VERSION[\"<]" "$FILE" && continue
+              NAME="$(basename "$FILE")"
+              grep -q "^$NAME=" src/test/resources/released-metadata-checksums.txt \
+                || echo "$NAME=$(sha256sum "$FILE" | cut -d' ' -f1)" >> src/test/resources/released-metadata-checksums.txt
+            done
+          fi
           
           # 4. Update CHANGELOG.md (replace Unreleased heading with the version and current date)
           TODAY=$(date +%Y-%m-%d)

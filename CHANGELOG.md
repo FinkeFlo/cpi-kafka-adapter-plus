@@ -13,6 +13,7 @@ iFlow compatibility.
 
 ### Changed
 - **Rollout note:** integration flows started on an adapter *before* this version still run unwarmed code and will show the old failure once, when they are updated to this version — redeploy the Kafka integration flows once after this rollout. All later adapter updates are transparent to running flows.
+- The adapter ships the 1.2 component metadata line again. An iFlow binds to the adapter's `MAJOR.MINOR`, so the 1.3.0 release — which raised the existing metadata files in place instead of adding new ones — left iFlows configured against 1.2 undeployable (`This component KafkaAdapterPlus with version 1.2 is not supported in Cloud Integration profile`). The restored files are the unchanged 1.2.8 definitions, whose property set is a subset of 1.3.5, so the current runtime serves them. The release workflow now rewrites metadata in place only for micro bumps and stops a minor bump that would drop the outgoing line, and a build check keeps every released line shipping.
 
 ## [1.3.5] - 2026-09-17
 ### Fixed

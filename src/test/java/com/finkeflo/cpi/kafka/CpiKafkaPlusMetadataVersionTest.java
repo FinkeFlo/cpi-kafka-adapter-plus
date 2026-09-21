@@ -97,6 +97,40 @@ public class CpiKafkaPlusMetadataVersionTest {
         }
     }
 
+    /**
+     * Gap guard: every minor line that has ever been released must keep shipping a metadata
+     * file. An iFlow binds to MAJOR.MINOR ({@code componentVersion=1.2}), so dropping a minor
+     * line leaves every iFlow bound to it permanently undeployable. The frozen-file guard above
+     * cannot catch this: at release time the outgoing file still matches config.adk, so it is
+     * treated as the editable current line and a minor bump can overwrite it in place.
+     */
+    @Test
+    public void everyReleasedMinorLineStillShips() throws IOException {
+        Map<String, Set<String>> shipped = new HashMap<String, Set<String>>();
+        for (File f : metadataFiles()) {
+            String direction = f.getName().startsWith("metadata-sender-") ? "sender" : "receiver";
+            String version = versionsIn(f).iterator().next();
+            String[] parts = version.split("\\.");
+            Set<String> lines = shipped.get(direction);
+            if (lines == null) {
+                lines = new LinkedHashSet<String>();
+                shipped.put(direction, lines);
+            }
+            lines.add(parts[0] + "." + parts[1]);
+        }
+        for (Map.Entry<String, List<String>> required : loadRequiredLines().entrySet()) {
+            Set<String> lines = shipped.get(required.getKey());
+            for (String line : required.getValue()) {
+                Assert.assertTrue(
+                    "released " + required.getKey() + " metadata line " + line
+                        + " no longer ships — iFlows bound to componentVersion " + line
+                        + " would fail to deploy. Restore the metadata file or, for a minor bump,"
+                        + " copy the current variant into a NEW file instead of editing it in place.",
+                    lines != null && lines.contains(line));
+            }
+        }
+    }
+
     private static File[] metadataFiles() {
         File dir = new File("src/main/resources/metadata");
         Assert.assertTrue("metadata dir not found at " + dir.getAbsolutePath(), dir.isDirectory());
@@ -171,6 +205,32 @@ public class CpiKafkaPlusMetadataVersionTest {
                 out.put(s.substring(0, eq).trim(), s.substring(eq + 1).trim());
             }
         }
+        return out;
+    }
+
+    private static final String REQUIRED_LINES_FILE = "src/test/resources/required-metadata-lines.txt";
+
+    private static Map<String, List<String>> loadRequiredLines() throws IOException {
+        File f = new File(REQUIRED_LINES_FILE);
+        Assert.assertTrue("required-lines manifest not found at " + f.getAbsolutePath(), f.isFile());
+        Map<String, List<String>> out = new HashMap<String, List<String>>();
+        String text = new String(Files.readAllBytes(f.toPath()), StandardCharsets.UTF_8);
+        for (String line : text.split("\n")) {
+            String s = line.trim();
+            if (s.isEmpty() || s.startsWith("#")) {
+                continue;
+            }
+            int eq = s.indexOf('=');
+            Assert.assertTrue("malformed entry in " + REQUIRED_LINES_FILE + ": " + s, eq > 0);
+            String direction = s.substring(0, eq).trim();
+            List<String> lines = out.get(direction);
+            if (lines == null) {
+                lines = new ArrayList<String>();
+                out.put(direction, lines);
+            }
+            lines.add(s.substring(eq + 1).trim());
+        }
+        Assert.assertFalse("no entries in " + REQUIRED_LINES_FILE, out.isEmpty());
         return out;
     }
 
