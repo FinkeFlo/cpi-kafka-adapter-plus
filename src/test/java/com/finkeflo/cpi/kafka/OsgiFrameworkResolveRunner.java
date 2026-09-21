@@ -75,9 +75,11 @@ public final class OsgiFrameworkResolveRunner {
      * issue #156 was raised for. Because the list is fixed, a newly calculated mandatory import
      * that CPI does not export makes {@code adapter} mode fail, which is the alarm we want.
      * <p>
-     * Versions are pinned at the lower bound of the range the bundle declares, so the check also
-     * documents the minimum platform level the adapter claims to run on. Packages the OSGi
-     * framework already exports from the system bundle ({@code java.*}, {@code javax.*},
+     * Versions are the ones observed on a CPI tenant where that observation exists, so the list
+     * models the platform the adapter actually runs on rather than a guess. Where no observation
+     * exists the entry is left unversioned, which resolves against any exporter - honest about
+     * what is known instead of inventing a number that would look authoritative. Packages the
+     * OSGi framework already exports from the system bundle ({@code java.*}, {@code javax.*},
      * {@code org.w3c.dom}, {@code org.xml.sax}, {@code org.osgi.framework}) are intentionally
      * absent - re-exporting them here would shadow the framework's own JRE profile.
      * <p>
@@ -85,30 +87,37 @@ public final class OsgiFrameworkResolveRunner {
      * here together with the reason. That edit is the conscious decision this test exists to force.
      */
     private static final String[] CPI_SYSTEM_PACKAGES = {
-            // Camel runtime hosting the adapter component.
-            "org.apache.camel;version=3.14.0",
-            "org.apache.camel.spi;version=3.14.0",
-            "org.apache.camel.support;version=3.14.0",
-            // Logging facade; CPI ships SLF4J 1.7.x.
-            "org.slf4j;version=1.7.36",
-            "org.slf4j.event;version=1.7.36",
-            "org.slf4j.helpers;version=1.7.36",
-            "org.slf4j.spi;version=1.7.36",
-            // SAP Integration Suite adapter APIs.
+            // Camel runtime hosting the adapter component. Version observed on a CPI tenant:
+            // the platform ships org.apache.camel.camel-kafka 3.14.7.sap-56, so the Camel line
+            // is 3.14.7 and the core packages are exported at that version.
+            "org.apache.camel;version=3.14.7",
+            "org.apache.camel.spi;version=3.14.7",
+            "org.apache.camel.support;version=3.14.7",
+            // Logging facade. Not covered by the tenant probe, so the version is not an
+            // observation but the floor of the range the bundle declares ([1.7,2)) - an
+            // unversioned export defaults to 0.0.0 and would not satisfy that import at all.
+            "org.slf4j;version=1.7.0",
+            "org.slf4j.event;version=1.7.0",
+            "org.slf4j.helpers;version=1.7.0",
+            "org.slf4j.spi;version=1.7.0",
+            // SAP Integration Suite adapter APIs. Not covered by the tenant probe. The bundle
+            // imports com.sap.it.api.msglog at [1.1,2) and .msglog.adapter at [1.3,2); those two
+            // are pinned at the declared floor, the unversioned SAP packages stay unversioned.
             "com.sap.it.api",
             "com.sap.it.api.adapter.iflowmonitoring",
             "com.sap.it.api.keystore",
             "com.sap.it.api.msglog;version=1.1.0",
             "com.sap.it.api.msglog.adapter;version=1.3.0",
             "com.sap.it.api.securestore",
-            // Consumed by the ADK-generated monitor bundle.
+            // Consumed by the ADK-generated monitor bundle. Not covered by the tenant probe.
             "com.sap.esb.monitoring.messages.adapter",
             "com.sap.it.nm.component",
             "com.sap.it.op.component.check",
-            "org.osgi.service.blueprint.container;version=1.0.0",
-            // Avro's optional codecs reference these; CPI provides Commons on the platform.
-            "org.apache.commons.compress.compressors.bzip2",
-            "org.apache.commons.compress.compressors.xz",
+            "org.osgi.service.blueprint.container",
+            // Avro's optional codecs reference these. Version observed on a CPI tenant:
+            // org.apache.commons.commons-compress 1.26.1. commons-io is not in the probe.
+            "org.apache.commons.compress.compressors.bzip2;version=1.26.1",
+            "org.apache.commons.compress.compressors.xz;version=1.26.1",
             "org.apache.commons.io",
     };
 
@@ -462,7 +471,8 @@ public final class OsgiFrameworkResolveRunner {
         for (int i = 0; i < CPI_SYSTEM_PACKAGES.length; i++) {
             String pkg = firstPathSegment(CPI_SYSTEM_PACKAGES[i]);
             if (!availableExports.containsKey(pkg)) {
-                availableExports.put(pkg, new ArrayList<String>(Arrays.asList("<CPI system packages>")));
+                availableExports.put(pkg, new ArrayList<String>(
+                        Arrays.asList("<CPI system packages>:" + declaredVersion(CPI_SYSTEM_PACKAGES[i]))));
             }
         }
         StringBuilder diagnostic = new StringBuilder();
@@ -483,7 +493,7 @@ public final class OsgiFrameworkResolveRunner {
             }
             for (int j = 0; j < requiredImports.size(); j++) {
                 String pkg = requiredImports.get(j);
-                List<String> exporters = availableExports.get(pkg);
+                List<String> exporters = availableExports.get(packageOf(pkg));
                 diagnostic.append("  import ").append(pkg).append(" -> ");
                 if (exporters == null || exporters.isEmpty()) {
                     diagnostic.append("UNRESOLVED (no exporter among the installed bundles, the system"
@@ -541,15 +551,33 @@ public final class OsgiFrameworkResolveRunner {
             if (clause.optional) {
                 continue;
             }
-            imports.addAll(clause.packageNames);
+            for (int j = 0; j < clause.packageNames.size(); j++) {
+                imports.add(withVersion(clause.packageNames.get(j), clause.versionRange));
+            }
         }
         return imports;
+    }
+
+    /**
+     * Renders {@code pkg} and {@code version} as {@code pkg version=<range>}, so a diagnostic can
+     * show why a package that <em>is</em> exported still does not satisfy an import. Without the
+     * version a range mismatch reads as if everything were fine.
+     */
+    private static String withVersion(String name, String version) {
+        return hasText(version) ? name + " version=" + version : name + " version=<any>";
+    }
+
+    /** @return the package name of a {@code pkg version=<range>} entry produced by {@link #withVersion}. */
+    private static String packageOf(String annotated) {
+        int space = annotated.indexOf(' ');
+        return space < 0 ? annotated : annotated.substring(0, space);
     }
 
     private static ImportClause parseImportClause(String clause) {
         String[] segments = clause.split(";");
         List<String> packageNames = new ArrayList<String>();
         boolean optional = false;
+        String versionRange = null;
         for (int i = 0; i < segments.length; i++) {
             String segment = segments[i].trim();
             if (segment.length() == 0) {
@@ -558,16 +586,29 @@ public final class OsgiFrameworkResolveRunner {
             if (segment.indexOf('=') >= 0) {
                 if (segment.startsWith("resolution:=")) {
                     optional = "optional".equals(unquote(segment.substring("resolution:=".length()).trim()));
+                } else if (segment.startsWith("version=")) {
+                    versionRange = unquote(segment.substring("version=".length()).trim());
                 }
                 continue;
             }
             packageNames.add(segment);
         }
-        return new ImportClause(packageNames, optional);
+        return new ImportClause(packageNames, optional, versionRange);
     }
 
-    private static String firstPathSegment(String clause) {
-        int semicolon = clause.indexOf(';');
+    /** @return the {@code version=} attribute of an {@link #CPI_SYSTEM_PACKAGES} clause, or {@code <unversioned>}. */
+    private static String declaredVersion(String clause) {
+        String[] segments = clause.split(";");
+        for (int i = 1; i < segments.length; i++) {
+            String segment = segments[i].trim();
+            if (segment.startsWith("version=")) {
+                return unquote(segment.substring("version=".length()).trim());
+            }
+        }
+        return "<unversioned>";
+    }
+
+    private static String firstPathSegment(String clause) {        int semicolon = clause.indexOf(';');
         String path = semicolon >= 0 ? clause.substring(0, semicolon) : clause;
         return path.trim();
     }
@@ -704,10 +745,12 @@ public final class OsgiFrameworkResolveRunner {
     private static final class ImportClause {
         private final List<String> packageNames;
         private final boolean optional;
+        private final String versionRange;
 
-        private ImportClause(List<String> packageNames, boolean optional) {
+        private ImportClause(List<String> packageNames, boolean optional, String versionRange) {
             this.packageNames = packageNames;
             this.optional = optional;
+            this.versionRange = versionRange;
         }
     }
 }
