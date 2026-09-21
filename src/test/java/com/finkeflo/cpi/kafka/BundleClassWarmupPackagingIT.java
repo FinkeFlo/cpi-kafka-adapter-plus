@@ -95,9 +95,12 @@ public class BundleClassWarmupPackagingIT {
         Assert.assertTrue("expected the codec jars on Bundle-ClassPath, got " + nestedJars, nestedJars.size() >= 3);
         Assert.assertTrue("suspiciously few classes: " + reference.size(), reference.size() > 5000);
 
-        TreeSet<String> enumerated = new TreeSet<>();
-        BundleClassWarmup.enumerateJarFile(jar, enumerated, true);
+        BundleClassWarmup.ClassIndex index = new BundleClassWarmup.ClassIndex(true);
+        BundleClassWarmup.enumerateJarFile(jar, index, true);
+        TreeSet<String> enumerated = index.names;
         Assert.assertEquals("warm-up enumeration must cover every packaged class", reference, enumerated);
+        Assert.assertEquals("every packaged class file must be readable by the constant-pool scanner",
+                0, index.unreadable);
 
         for (String mustHave : Arrays.asList(
                 "org.apache.kafka.common.compress.Lz4Compression$Builder",
@@ -156,6 +159,93 @@ public class BundleClassWarmupPackagingIT {
         }
         Assert.assertTrue("classes failed to load outside the tolerated set:\n  " + String.join("\n  ", unexpected),
                 unexpected.isEmpty());
+    }
+
+    /**
+     * Root namespaces the bundle bytecode is allowed to reach outside its own content. Everything
+     * here is either provided by the CPI platform (Camel, SAP APIs, SLF4J, OSGi, {@code javax.*})
+     * or an optional dependency of an embedded library that is simply absent at runtime. A new
+     * entry means the bundle grew external surface that stage 3 now has to warm up — review it.
+     */
+    private static final List<String> ALLOWED_IMPORT_NAMESPACES = Arrays.asList(
+            "com.google.common.util.concurrent.",     // guava, optional in the grpc stubs
+            "com.sap.it.api.",                        // CPI platform
+            "io.grpc.",                               // OpenTelemetry proto stubs, not shipped
+            "javax.",                                 // JRE/system bundle exports
+            "org.apache.camel.",                      // CPI platform
+            "org.apache.commons.compress.",           // avro container codecs, not shipped (#151)
+            "org.apache.commons.io.",                 // optional in avro, not shipped
+            "org.graalvm.polyglot.",                  // json-schema-validator regex backend, not shipped
+            "org.ietf.jgss.",                         // Kerberos, JRE
+            "org.jcodings.", "org.joni.",             // json-schema-validator regex backend, not shipped
+            "org.jose4j.",                            // Kafka OAUTHBEARER, not shipped
+            "org.osgi.framework.",                    // OSGi core, optional unversioned import
+            "org.slf4j.",                             // CPI platform
+            "org.w3c.dom.", "org.xml.sax.",           // JRE XML
+            "org.yaml.snakeyaml.",                    // optional in jackson-dataformat-yaml, not shipped
+            "sun.misc."                               // Unsafe, JRE
+    );
+
+    /**
+     * Classes the adapter provably needs from other bundles. They are exactly the kind that an
+     * error or stop path touches for the first time after an adapter update (issue #154), so they
+     * must be in the stage-3 set.
+     */
+    private static final List<String> REQUIRED_IMPORTS = Arrays.asList(
+            "org.apache.camel.CamelExchangeException",
+            "org.apache.camel.Exchange",
+            "org.apache.camel.spi.ExceptionHandler",
+            "org.apache.camel.support.ScheduledPollConsumer",
+            "com.sap.it.api.ITApiFactory",
+            "com.sap.it.api.securestore.SecureStoreService",
+            "org.slf4j.Logger");
+
+    /**
+     * Stage 3 guard (issue #154): the set of classes the bundle references but does not contain —
+     * everything {@code DynamicImport-Package: *} would otherwise wire lazily — must stay small,
+     * fully attributable and must contain the platform classes the adapter's own code needs.
+     */
+    @Test
+    public void importedClassSurfaceIsSmallAndAttributable() throws Exception {
+        File jar = locateBundleJar();
+
+        BundleClassWarmup.ClassIndex index = new BundleClassWarmup.ClassIndex(true);
+        BundleClassWarmup.enumerateJarFile(jar, index, true);
+        Assert.assertEquals("every packaged class file must be readable", 0, index.unreadable);
+
+        TreeSet<String> imported = BundleClassWarmup.importedClassNames(index);
+
+        // Build artifact for review: exactly what stage 3 pre-loads.
+        List<String> lines = new ArrayList<>();
+        lines.add("bundleClasses=" + index.names.size() + " referencedTypes=" + index.referencedTypes.size()
+                + " imported=" + imported.size());
+        lines.addAll(imported);
+        Files.write(new File("target", "warmup-it-imported.txt").toPath(), lines);
+
+        Assert.assertTrue("suspiciously few referenced types: " + index.referencedTypes.size(),
+                index.referencedTypes.size() > 500);
+        // A hard ceiling rather than an exact count: dependency bumps move the number a little,
+        // but an order-of-magnitude jump means the bundle lost content or gained a new dependency.
+        Assert.assertTrue("imported-class surface grew unexpectedly (" + imported.size()
+                        + "); review target/warmup-it-imported.txt",
+                imported.size() > 100 && imported.size() < 600);
+
+        List<String> unattributed = new ArrayList<>();
+        for (String name : imported) {
+            if (ALLOWED_IMPORT_NAMESPACES.stream().noneMatch(name::startsWith)) {
+                unattributed.add(name);
+            }
+        }
+        Assert.assertTrue("classes referenced from outside the bundle in an unknown namespace:\n  "
+                + String.join("\n  ", unattributed), unattributed.isEmpty());
+
+        for (String required : REQUIRED_IMPORTS) {
+            Assert.assertTrue("stage 3 must pre-load " + required, imported.contains(required));
+        }
+        Assert.assertFalse("java.* is boot-delegated and must not be warmed up",
+                imported.stream().anyMatch(n -> n.startsWith("java.")));
+        Assert.assertTrue("bundle content must not leak into the imported set",
+                imported.stream().noneMatch(index.names::contains));
     }
 
     private static void collect(TreeSet<String> names, String path) {
