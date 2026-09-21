@@ -145,6 +145,20 @@
             <groupId>org.apache.avro</groupId>
             <artifactId>avro</artifactId>
             <version>${avro.version}</version>
+            <exclusions>
+                <!-- commons-compress is only reachable from org.apache.avro.file.XZCodec and
+                     BZip2Codec, the codecs of the Avro object-container-file format. The adapter
+                     encodes single records (Confluent wire format) and never opens a data file, so
+                     nothing in the bundle calls them - verified by scanning every class in the
+                     built bundle for references. Excluding it drops a 1.1 MB embedded jar and the
+                     11 pack200 classes that could not load in the class warm-up. commons-codec
+                     (0.4 MB) rode in as a commons-compress dependency and goes with it; no class
+                     in the bundle references org.apache.commons.codec either. -->
+                <exclusion>
+                    <groupId>org.apache.commons</groupId>
+                    <artifactId>commons-compress</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
 
         <!-- Jackson for JSON serialization -->
@@ -398,8 +412,6 @@
                             jackson-datatype-jdk8;scope=compile,
                             json-schema-validator;scope=compile,
                             itu;scope=compile,
-                            commons-compress;scope=compile,
-                            commons-codec;scope=compile,
                             lz4-java;scope=runtime,
                             zstd-jni;scope=runtime,
                             snappy-java;scope=runtime
