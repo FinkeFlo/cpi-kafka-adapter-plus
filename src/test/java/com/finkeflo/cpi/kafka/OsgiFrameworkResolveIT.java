@@ -31,31 +31,103 @@ import org.junit.Assume;
 import org.junit.Test;
 
 /**
- * Verifies ESA standalone bundle resolution using a real OSGi runtime in an isolated JVM.
+ * Verifies that the shipped ESA resolves in a real OSGi runtime, in an isolated JVM.
  * <p>
- * Isolation avoids classpath interference from provided SAP dependencies while still checking
- * the real resolver behavior of the produced ESA content.
+ * Isolation avoids classpath interference from provided SAP dependencies while still checking the
+ * real resolver behavior of the produced ESA content. The suite covers four properties:
+ * <ol>
+ * <li>the ESA ships the expected number of third-party bundles (baseline zero);</li>
+ * <li>the adapter and monitor bundles resolve against the packages CPI provides;</li>
+ * <li>that resolve check rejects an unsatisfiable mandatory import (mutation probe);</li>
+ * <li>the harness itself can fail (negative guard).</li>
+ * </ol>
+ * Every assertion checks a marker in the runner output on top of the exit code. Exit code alone is
+ * what let the previous version of this test pass without resolving a single bundle (issue #156).
  */
 public class OsgiFrameworkResolveIT {
 
+    /**
+     * The number of third-party bundles the ESA is expected to ship alongside the project's own.
+     * <p>
+     * Zero is the intended steady state: every runtime dependency is embedded in the fat bundle or
+     * excluded from {@code copy-dependencies}. The baseline is asserted rather than tolerated, so
+     * a dependency that slips past {@code excludeGroupIds} - the way {@code at.yawk.lz4:lz4-java}
+     * once did - is reported instead of silently passing (issue #156).
+     */
+    private static final int EXPECTED_STANDALONE_BUNDLES = 0;
+
     @Test
-    public void esaStandaloneBundlesResolveInOsgiFramework() throws Exception {
-        File esa = locateBuiltEsa();
+    public void esaShipsTheExpectedNumberOfStandaloneBundles() throws Exception {
+        File esa = requireBuiltEsa();
         if (esa == null) {
-            Assume.assumeTrue(
-                    "No ESA found under target/. Run this test in an ESA-producing build path (e.g. mvn install).",
-                    false);
             return;
         }
 
-        RunnerResult result = runResolver("resolve", esa.getAbsolutePath());
+        RunnerResult result = runResolver("standalone", esa.getAbsolutePath());
         Assert.assertEquals("OSGi resolver failed for ESA standalone bundles:\n" + result.output, 0, result.exitCode);
+        assertOutputContains(result, "standaloneBundles=" + EXPECTED_STANDALONE_BUNDLES,
+                "The ESA no longer ships the expected number of standalone bundles. A transitive"
+                        + " dependency likely slipped past the copy-dependencies excludeGroupIds in pom.xml."
+                        + " Verify it carries a CPI-resolvable manifest, then update"
+                        + " EXPECTED_STANDALONE_BUNDLES.");
+    }
+
+    @Test
+    public void shippedAdapterBundleResolvesAgainstCpiPlatformPackages() throws Exception {
+        File esa = requireBuiltEsa();
+        if (esa == null) {
+            return;
+        }
+
+        RunnerResult result = runResolver("adapter", esa.getAbsolutePath());
+        Assert.assertEquals("The shipped adapter bundle does not resolve against the packages CPI"
+                + " provides:\n" + result.output, 0, result.exitCode);
+        assertOutputContains(result, "Resolved project bundles: 2",
+                "Expected the adapter bundle and the ADK monitor bundle to be installed and resolved.");
+    }
+
+    /**
+     * Keeps {@link #shippedAdapterBundleResolvesAgainstCpiPlatformPackages} honest: the same
+     * shipped bundle with one unsatisfiable mandatory import must not resolve. Without this probe
+     * the resolve check could degrade into a test that cannot fail.
+     */
+    @Test
+    public void adapterResolveCatchesAnUnsatisfiableMandatoryImport() throws Exception {
+        File esa = requireBuiltEsa();
+        if (esa == null) {
+            return;
+        }
+
+        RunnerResult result = runResolver("mutation", esa.getAbsolutePath());
+        Assert.assertEquals("Mutation probe failed:\n" + result.output, 0, result.exitCode);
+        assertOutputContains(result, "mutationProbe=detected",
+                "The adapter resolve check did not reject an unsatisfiable mandatory import.");
     }
 
     @Test
     public void resolverHarnessFailsForUnresolvableBundle() throws Exception {
         RunnerResult result = runResolver("negative");
         Assert.assertEquals("Negative resolver guard failed:\n" + result.output, 0, result.exitCode);
+        assertOutputContains(result, "Negative guard passed.", "Negative guard did not run.");
+    }
+
+    private static void assertOutputContains(RunnerResult result, String expected, String explanation) {
+        Assert.assertTrue(explanation + "\nExpected runner output to contain: " + expected + "\nActual output:\n"
+                + result.output, result.output.contains(expected));
+    }
+
+    /**
+     * @return the built ESA, or {@code null} when the build path does not produce one and the
+     *         caller should skip.
+     */
+    private static File requireBuiltEsa() {
+        File esa = locateBuiltEsa();
+        if (esa == null) {
+            Assume.assumeTrue(
+                    "No ESA found under target/. Run this test in an ESA-producing build path (e.g. mvn install).",
+                    false);
+        }
+        return esa;
     }
 
     private static File locateBuiltEsa() {
