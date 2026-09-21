@@ -145,6 +145,20 @@
             <groupId>org.apache.avro</groupId>
             <artifactId>avro</artifactId>
             <version>${avro.version}</version>
+            <exclusions>
+                <!-- commons-compress is only reachable from org.apache.avro.file.XZCodec and
+                     BZip2Codec, the codecs of the Avro object-container-file format. The adapter
+                     encodes single records (Confluent wire format) and never opens a data file, so
+                     nothing in the bundle calls them - verified by scanning every class in the
+                     built bundle for references. Excluding it drops a 1.1 MB embedded jar and the
+                     11 pack200 classes that could not load in the class warm-up. commons-codec
+                     (0.4 MB) rode in as a commons-compress dependency and goes with it; no class
+                     in the bundle references org.apache.commons.codec either. -->
+                <exclusion>
+                    <groupId>org.apache.commons</groupId>
+                    <artifactId>commons-compress</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
 
         <!-- Jackson for JSON serialization -->
@@ -398,8 +412,6 @@
                             jackson-datatype-jdk8;scope=compile,
                             json-schema-validator;scope=compile,
                             itu;scope=compile,
-                            commons-compress;scope=compile,
-                            commons-codec;scope=compile,
                             lz4-java;scope=runtime,
                             zstd-jni;scope=runtime,
                             snappy-java;scope=runtime
@@ -556,7 +568,10 @@
                     </execution>
                 </executions>
             </plugin>
-            <!-- Stage adapter project without .git for ADK build (avoids ADK copy failure on .git dirs) -->
+            <!-- Stage the declared adapter project files for the ADK build. Include list, not an
+                 exclude list: the ADK build input must depend on what the project declares, not on
+                 whatever happens to sit in the working tree (scratch dirs, editor state, local
+                 tooling). -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-antrun-plugin</artifactId>
@@ -571,11 +586,23 @@
                                 <mkdir dir="${project.build.directory}/${project.build.finalName}/target"/>
                                 <copy todir="${project.build.directory}/${project.build.finalName}" overwrite="true">
                                     <fileset dir="${project.basedir}">
-                                        <exclude name=".git/**"/>
-                                        <exclude name="target/**"/>
-                                        <exclude name="dev/**"/>
-                                        <exclude name=".claude/**"/>
-                                        <exclude name=".venv/**"/>
+                                        <!-- ADK build inputs -->
+                                        <include name="config.adk"/>
+                                        <include name="pom.xml"/>
+                                        <include name="src/**"/>
+                                        <!-- Licence and documentation shipped with the project -->
+                                        <include name="LICENSE"/>
+                                        <include name="NOTICE"/>
+                                        <include name="THIRD-PARTY.txt"/>
+                                        <include name="README.md"/>
+                                        <include name="CHANGELOG.md"/>
+                                        <include name="docs/**"/>
+                                        <!-- Defensive: never stage local working state, even if it
+                                             ends up below one of the included trees. -->
+                                        <exclude name="**/.git/**"/>
+                                        <exclude name="**/target/**"/>
+                                        <exclude name="**/.tmp/**"/>
+                                        <exclude name="**/.DS_Store"/>
                                     </fileset>
                                 </copy>
                                 <copy todir="${project.build.directory}/${project.build.finalName}/target" overwrite="true">

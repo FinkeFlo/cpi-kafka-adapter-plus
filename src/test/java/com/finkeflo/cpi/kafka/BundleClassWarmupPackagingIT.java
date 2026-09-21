@@ -59,10 +59,7 @@ public class BundleClassWarmupPackagingIT {
     private static final List<String> TOLERATED_FAILURE_PREFIXES = Arrays.asList(
             "org.apache.kafka.shaded.io.opentelemetry.proto.collector.", // io.grpc stubs (44 classes)
             "org.apache.kafka.common.security.oauthbearer.internals.secured.", // org.jose4j (4 classes)
-            "com.networknt.schema.regex.",            // org.joni / org.graalvm (2 classes)
-            // org.objectweb.asm (11 classes). Passes locally because asm is on the test classpath,
-            // fails on CPI where the bundle class space has no asm (observed: 61 failures total).
-            "org.apache.commons.compress.harmony.pack200."
+            "com.networknt.schema.regex."             // org.joni / org.graalvm (2 classes)
     );
 
     @Test

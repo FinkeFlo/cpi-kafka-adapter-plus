@@ -48,8 +48,7 @@ public class OsgiFrameworkResolveIT {
             return;
         }
 
-        RunnerResult result = runResolver("resolve", esa.getAbsolutePath(),
-                System.getProperty("project.build.finalName", ""));
+        RunnerResult result = runResolver("resolve", esa.getAbsolutePath());
         Assert.assertEquals("OSGi resolver failed for ESA standalone bundles:\n" + result.output, 0, result.exitCode);
     }
 
