@@ -297,7 +297,7 @@ public class DiagnosticContractTest {
      */
     @Test
     public void anOptionIsNotOfferedOnAChannelThatIgnoresIt() throws IOException {
-        String senderMetadata = read(Paths.get("src/main/resources/metadata/metadata-sender-1.2.0.xml"));
+        String senderMetadata = read(Paths.get("src/main/resources/metadata/metadata-sender-1.3.0.xml"));
         if (!senderMetadata.contains("diagnosticsLevel")) {
             return;
         }
