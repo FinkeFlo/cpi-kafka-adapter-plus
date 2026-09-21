@@ -52,7 +52,14 @@ import org.junit.Test;
 public class AutoPauseIT {
 
     private static final int ERROR_THRESHOLD = 2;
-    private static final int COOLDOWN_SECONDS = 2;
+    /**
+     * Long enough that the cooldown observation below cannot race the resume. The value is not
+     * what this test verifies - pause-then-resume is - so it only has to be comfortably larger
+     * than {@link #COOLDOWN_OBSERVATION_MS} plus any scheduling noise on a loaded CI runner.
+     */
+    private static final int COOLDOWN_SECONDS = 6;
+    private static final long COOLDOWN_OBSERVATION_MS = 1000L;
+    private static final long COOLDOWN_POLL_INTERVAL_MS = 100L;
     private static final int MESSAGE_COUNT = 6;
 
     private static DefaultCamelContext ctx;
@@ -131,7 +138,10 @@ public class AutoPauseIT {
 
             assertNoProcessingDuringCooldown(pollMethod, consumer, attempts.get());
 
-            waitUntilSuccessCount(pollMethod, consumer, MESSAGE_COUNT - ERROR_THRESHOLD, 20000L);
+            // The cooldown still has to expire before anything is processed, so the budget has to
+            // cover it on top of the time the remaining messages need.
+            waitUntilSuccessCount(pollMethod, consumer, MESSAGE_COUNT - ERROR_THRESHOLD,
+                    20000L + COOLDOWN_SECONDS * 1000L);
         } finally {
             consumer.doStop();
         }
@@ -175,21 +185,48 @@ public class AutoPauseIT {
                 });
     }
 
+    /**
+     * Polls a paused consumer for a fixed window and asserts that nothing is processed.
+     *
+     * <p>This used Awaitility's {@code during(800ms)} / {@code atMost(1200ms)} pair, which requires
+     * the condition to hold for a continuous 800 ms within a 1200 ms deadline. That leaves 400 ms of
+     * slack for a loop that performs a real broker poll per iteration, so one slow poll on a loaded
+     * runner aborted the observation with a {@code ConditionTimeoutException} even though the
+     * consumer had behaved correctly - which is exactly how it failed in CI.
+     *
+     * <p>It was fragile in the opposite direction too: the window has to close before the cooldown
+     * expires, or the consumer legitimately resumes mid-observation and {@code processed != 0} reads
+     * like a product defect rather than a test that ran out of time.
+     *
+     * <p>So there is no deadline here at all. The loop runs for a fixed window that fits well inside
+     * {@link #COOLDOWN_SECONDS}, and the only way it can fail is a real assertion violation. The
+     * elapsed time travels with the failure messages so that a genuine overrun stays
+     * distinguishable from a genuine defect.
+     */
     private static void assertNoProcessingDuringCooldown(Method pollMethod, CpiKafkaPlusConsumer consumer,
                                                          int attemptsAfterPause) throws Exception {
-        AtomicInteger pausedPolls = new AtomicInteger();
-        await().during(Duration.ofMillis(800))
-                .atMost(Duration.ofMillis(1200))
-                .pollInterval(Duration.ofMillis(100))
-                .untilAsserted(() -> {
-                    int processed = invokePollAllowingIntentionalFailures(pollMethod, consumer);
-                    pausedPolls.incrementAndGet();
-                    Assert.assertEquals("Auto-paused poll must not process records", 0, processed);
-                    Assert.assertEquals("No downstream processor calls expected during cooldown",
-                            attemptsAfterPause, getAttempts(consumer));
-                });
+        long startNanos = System.nanoTime();
+        long deadlineNanos = startNanos + COOLDOWN_OBSERVATION_MS * 1_000_000L;
+        int pausedPolls = 0;
+
+        do {
+            int processed = invokePollAllowingIntentionalFailures(pollMethod, consumer);
+            pausedPolls++;
+            long elapsedMs = (System.nanoTime() - startNanos) / 1_000_000L;
+            Assert.assertEquals("Auto-paused poll must not process records (poll " + pausedPolls
+                            + ", " + elapsedMs + " ms into a " + (COOLDOWN_SECONDS * 1000L) + " ms cooldown)",
+                    0, processed);
+            Assert.assertEquals("No downstream processor calls expected during cooldown (poll " + pausedPolls
+                            + ", " + elapsedMs + " ms into a " + (COOLDOWN_SECONDS * 1000L) + " ms cooldown)",
+                    attemptsAfterPause, getAttempts(consumer));
+            if (System.nanoTime() >= deadlineNanos) {
+                break;
+            }
+            Thread.sleep(COOLDOWN_POLL_INTERVAL_MS);
+        } while (System.nanoTime() < deadlineNanos);
+
         Assert.assertTrue("Cooldown observation should include at least one paused poll",
-                pausedPolls.get() > 0);
+                pausedPolls > 0);
     }
 
     private static int invokePollAllowingIntentionalFailures(Method pollMethod,
