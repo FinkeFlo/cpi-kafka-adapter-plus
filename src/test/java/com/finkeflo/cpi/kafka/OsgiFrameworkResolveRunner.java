@@ -66,22 +66,94 @@ public final class OsgiFrameworkResolveRunner {
     /** Symbolic-name suffix of the ADK-generated monitor bundle. */
     private static final String MONITOR_BUNDLE_SUFFIX = ".monitor";
 
+    /**
+     * The packages CPI is expected to provide to the adapter subsystem, written down here as a
+     * deliberate, checked-in platform contract.
+     * <p>
+     * This list must <em>not</em> be derived from the built bundle's own {@code Import-Package}
+     * header. Deriving it would make the resolve check pass by construction - the exact defect
+     * issue #156 was raised for. Because the list is fixed, a newly calculated mandatory import
+     * that CPI does not export makes {@code adapter} mode fail, which is the alarm we want.
+     * <p>
+     * Versions are the ones observed on a CPI tenant where that observation exists, so the list
+     * models the platform the adapter actually runs on rather than a guess. Where no observation
+     * exists the entry is left unversioned, which resolves against any exporter - honest about
+     * what is known instead of inventing a number that would look authoritative. Packages the
+     * OSGi framework already exports from the system bundle ({@code java.*}, {@code javax.*},
+     * {@code org.w3c.dom}, {@code org.xml.sax}, {@code org.osgi.framework}) are intentionally
+     * absent - re-exporting them here would shadow the framework's own JRE profile.
+     * <p>
+     * When a build legitimately introduces a new mandatory import that CPI does provide, add it
+     * here together with the reason. That edit is the conscious decision this test exists to force.
+     */
+    private static final String[] CPI_SYSTEM_PACKAGES = {
+            // Camel runtime hosting the adapter component. Version observed on a CPI tenant:
+            // the platform ships org.apache.camel.camel-kafka 3.14.7.sap-56, so the Camel line
+            // is 3.14.7 and the core packages are exported at that version.
+            "org.apache.camel;version=3.14.7",
+            "org.apache.camel.spi;version=3.14.7",
+            "org.apache.camel.support;version=3.14.7",
+            // Logging facade. Not covered by the tenant probe, so the version is not an
+            // observation but the floor of the range the bundle declares ([1.7,2)) - an
+            // unversioned export defaults to 0.0.0 and would not satisfy that import at all.
+            "org.slf4j;version=1.7.0",
+            "org.slf4j.event;version=1.7.0",
+            "org.slf4j.helpers;version=1.7.0",
+            "org.slf4j.spi;version=1.7.0",
+            // SAP Integration Suite adapter APIs. Not covered by the tenant probe. The bundle
+            // imports com.sap.it.api.msglog at [1.1,2) and .msglog.adapter at [1.3,2); those two
+            // are pinned at the declared floor, the unversioned SAP packages stay unversioned.
+            "com.sap.it.api",
+            "com.sap.it.api.adapter.iflowmonitoring",
+            "com.sap.it.api.keystore",
+            "com.sap.it.api.msglog;version=1.1.0",
+            "com.sap.it.api.msglog.adapter;version=1.3.0",
+            "com.sap.it.api.securestore",
+            // Consumed by the ADK-generated monitor bundle. Not covered by the tenant probe.
+            "com.sap.esb.monitoring.messages.adapter",
+            "com.sap.it.nm.component",
+            "com.sap.it.op.component.check",
+            "org.osgi.service.blueprint.container",
+            // Avro's optional codecs reference these. Version observed on a CPI tenant:
+            // org.apache.commons.commons-compress 1.26.1. commons-io is not in the probe.
+            "org.apache.commons.compress.compressors.bzip2;version=1.26.1",
+            "org.apache.commons.compress.compressors.xz;version=1.26.1",
+            "org.apache.commons.io",
+    };
+
+    /**
+     * Import clause injected by {@code mutation} mode. Deliberately a package no framework and no
+     * platform can ever export, rather than {@code java.lang;version="[99,100)"}: {@code java.*}
+     * imports are subject to parent delegation rules that differ between framework
+     * implementations, so a failure there would not prove the resolve check itself works.
+     */
+    private static final String MUTATION_IMPORT =
+            "com.finkeflo.cpi.kafka.mutationprobe.absent;version=\"[1.0,2.0)\"";
+
     private OsgiFrameworkResolveRunner() {
     }
 
     public static void main(String[] args) throws Exception {
         if (args.length == 0) {
-            System.out.println("Usage: " + OsgiFrameworkResolveRunner.class.getName() + " <resolve|negative> [esa]");
+            System.out.println("Usage: " + OsgiFrameworkResolveRunner.class.getName()
+                    + " <standalone|adapter|mutation|negative> [esa]");
             System.exit(2);
         }
 
         String mode = args[0];
-        if ("resolve".equals(mode)) {
-            if (args.length < 2) {
-                System.out.println("Missing ESA path for resolve mode");
-                System.exit(2);
-            }
-            runResolve(new File(args[1]));
+        if ("standalone".equals(mode) || "resolve".equals(mode)) {
+            requireEsaArgument(args);
+            runStandaloneResolve(new File(args[1]));
+            System.exit(0);
+        }
+        if ("adapter".equals(mode)) {
+            requireEsaArgument(args);
+            runAdapterResolve(new File(args[1]));
+            System.exit(0);
+        }
+        if ("mutation".equals(mode)) {
+            requireEsaArgument(args);
+            runMutationProbe(new File(args[1]));
             System.exit(0);
         }
         if ("negative".equals(mode)) {
@@ -93,15 +165,37 @@ public final class OsgiFrameworkResolveRunner {
         System.exit(2);
     }
 
-    private static void runResolve(File esa) throws Exception {
-        List<BundleArchive> standaloneBundles = readStandaloneBundles(esa);
+    private static void requireEsaArgument(String[] args) {
+        if (args.length < 2) {
+            System.out.println("Missing ESA path");
+            System.exit(2);
+        }
+    }
+
+    /**
+     * Resolves the third-party bundles the ESA ships alongside the project's own bundles.
+     * <p>
+     * An empty set is the expected steady state: every runtime dependency is either embedded in
+     * the fat bundle via {@code Embed-Dependency} or listed in the {@code copy-dependencies}
+     * {@code excludeGroupIds}, so nothing should be emitted as a standalone subsystem jar. The
+     * count is printed unconditionally and asserted by the caller, because a silent "nothing to
+     * do" is indistinguishable from a passing check (issue #156).
+     * <p>
+     * A non-empty set means a transitive dependency with an unexpected {@code groupId} slipped
+     * past {@code excludeGroupIds}. That is exactly how {@code at.yawk.lz4:lz4-java} broke CPI
+     * deployment, so those bundles are resolved for real.
+     */
+    private static void runStandaloneResolve(File esa) throws Exception {
+        List<BundleArchive> standaloneBundles = readBundles(esa, false);
+        System.out.println("standaloneBundles=" + standaloneBundles.size());
         if (standaloneBundles.isEmpty()) {
-            System.out.println("No standalone dependency bundles found in ESA " + esa.getAbsolutePath());
+            System.out.println("No standalone dependency bundles in ESA " + esa.getAbsolutePath()
+                    + " (expected steady state: all runtime dependencies are embedded).");
             return;
         }
 
         String storagePath = "target/felix-resolve-" + UUID.randomUUID().toString();
-        Framework framework = startFramework(storagePath);
+        Framework framework = startFramework(storagePath, null);
         try {
             List<Bundle> installed = installBundles(framework, standaloneBundles);
             FrameworkWiring wiring = framework.adapt(FrameworkWiring.class);
@@ -112,17 +206,120 @@ public final class OsgiFrameworkResolveRunner {
             }
             System.out.println("Resolved standalone ESA bundles: " + standaloneBundles.size());
         } finally {
-            try {
-                stopFramework(framework);
-            } finally {
-                deleteRecursively(new File(storagePath));
+            shutdown(framework, storagePath);
+        }
+    }
+
+    /**
+     * Installs the bundles this project ships - the fat adapter bundle and the ADK monitor bundle -
+     * into a framework that exports {@link #CPI_SYSTEM_PACKAGES}, and resolves them for real.
+     * <p>
+     * This is the check that carries the property the suite is supposed to guarantee: the shipped
+     * bundle resolves against the packages CPI actually offers.
+     */
+    private static void runAdapterResolve(File esa) throws Exception {
+        List<BundleArchive> projectBundles = readBundles(esa, true);
+        System.out.println("projectBundles=" + projectBundles.size());
+        if (projectBundles.isEmpty()) {
+            throw new IllegalStateException("No project-owned bundles found in ESA " + esa.getAbsolutePath()
+                    + ". The ESA must contain the adapter bundle; refusing to report success.");
+        }
+
+        String storagePath = "target/felix-resolve-adapter-" + UUID.randomUUID().toString();
+        Framework framework = startFramework(storagePath, systemPackagesExtra());
+        try {
+            List<Bundle> installed = installBundles(framework, projectBundles);
+            FrameworkWiring wiring = framework.adapt(FrameworkWiring.class);
+            if (!wiring.resolveBundles(installed)) {
+                throw new IllegalStateException("Failed to resolve the shipped adapter bundles from "
+                        + esa.getAbsolutePath()
+                        + "\nEither CPI does not provide a newly calculated mandatory import, or the"
+                        + " platform contract in CPI_SYSTEM_PACKAGES needs a deliberate update.\n"
+                        + unresolvedDiagnostics(installed));
             }
+            for (int i = 0; i < installed.size(); i++) {
+                System.out.println("resolved " + bundleName(installed.get(i)));
+            }
+            System.out.println("Resolved project bundles: " + projectBundles.size());
+        } finally {
+            shutdown(framework, storagePath);
+        }
+    }
+
+    /**
+     * Anti-vacuity guard for {@link #runAdapterResolve}: takes the very same shipped adapter
+     * bundle, injects one unsatisfiable mandatory import into its manifest and requires the
+     * resolve to fail.
+     * <p>
+     * Without this, {@code adapter} mode could silently degrade into another check that cannot
+     * fail. Running it against the real artifact rather than a synthetic bundle is what makes it
+     * a mutation probe rather than a second negative guard.
+     */
+    private static void runMutationProbe(File esa) throws Exception {
+        List<BundleArchive> projectBundles = readBundles(esa, true);
+        BundleArchive adapter = findAdapterBundle(projectBundles);
+        if (adapter == null) {
+            throw new IllegalStateException("No adapter bundle found in ESA " + esa.getAbsolutePath());
+        }
+
+        BundleArchive mutated = new BundleArchive(adapter.entryName,
+                withAdditionalImport(adapter.content, MUTATION_IMPORT), adapter.symbolicName);
+
+        String storagePath = "target/felix-resolve-mutation-" + UUID.randomUUID().toString();
+        Framework framework = startFramework(storagePath, systemPackagesExtra());
+        try {
+            List<Bundle> installed = installBundles(framework, Arrays.asList(mutated));
+            FrameworkWiring wiring = framework.adapt(FrameworkWiring.class);
+            if (wiring.resolveBundles(installed)) {
+                throw new IllegalStateException("Mutation probe resolved despite the injected import "
+                        + MUTATION_IMPORT + ". The adapter resolve check cannot detect an"
+                        + " unsatisfiable mandatory import and is therefore vacuous.");
+            }
+            String diagnostics = unresolvedDiagnostics(installed);
+            if (diagnostics.indexOf("com.finkeflo.cpi.kafka.mutationprobe.absent") < 0) {
+                throw new IllegalStateException("Mutation probe failed to resolve, but not because of the"
+                        + " injected import. Diagnostics:\n" + diagnostics);
+            }
+            System.out.println("mutationProbe=detected");
+        } finally {
+            shutdown(framework, storagePath);
+        }
+    }
+
+    private static BundleArchive findAdapterBundle(List<BundleArchive> projectBundles) {
+        for (int i = 0; i < projectBundles.size(); i++) {
+            BundleArchive candidate = projectBundles.get(i);
+            String symbolicName = stripManifestAttributes(candidate.symbolicName);
+            if (symbolicName != null && symbolicName.startsWith(ADAPTER_BUNDLE_NAMESPACE)
+                    && !symbolicName.endsWith(MONITOR_BUNDLE_SUFFIX)) {
+                return candidate;
+            }
+        }
+        return null;
+    }
+
+    private static String systemPackagesExtra() {
+        StringBuilder packages = new StringBuilder();
+        for (int i = 0; i < CPI_SYSTEM_PACKAGES.length; i++) {
+            if (packages.length() > 0) {
+                packages.append(',');
+            }
+            packages.append(CPI_SYSTEM_PACKAGES[i]);
+        }
+        return packages.toString();
+    }
+
+    private static void shutdown(Framework framework, String storagePath) throws Exception {
+        try {
+            stopFramework(framework);
+        } finally {
+            deleteRecursively(new File(storagePath));
         }
     }
 
     private static void runNegativeGuard() throws Exception {
         String storagePath = "target/felix-resolve-negative-" + UUID.randomUUID().toString();
-        Framework framework = startFramework(storagePath);
+        Framework framework = startFramework(storagePath, null);
         try {
             byte[] brokenBundle = createBundleWithImport("com.finkeflo.cpi.kafka.test.unresolvable",
                     "com.finkeflo.cpi.kafka.missing.pkg;version=\"[1.0,2.0)\"");
@@ -140,15 +337,11 @@ public final class OsgiFrameworkResolveRunner {
             }
             System.out.println("Negative guard passed.");
         } finally {
-            try {
-                stopFramework(framework);
-            } finally {
-                deleteRecursively(new File(storagePath));
-            }
+            shutdown(framework, storagePath);
         }
     }
 
-    private static List<BundleArchive> readStandaloneBundles(File esa) throws IOException {
+    private static List<BundleArchive> readBundles(File esa, boolean projectOwned) throws IOException {
         List<BundleArchive> bundles = new ArrayList<BundleArchive>();
         JarFile esaJar = new JarFile(esa);
         try {
@@ -169,10 +362,10 @@ public final class OsgiFrameworkResolveRunner {
                 if (!hasText(symbolicName)) {
                     continue;
                 }
-                if (isProjectOwnedBundle(symbolicName)) {
+                if (isProjectOwnedBundle(symbolicName) != projectOwned) {
                     continue;
                 }
-                bundles.add(new BundleArchive(entry.getName(), content));
+                bundles.add(new BundleArchive(entry.getName(), content, symbolicName));
             }
         } finally {
             esaJar.close();
@@ -227,12 +420,15 @@ public final class OsgiFrameworkResolveRunner {
         return bundles;
     }
 
-    private static Framework startFramework(String storagePath) throws BundleException {
+    private static Framework startFramework(String storagePath, String systemPackagesExtra) throws BundleException {
         FrameworkFactory factory = findFrameworkFactory();
         Map<String, String> config = new HashMap<String, String>();
         config.put(Constants.FRAMEWORK_STORAGE, storagePath);
         config.put(Constants.FRAMEWORK_STORAGE_CLEAN, Constants.FRAMEWORK_STORAGE_CLEAN_ONFIRSTINIT);
         config.put(Constants.FRAMEWORK_BOOTDELEGATION, "");
+        if (hasText(systemPackagesExtra)) {
+            config.put(Constants.FRAMEWORK_SYSTEMPACKAGES_EXTRA, systemPackagesExtra);
+        }
         Framework framework = factory.newFramework(config);
         framework.start();
         return framework;
@@ -272,6 +468,13 @@ public final class OsgiFrameworkResolveRunner {
 
     private static String unresolvedDiagnostics(List<Bundle> bundles) {
         Map<String, List<String>> availableExports = collectExportedPackages(bundles);
+        for (int i = 0; i < CPI_SYSTEM_PACKAGES.length; i++) {
+            String pkg = firstPathSegment(CPI_SYSTEM_PACKAGES[i]);
+            if (!availableExports.containsKey(pkg)) {
+                availableExports.put(pkg, new ArrayList<String>(
+                        Arrays.asList("<CPI system packages>:" + declaredVersion(CPI_SYSTEM_PACKAGES[i]))));
+            }
+        }
         StringBuilder diagnostic = new StringBuilder();
         for (int i = 0; i < bundles.size(); i++) {
             Bundle bundle = bundles.get(i);
@@ -290,10 +493,11 @@ public final class OsgiFrameworkResolveRunner {
             }
             for (int j = 0; j < requiredImports.size(); j++) {
                 String pkg = requiredImports.get(j);
-                List<String> exporters = availableExports.get(pkg);
+                List<String> exporters = availableExports.get(packageOf(pkg));
                 diagnostic.append("  import ").append(pkg).append(" -> ");
                 if (exporters == null || exporters.isEmpty()) {
-                    diagnostic.append("UNRESOLVED (no exporter in standalone ESA bundles/system)");
+                    diagnostic.append("UNRESOLVED (no exporter among the installed bundles, the system"
+                            + " bundle or the CPI platform contract)");
                 } else {
                     diagnostic.append("exported by ").append(exporters);
                 }
@@ -347,15 +551,33 @@ public final class OsgiFrameworkResolveRunner {
             if (clause.optional) {
                 continue;
             }
-            imports.addAll(clause.packageNames);
+            for (int j = 0; j < clause.packageNames.size(); j++) {
+                imports.add(withVersion(clause.packageNames.get(j), clause.versionRange));
+            }
         }
         return imports;
+    }
+
+    /**
+     * Renders {@code pkg} and {@code version} as {@code pkg version=<range>}, so a diagnostic can
+     * show why a package that <em>is</em> exported still does not satisfy an import. Without the
+     * version a range mismatch reads as if everything were fine.
+     */
+    private static String withVersion(String name, String version) {
+        return hasText(version) ? name + " version=" + version : name + " version=<any>";
+    }
+
+    /** @return the package name of a {@code pkg version=<range>} entry produced by {@link #withVersion}. */
+    private static String packageOf(String annotated) {
+        int space = annotated.indexOf(' ');
+        return space < 0 ? annotated : annotated.substring(0, space);
     }
 
     private static ImportClause parseImportClause(String clause) {
         String[] segments = clause.split(";");
         List<String> packageNames = new ArrayList<String>();
         boolean optional = false;
+        String versionRange = null;
         for (int i = 0; i < segments.length; i++) {
             String segment = segments[i].trim();
             if (segment.length() == 0) {
@@ -364,16 +586,29 @@ public final class OsgiFrameworkResolveRunner {
             if (segment.indexOf('=') >= 0) {
                 if (segment.startsWith("resolution:=")) {
                     optional = "optional".equals(unquote(segment.substring("resolution:=".length()).trim()));
+                } else if (segment.startsWith("version=")) {
+                    versionRange = unquote(segment.substring("version=".length()).trim());
                 }
                 continue;
             }
             packageNames.add(segment);
         }
-        return new ImportClause(packageNames, optional);
+        return new ImportClause(packageNames, optional, versionRange);
     }
 
-    private static String firstPathSegment(String clause) {
-        int semicolon = clause.indexOf(';');
+    /** @return the {@code version=} attribute of an {@link #CPI_SYSTEM_PACKAGES} clause, or {@code <unversioned>}. */
+    private static String declaredVersion(String clause) {
+        String[] segments = clause.split(";");
+        for (int i = 1; i < segments.length; i++) {
+            String segment = segments[i].trim();
+            if (segment.startsWith("version=")) {
+                return unquote(segment.substring("version=".length()).trim());
+            }
+        }
+        return "<unversioned>";
+    }
+
+    private static String firstPathSegment(String clause) {        int semicolon = clause.indexOf(';');
         String path = semicolon >= 0 ? clause.substring(0, semicolon) : clause;
         return path.trim();
     }
@@ -439,6 +674,48 @@ public final class OsgiFrameworkResolveRunner {
         return output.toByteArray();
     }
 
+    /**
+     * Repacks a bundle jar with one extra clause appended to its {@code Import-Package} header,
+     * leaving every other header and every entry untouched.
+     * <p>
+     * The jar is rewritten uncompressed: only the manifest matters for resolution and the result
+     * is a throwaway in-memory artifact, so paying the deflate cost for a 17 MB fat bundle would
+     * be wasted time.
+     */
+    static byte[] withAdditionalImport(byte[] jarBytes, String importClause) throws IOException {
+        JarInputStream source = new JarInputStream(new ByteArrayInputStream(jarBytes));
+        try {
+            Manifest manifest = source.getManifest();
+            if (manifest == null) {
+                throw new IOException("Bundle jar has no manifest; cannot mutate Import-Package");
+            }
+            Attributes attributes = manifest.getMainAttributes();
+            String existing = attributes.getValue(IMPORT_PACKAGE);
+            attributes.putValue(IMPORT_PACKAGE, hasText(existing) ? existing + "," + importClause : importClause);
+
+            ByteArrayOutputStream output = new ByteArrayOutputStream(jarBytes.length);
+            JarOutputStream target = new JarOutputStream(output, manifest);
+            try {
+                target.setLevel(java.util.zip.Deflater.NO_COMPRESSION);
+                byte[] buffer = new byte[8192];
+                JarEntry entry;
+                while ((entry = source.getNextJarEntry()) != null) {
+                    target.putNextEntry(new JarEntry(entry.getName()));
+                    int read;
+                    while ((read = source.read(buffer)) >= 0) {
+                        target.write(buffer, 0, read);
+                    }
+                    target.closeEntry();
+                }
+            } finally {
+                target.close();
+            }
+            return output.toByteArray();
+        } finally {
+            source.close();
+        }
+    }
+
     private static byte[] readAllBytes(InputStream inputStream) throws IOException {
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         try {
@@ -456,20 +733,24 @@ public final class OsgiFrameworkResolveRunner {
     private static final class BundleArchive {
         private final String entryName;
         private final byte[] content;
+        private final String symbolicName;
 
-        private BundleArchive(String entryName, byte[] content) {
+        private BundleArchive(String entryName, byte[] content, String symbolicName) {
             this.entryName = entryName;
             this.content = content;
+            this.symbolicName = symbolicName;
         }
     }
 
     private static final class ImportClause {
         private final List<String> packageNames;
         private final boolean optional;
+        private final String versionRange;
 
-        private ImportClause(List<String> packageNames, boolean optional) {
+        private ImportClause(List<String> packageNames, boolean optional, String versionRange) {
             this.packageNames = packageNames;
             this.optional = optional;
+            this.versionRange = versionRange;
         }
     }
 }
