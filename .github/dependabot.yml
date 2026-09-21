@@ -12,9 +12,14 @@ updates:
       time: "06:00"
       timezone: "Europe/Berlin"
     open-pull-requests-limit: 10
+    # 'no-changelog' skips the changelog CI gate. Dependabot cannot write a CHANGELOG entry, so
+    # without the label every dependency PR is born red and needs a manual label before it can
+    # merge - which is how #121, #122, #142, #143 and #150 ended up stuck. A dependency bump that
+    # does change user-visible behaviour still deserves an entry; add it and drop the label.
     labels:
       - "dependencies"
       - "java"
+      - "no-changelog"
     commit-message:
       prefix: "build"
       include: "scope"
@@ -49,9 +54,12 @@ updates:
       time: "06:00"
       timezone: "Europe/Berlin"
     open-pull-requests-limit: 5
+    # See the note on the Maven ecosystem above: without 'no-changelog' every Dependabot PR is
+    # born red on the changelog gate.
     labels:
       - "dependencies"
       - "github-actions"
+      - "no-changelog"
     commit-message:
       prefix: "ci"
       include: "scope"
