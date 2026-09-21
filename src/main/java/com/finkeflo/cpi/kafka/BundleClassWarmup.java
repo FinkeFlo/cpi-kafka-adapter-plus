@@ -27,6 +27,7 @@ import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -73,6 +74,13 @@ import org.slf4j.LoggerFactory;
  *       routes. It stops on its own when the <em>bundle</em> is stopping/stopped (checked every
  *       {@link #BUNDLE_STATE_CHECK_INTERVAL} classes) or when class loads fail with the
  *       "wiring no longer valid" signature.</li>
+ *   <li><b>Imported classes, same thread, after stage 2</b>: the bundle declares
+ *       {@code DynamicImport-Package: *}, so classes owned by <em>other</em> bundles (Camel, the
+ *       SAP APIs, SLF4J, …) are wired lazily on first reference and fail the same way on a purged
+ *       revision (issue #154). Stage 3 re-walks the bundle content, reads the constant pool of
+ *       every class ({@link ConstantPoolScanner}) and loads the types that are referenced but not
+ *       contained in the bundle. It runs <em>after</em> stage 2 on purpose: stage 2 covers the
+ *       failures actually observed in production and must not be delayed by the scan.</li>
  * </ol>
  *
  * <p>Runs equally outside OSGi (unit/integration tests) by walking the code source of the anchor
@@ -96,8 +104,19 @@ final class BundleClassWarmup {
         "org.apache.kafka.",
     };
 
-    /** Abort the background pass once the class space is evidently gone. */
-    private static final int MAX_CONSECUTIVE_WIRING_FAILURES = 25;
+    /**
+     * Stage 3 ordering: packages provided by the CPI platform, whose classes an error or stop path
+     * is most likely to touch for the first time after an adapter update.
+     */
+    static final String[] IMPORTED_PRIORITY_PREFIXES = {
+        "org.apache.camel.",
+        "com.sap.it.api.",
+        "org.slf4j.",
+        "org.osgi.",
+        "javax.",
+    };
+
+    /** Abort the background pass once the class space is evidently gone. */    private static final int MAX_CONSECUTIVE_WIRING_FAILURES = 25;
     /** Poll the bundle state this often (in classes) so the pass ends promptly on bundle stop. */
     static final int BUNDLE_STATE_CHECK_INTERVAL = 200;
     private static final int MAX_FAILURES_LOGGED = 300;
@@ -153,6 +172,15 @@ final class BundleClassWarmup {
                                 + "aborted={} durationMs={}",
                         report.source, report.attempted, report.loaded, report.failures.size(), report.aborted, report.durationMs);
                 logFailures("stage2", report);
+                if (report.aborted != null) {
+                    return; // class space is gone or the bundle is stopping — stage 3 cannot help
+                }
+                Report imported = warmImportedClasses(anchor, bundle);
+                LOG.error("[CPI-KAFKA-PLUS-DIAG] class-warmup.stage3.completed scope=imported source={} referenced={} classes={} "
+                                + "loaded={} failed={} aborted={} durationMs={}",
+                        imported.source, imported.referencedTypes, imported.attempted, imported.loaded,
+                        imported.failures.size(), imported.aborted, imported.durationMs);
+                logFailures("stage3", imported);
             } catch (Throwable t) {
                 LOG.error("[CPI-KAFKA-PLUS-DIAG] class-warmup.stage2.failed exClass={} exMsg='{}'",
                         t.getClass().getName(), t.getMessage());
@@ -174,7 +202,7 @@ final class BundleClassWarmup {
         long t0 = System.nanoTime();
         Report report = new Report("adapter");
         ClassLoader loader = anchor.getClassLoader();
-        for (String name : enumerateClassNames(anchor, bundle, report, false)) {
+        for (String name : buildClassIndex(anchor, bundle, report, false, false).names) {
             if (!name.startsWith(ADAPTER_PACKAGE_PREFIX)) {
                 continue;
             }
@@ -188,16 +216,57 @@ final class BundleClassWarmup {
     static Report warmAllClasses(Class<?> anchor, OsgiBundleInfo bundle) {
         long t0 = System.nanoTime();
         Report report = new Report(null);
-        ClassLoader loader = anchor.getClassLoader();
-        List<String> names = new ArrayList<>(enumerateClassNames(anchor, bundle, report, true));
+        List<String> names = new ArrayList<>(buildClassIndex(anchor, bundle, report, true, false).names);
         names.sort(Comparator.comparingInt(BundleClassWarmup::priorityRank).thenComparing(Comparator.naturalOrder()));
+        names.removeIf(name -> name.startsWith(ADAPTER_PACKAGE_PREFIX)); // stage 1 already covered these
+        loadAll(names, anchor.getClassLoader(), bundle, report);
+        report.durationMs = (System.nanoTime() - t0) / 1_000_000L;
+        return report;
+    }
 
+    /**
+     * Stage 3: the classes the bundle bytecode references but does not contain — everything that
+     * {@code DynamicImport-Package: *} would otherwise wire lazily on first use (issue #154).
+     */
+    static Report warmImportedClasses(Class<?> anchor, OsgiBundleInfo bundle) {
+        long t0 = System.nanoTime();
+        Report report = new Report(null);
+        ClassIndex index = buildClassIndex(anchor, bundle, report, true, true);
+        report.referencedTypes = index.referencedTypes.size();
+        List<String> names = new ArrayList<>(importedClassNames(index));
+        names.sort(Comparator.comparingInt(BundleClassWarmup::importedPriorityRank).thenComparing(Comparator.naturalOrder()));
+        loadAll(names, anchor.getClassLoader(), bundle, report);
+        report.durationMs = (System.nanoTime() - t0) / 1_000_000L;
+        return report;
+    }
+
+    /**
+     * The referenced types that are not part of the bundle and therefore have to come from another
+     * bundle through the wiring. Visible for the packaging IT.
+     *
+     * <p>{@code java.*} is left out: the OSGi core specification requires every bundle class loader
+     * to delegate it to the parent, so those classes never travel over a bundle wire and cannot be
+     * invalidated by a revision purge.
+     */
+    static TreeSet<String> importedClassNames(ClassIndex index) {
+        TreeSet<String> imported = new TreeSet<>();
+        for (String type : index.referencedTypes) {
+            if (type.startsWith("java.") || index.names.contains(type)) {
+                continue;
+            }
+            imported.add(type);
+        }
+        return imported;
+    }
+
+    /**
+     * Loads {@code names} without initialising, bailing out when the bundle stops or the class
+     * space turns out to be gone.
+     */
+    private static void loadAll(Collection<String> names, ClassLoader loader, OsgiBundleInfo bundle, Report report) {
         int consecutiveWiringFailures = 0;
         int sinceStateCheck = 0;
         for (String name : names) {
-            if (name.startsWith(ADAPTER_PACKAGE_PREFIX)) {
-                continue; // stage 1 already covered these
-            }
             if (Thread.currentThread().isInterrupted()) {
                 report.aborted = "interrupted";
                 break;
@@ -219,17 +288,23 @@ final class BundleClassWarmup {
                 consecutiveWiringFailures = 0;
             }
         }
-        report.durationMs = (System.nanoTime() - t0) / 1_000_000L;
-        return report;
     }
 
     static int priorityRank(String className) {
-        for (int i = 0; i < PRIORITY_PREFIXES.length; i++) {
-            if (className.startsWith(PRIORITY_PREFIXES[i])) {
+        return rank(className, PRIORITY_PREFIXES);
+    }
+
+    static int importedPriorityRank(String className) {
+        return rank(className, IMPORTED_PRIORITY_PREFIXES);
+    }
+
+    private static int rank(String className, String[] prefixes) {
+        for (int i = 0; i < prefixes.length; i++) {
+            if (className.startsWith(prefixes[i])) {
                 return i;
             }
         }
-        return PRIORITY_PREFIXES.length;
+        return prefixes.length;
     }
 
     private static Throwable load(String name, boolean initialize, ClassLoader loader, Report report) {
@@ -317,17 +392,20 @@ final class BundleClassWarmup {
      * All binary class names reachable through the bundle class loader: bundle root plus, when
      * {@code includeNestedJars} is set, each {@code Bundle-ClassPath} jar. Uses the OSGi bundle
      * when available, otherwise the anchor's code source (jar or directory).
+     *
+     * @param scanReferences also read each class file's constant pool and collect the types it
+     *        references (stage 3); costs a full read of the bundle content
      */
-    static TreeSet<String> enumerateClassNames(Class<?> anchor, OsgiBundleInfo bundle, Report report,
-            boolean includeNestedJars) {
-        TreeSet<String> names = new TreeSet<>();
+    static ClassIndex buildClassIndex(Class<?> anchor, OsgiBundleInfo bundle, Report report,
+            boolean includeNestedJars, boolean scanReferences) {
+        ClassIndex index = new ClassIndex(scanReferences);
         if (bundle.isOsgi()) {
             report.source = "osgi";
             for (URL url : bundle.findEntries("/", "*.class")) {
-                addIfClass(names, stripLeadingSlash(url.getPath()));
+                addUrlEntry(index, stripLeadingSlash(url.getPath()), url);
             }
             if (!includeNestedJars) {
-                return names;
+                return index;
             }
             for (String entry : bundleClassPathEntries(bundle.getHeader("Bundle-ClassPath"))) {
                 URL jar = bundle.getEntry(entry);
@@ -335,31 +413,31 @@ final class BundleClassWarmup {
                     continue;
                 }
                 try (InputStream in = jar.openStream()) {
-                    readNestedJar(in, names);
+                    readNestedJar(in, index);
                 } catch (IOException e) {
                     LOG.debug("class-warmup: cannot read Bundle-ClassPath entry {}: {}", entry, e.toString());
                 }
             }
-            return names;
+            return index;
         }
         try {
             URL location = anchor.getProtectionDomain().getCodeSource().getLocation();
             File file = new File(location.toURI());
             if (file.isDirectory()) {
                 report.source = "directory";
-                enumerateDirectory(file.toPath(), names);
+                enumerateDirectory(file.toPath(), index);
             } else {
                 report.source = "jar";
-                enumerateJarFile(file, names, includeNestedJars);
+                enumerateJarFile(file, index, includeNestedJars);
             }
         } catch (Exception e) {
             LOG.debug("class-warmup: cannot enumerate code source of {}: {}", anchor.getName(), e.toString());
         }
-        return names;
+        return index;
     }
 
     /** Independent jar walk (root + nested Bundle-ClassPath jars); shared with the packaging IT. */
-    static void enumerateJarFile(File file, TreeSet<String> names, boolean includeNestedJars) throws IOException {
+    static void enumerateJarFile(File file, ClassIndex index, boolean includeNestedJars) throws IOException {
         try (JarFile jar = new JarFile(file)) {
             Manifest manifest = jar.getManifest();
             String bcp = manifest == null ? null : manifest.getMainAttributes().getValue("Bundle-ClassPath");
@@ -367,30 +445,59 @@ final class BundleClassWarmup {
             for (JarEntry entry : (Iterable<JarEntry>) jar.stream()::iterator) {
                 String path = entry.getName();
                 if (path.endsWith(".class")) {
-                    addIfClass(names, path);
+                    if (index.needsBytes(path)) {
+                        try (InputStream in = jar.getInputStream(entry)) {
+                            index.add(path, in);
+                        }
+                    } else {
+                        index.add(path, null);
+                    }
                 } else if (nested.contains(path)) {
                     try (InputStream in = jar.getInputStream(entry)) {
-                        readNestedJar(in, names);
+                        readNestedJar(in, index);
                     }
                 }
             }
         }
     }
 
-    private static void enumerateDirectory(Path root, TreeSet<String> names) throws IOException {
-        try (Stream<Path> walk = Files.walk(root)) {
-            walk.filter(p -> p.toString().endsWith(".class"))
-                .forEach(p -> addIfClass(names, root.relativize(p).toString().replace(File.separatorChar, '/')));
+    private static void addUrlEntry(ClassIndex index, String path, URL url) {
+        if (!index.needsBytes(path)) {
+            index.add(path, null);
+            return;
+        }
+        try (InputStream in = url.openStream()) {
+            index.add(path, in);
+        } catch (IOException e) {
+            index.add(path, null);
         }
     }
 
-    private static void readNestedJar(InputStream in, TreeSet<String> names) throws IOException {
+    private static void enumerateDirectory(Path root, ClassIndex index) throws IOException {
+        try (Stream<Path> walk = Files.walk(root)) {
+            for (Path p : (Iterable<Path>) walk.filter(p -> p.toString().endsWith(".class"))::iterator) {
+                String path = root.relativize(p).toString().replace(File.separatorChar, '/');
+                if (!index.needsBytes(path)) {
+                    index.add(path, null);
+                    continue;
+                }
+                try (InputStream in = Files.newInputStream(p)) {
+                    index.add(path, in);
+                }
+            }
+        }
+    }
+
+    private static void readNestedJar(InputStream in, ClassIndex index) throws IOException {
         try (JarInputStream jin = new JarInputStream(in)) {
             JarEntry e;
             while ((e = jin.getNextJarEntry()) != null) {
-                if (e.getName().endsWith(".class")) {
-                    addIfClass(names, e.getName());
+                String path = e.getName();
+                if (!path.endsWith(".class")) {
+                    continue;
                 }
+                // JarInputStream serves the current entry; it must not be closed by the index.
+                index.add(path, index.needsBytes(path) ? jin : null);
             }
         }
     }
@@ -410,20 +517,63 @@ final class BundleClassWarmup {
         return entries;
     }
 
-    /** Converts a class file path to a binary name, skipping multi-release and module descriptors. */
-    static void addIfClass(TreeSet<String> names, String path) {
+    /** Converts a class file path to a binary name, or {@code null} for entries to skip. */
+    static String binaryName(String path) {
         if (path == null || !path.endsWith(".class") || path.startsWith("META-INF/") || path.contains("/META-INF/")) {
-            return;
+            return null;
         }
         String name = path.substring(0, path.length() - ".class".length()).replace('/', '.');
-        if (name.endsWith("module-info")) {
-            return;
-        }
-        names.add(name);
+        return name.endsWith("module-info") ? null : name;
     }
 
     private static String stripLeadingSlash(String path) {
         return path.startsWith("/") ? path.substring(1) : path;
+    }
+
+    /**
+     * The classes the bundle contains and, when reference scanning is on, every type their
+     * bytecode can make the JVM resolve.
+     */
+    static final class ClassIndex {
+
+        final TreeSet<String> names = new TreeSet<>();
+        final TreeSet<String> referencedTypes = new TreeSet<>();
+        /** Class files whose constant pool the scanner could not read; expected to stay 0. */
+        int unreadable;
+
+        private final boolean scanReferences;
+
+        ClassIndex(boolean scanReferences) {
+            this.scanReferences = scanReferences;
+        }
+
+        /** {@code true} when the caller must open the class file so its constant pool can be read. */
+        boolean needsBytes(String path) {
+            return scanReferences && binaryName(path) != null;
+        }
+
+        /**
+         * Records one class file entry. {@code bytes} may be {@code null} (name only) and is never
+         * closed here — the walker that opened it stays the owner.
+         */
+        void add(String path, InputStream bytes) {
+            String name = binaryName(path);
+            if (name == null) {
+                return;
+            }
+            names.add(name);
+            if (bytes == null) {
+                return;
+            }
+            try {
+                if (!ConstantPoolScanner.collectReferencedTypes(bytes, referencedTypes)) {
+                    unreadable++;
+                }
+            } catch (IOException | RuntimeException e) {
+                unreadable++;
+                LOG.debug("class-warmup: cannot scan constant pool of {}: {}", name, e.toString());
+            }
+        }
     }
 
     /** Outcome of one warm-up pass. */
@@ -433,6 +583,8 @@ final class BundleClassWarmup {
         int loaded;
         long durationMs;
         String aborted;
+        /** Stage 3 only: distinct types found in the constant pools, before filtering. */
+        int referencedTypes;
         final Map<String, String> failures = new LinkedHashMap<>();
 
         Report(String source) {

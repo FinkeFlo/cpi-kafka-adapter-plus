@@ -35,15 +35,17 @@ import org.osgi.framework.Bundle;
 public class BundleClassWarmupTest {
 
     @Test
-    public void addIfClassConvertsPathsAndSkipsDescriptors() {
-        TreeSet<String> names = new TreeSet<>();
-        BundleClassWarmup.addIfClass(names, "org/apache/kafka/common/compress/Lz4Compression$Builder.class");
-        BundleClassWarmup.addIfClass(names, "META-INF/versions/9/module-info.class");
-        BundleClassWarmup.addIfClass(names, "META-INF/versions/11/com/foo/Bar.class");
-        BundleClassWarmup.addIfClass(names, "module-info.class");
-        BundleClassWarmup.addIfClass(names, "org/foo/notaclass.txt");
+    public void binaryNameConvertsPathsAndSkipsDescriptors() {
+        BundleClassWarmup.ClassIndex index = new BundleClassWarmup.ClassIndex(false);
+        index.add("org/apache/kafka/common/compress/Lz4Compression$Builder.class", null);
+        index.add("META-INF/versions/9/module-info.class", null);
+        index.add("META-INF/versions/11/com/foo/Bar.class", null);
+        index.add("module-info.class", null);
+        index.add("org/foo/notaclass.txt", null);
         Assert.assertEquals(
-                new TreeSet<>(Arrays.asList("org.apache.kafka.common.compress.Lz4Compression$Builder")), names);
+                new TreeSet<>(Arrays.asList("org.apache.kafka.common.compress.Lz4Compression$Builder")), index.names);
+        Assert.assertTrue("name-only index must not request bytes",
+                index.referencedTypes.isEmpty() && !index.needsBytes("com/foo/Bar.class"));
     }
 
     @Test
@@ -68,6 +70,68 @@ public class BundleClassWarmupTest {
     }
 
     @Test
+    public void importedPriorityRankPutsPlatformPackagesFirst() {
+        int camel = BundleClassWarmup.importedPriorityRank("org.apache.camel.CamelExchangeException");
+        int sap = BundleClassWarmup.importedPriorityRank("com.sap.it.api.ITApiFactory");
+        int slf4j = BundleClassWarmup.importedPriorityRank("org.slf4j.Logger");
+        int other = BundleClassWarmup.importedPriorityRank("io.grpc.Channel");
+        Assert.assertTrue(camel < sap);
+        Assert.assertTrue(sap < slf4j);
+        Assert.assertTrue(slf4j < other);
+        Assert.assertEquals(BundleClassWarmup.IMPORTED_PRIORITY_PREFIXES.length, other);
+    }
+
+    @Test
+    public void importedClassNamesKeepsOnlyTypesFromOutsideTheBundle() {
+        BundleClassWarmup.ClassIndex index = new BundleClassWarmup.ClassIndex(true);
+        index.names.add("com.finkeflo.cpi.kafka.CpiKafkaPlusConsumer");
+        index.names.add("org.apache.kafka.clients.consumer.KafkaConsumer");
+        index.referencedTypes.addAll(Arrays.asList(
+                "com.finkeflo.cpi.kafka.CpiKafkaPlusConsumer",       // in the bundle: stage 1/2
+                "org.apache.kafka.clients.consumer.KafkaConsumer",   // in the bundle: stage 2
+                "java.util.Map",                                     // boot delegation, never wired
+                "javax.net.ssl.SSLContext",
+                "org.apache.camel.CamelExchangeException"));
+
+        Assert.assertEquals(
+                new TreeSet<>(Arrays.asList("javax.net.ssl.SSLContext", "org.apache.camel.CamelExchangeException")),
+                BundleClassWarmup.importedClassNames(index));
+    }
+
+    @Test
+    public void stage3ScansConstantPoolsAndLoadsImportedClasses() {
+        OsgiBundleInfo bundle = OsgiBundleInfo.of(BundleClassWarmup.class);
+        BundleClassWarmup.Report report = BundleClassWarmup.warmImportedClasses(BundleClassWarmup.class, bundle);
+
+        Assert.assertEquals("directory", report.source);
+        Assert.assertTrue("expected constant-pool references, got " + report.referencedTypes,
+                report.referencedTypes > 100);
+        Assert.assertTrue("expected imported classes to load, got " + report.attempted, report.attempted > 10);
+        Assert.assertNull(report.aborted);
+        // The adapter's own Camel and SLF4J surface must be part of the set and must load here.
+        for (String mustLoad : Arrays.asList("org.apache.camel.CamelExchangeException", "org.apache.camel.Exchange",
+                "org.slf4j.Logger")) {
+            Assert.assertFalse("must not fail: " + mustLoad + " -> " + report.failures.get(mustLoad),
+                    report.failures.containsKey(mustLoad));
+        }
+        Assert.assertFalse("stage 3 must not re-load bundle classes",
+                report.failures.containsKey("org.apache.kafka.clients.consumer.KafkaConsumer"));
+    }
+
+    @Test
+    public void classIndexScansConstantPoolsWhenAskedTo() {
+        OsgiBundleInfo none = OsgiBundleInfo.of(BundleClassWarmup.class);
+        BundleClassWarmup.ClassIndex index = BundleClassWarmup.buildClassIndex(BundleClassWarmup.class, none,
+                new BundleClassWarmup.Report(null), true, true);
+
+        Assert.assertEquals("every class file must be readable", 0, index.unreadable);
+        Assert.assertTrue(index.names.contains("com.finkeflo.cpi.kafka.BundleClassWarmup"));
+        Assert.assertTrue("references of our own code must be picked up",
+                index.referencedTypes.contains("org.slf4j.Logger"));
+        Assert.assertTrue(index.referencedTypes.contains("java.util.TreeSet"));
+    }
+
+    @Test
     public void stage1LoadsAllAdapterClassesFromClassesDirectory() {
         OsgiBundleInfo bundle = OsgiBundleInfo.of(BundleClassWarmup.class);
         Assert.assertFalse("unit tests run outside OSGi", bundle.isOsgi());
@@ -89,8 +153,8 @@ public class BundleClassWarmupTest {
 
         // kafka-clients is unpacked into target/classes, so the observed cold-path classes must be
         // part of the enumerated set and loadable on the test class path.
-        TreeSet<String> names = BundleClassWarmup.enumerateClassNames(BundleClassWarmup.class, bundle,
-                new BundleClassWarmup.Report(null), true);
+        TreeSet<String> names = BundleClassWarmup.buildClassIndex(BundleClassWarmup.class, bundle,
+                new BundleClassWarmup.Report(null), true, false).names;
         Assert.assertTrue(names.contains("org.apache.kafka.common.compress.Lz4Compression$Builder"));
         Assert.assertTrue(names.contains("org.apache.kafka.clients.consumer.CloseOptions"));
         Assert.assertFalse(report.failures.containsKey("org.apache.kafka.common.compress.Lz4Compression$Builder"));
@@ -157,8 +221,8 @@ public class BundleClassWarmupTest {
         OsgiBundleInfo none = OsgiBundleInfo.of(BundleClassWarmupTest.class);
         BundleClassWarmup.Report report = new BundleClassWarmup.Report(null);
         List<URL> urls = new ArrayList<>();
-        for (String name : BundleClassWarmup.enumerateClassNames(org.apache.kafka.clients.consumer.KafkaConsumer.class,
-                none, report, false)) {
+        for (String name : BundleClassWarmup.buildClassIndex(org.apache.kafka.clients.consumer.KafkaConsumer.class,
+                none, report, false, false).names) {
             urls.add(new URL("file:/" + name.replace('.', '/') + ".class"));
         }
         return urls;
