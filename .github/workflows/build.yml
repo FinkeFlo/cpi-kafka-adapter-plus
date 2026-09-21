@@ -3,7 +3,11 @@ name: Build
 on:
   push:
     branches: [ main ]
+  # 'labeled'/'unlabeled' are not in the default set for pull_request, but the changelog job
+  # reads the labels from the event payload. Without them, applying 'no-changelog' has no
+  # effect until the next push - which is exactly what the failure message tells you to do.
   pull_request:
+    types: [ opened, synchronize, reopened, labeled, unlabeled ]
 
 jobs:
   unit-tests:
