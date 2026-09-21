@@ -41,6 +41,8 @@ final class OsgiBundleInfo {
 
     /** {@code org.osgi.framework.Bundle#UNINSTALLED}. */
     private static final int STATE_UNINSTALLED = 0x00000001;
+    /** {@code Bundle#UNINSTALLED | INSTALLED | RESOLVED | STOPPING} — every state that is not {@code STARTING}/{@code ACTIVE}. */
+    private static final int STATES_NOT_RUNNING = 0x00000001 | 0x00000002 | 0x00000004 | 0x00000010;
 
     private final Object bundle;
     /** {@code org.osgi.framework.Bundle}; methods are looked up on the interface, never on the impl. */
@@ -66,6 +68,11 @@ final class OsgiBundleInfo {
         return new OsgiBundleInfo(null, null);
     }
 
+    /** Visible for tests: wraps an arbitrary {@code org.osgi.framework.Bundle} implementation. */
+    static OsgiBundleInfo forTests(Object bundle, Class<?> bundleType) {
+        return new OsgiBundleInfo(bundle, bundleType);
+    }
+
     boolean isOsgi() {
         return bundle != null;
     }
@@ -87,6 +94,16 @@ final class OsgiBundleInfo {
     boolean isUninstalled() {
         Object state = call("getState");
         return state instanceof Integer && ((Integer) state) == STATE_UNINSTALLED;
+    }
+
+    /**
+     * {@code true} when the bundle is stopping, stopped or uninstalled — i.e. its Blueprint
+     * container is being torn down (adapter update/undeploy). {@code false} outside OSGi or while
+     * the bundle is {@code STARTING}/{@code ACTIVE}.
+     */
+    boolean isStoppingOrStopped() {
+        Object state = call("getState");
+        return state instanceof Integer && (((Integer) state) & STATES_NOT_RUNNING) != 0;
     }
 
     /**

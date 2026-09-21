@@ -336,7 +336,7 @@ native libraries are extracted by a real round trip. Classes are loaded without 
 static initialisers, so a resource lookup from a static initialiser other than the codecs' is the
 one path that can still fail — see `poll.bundle-wiring-invalid` below.
 
-### `poll.bundle-wiring-invalid`
+### `poll.bundle-wiring-invalid` / `send.bundle-wiring-invalid`
 
 The route runs on a bundle revision that an adapter update has already replaced *and* a poll failed
 on a class, link or native-library load. The line carries `classSpace=… stale=true` naming the
@@ -347,6 +347,11 @@ route re-uses the same dead class loader and fails again on the next cold load (
 attempted exactly that, in a ~6 s loop). The adapter therefore stops polling, reports the state to
 the integration-flow monitor once and repeats a reminder line every few minutes. Redeploy (or stop
 and start) the integration flow; it then binds to the current adapter revision.
+
+The producer has no polling loop to stop; instead every exchange that hits the dead class space
+fails with the same message ("The adapter bundle was updated while this integration flow was
+running … Redeploy the integration flow …") in the message-processing log, and the trace carries
+one `send.bundle-wiring-invalid` line per minute with the same `classSpace` fields.
 
 When to expect it: only for integration flows that were started on an adapter version *without*
 the warm-up (older than this one) and are then updated across. Redeploy the Kafka integration flows

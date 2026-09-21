@@ -20,12 +20,17 @@
  */
 package com.finkeflo.cpi.kafka;
 
+import java.lang.reflect.Proxy;
+import java.net.URL;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.TreeSet;
 
 import org.junit.Assert;
 import org.junit.Test;
+import org.osgi.framework.Bundle;
 
 public class BundleClassWarmupTest {
 
@@ -97,9 +102,15 @@ public class BundleClassWarmupTest {
     @Test
     public void ensureStartedIsIdempotentPerClassSpace() {
         BundleClassWarmup.resetForTests();
-        BundleClassWarmup.ensureStarted(BundleClassWarmup.class, "test-1");
-        BundleClassWarmup.ensureStarted(BundleClassWarmup.class, "test-2");
-        // No assertion beyond "does not throw": the once-guard is a static AtomicBoolean.
+        Assert.assertTrue("first call must start the warm-up",
+                BundleClassWarmup.ensureStarted(BundleClassWarmup.class, "test-1"));
+        Assert.assertFalse("second call must be a no-op",
+                BundleClassWarmup.ensureStarted(BundleClassWarmup.class, "test-2"));
+        Assert.assertFalse("guard is per class space, not per trigger or anchor",
+                BundleClassWarmup.ensureStarted(BundleClassWarmupTest.class, "test-1"));
+        BundleClassWarmup.resetForTests();
+        Assert.assertTrue("reset re-arms the guard (models a new bundle revision)",
+                BundleClassWarmup.ensureStarted(BundleClassWarmup.class, "test-3"));
     }
 
     @Test
@@ -107,5 +118,69 @@ public class BundleClassWarmupTest {
         String description = OsgiBundleInfo.describeClassSpace(BundleClassWarmup.class);
         Assert.assertTrue(description, description.contains("bundleVersion=null"));
         Assert.assertTrue(description, description.contains("loader="));
+    }
+    @Test
+    public void summarisePackagesTalliesPerPackageMostFrequentFirstAndCaps() {
+        List<String> names = Arrays.asList(
+                "a.b.C1", "a.b.C2", "a.b.C3",
+                "x.y.z.K1", "x.y.z.K2",
+                "m.N",
+                "NoPackage");
+        Assert.assertEquals("a.b:3,x.y.z:2,(default):1,m:1",
+                BundleClassWarmup.summarisePackages(names, 20));
+        Assert.assertEquals("a.b:3,x.y.z:2,…+2 packages",
+                BundleClassWarmup.summarisePackages(names, 2));
+        Assert.assertEquals("", BundleClassWarmup.summarisePackages(Arrays.<String>asList(), 20));
+    }
+    /**
+     * A {@code Bundle} stub that reports the given state and, via {@code findEntries}, exposes the
+     * anchor's real code source as bundle content (enough entries to cross the state-check interval).
+     */
+    private static OsgiBundleInfo bundleInState(int state) {
+        Bundle bundle = (Bundle) Proxy.newProxyInstance(Bundle.class.getClassLoader(), new Class<?>[] {Bundle.class},
+                (proxy, method, args) -> {
+                    switch (method.getName()) {
+                        case "getState":
+                            return state;
+                        case "findEntries":
+                            return Collections.enumeration(codeSourceClassUrls());
+                        case "getHeaders":
+                            return new java.util.Hashtable<String, String>();
+                        default:
+                            return null;
+                    }
+                });
+        return OsgiBundleInfo.forTests(bundle, Bundle.class);
+    }
+
+    private static List<URL> codeSourceClassUrls() throws Exception {
+        OsgiBundleInfo none = OsgiBundleInfo.of(BundleClassWarmupTest.class);
+        BundleClassWarmup.Report report = new BundleClassWarmup.Report(null);
+        List<URL> urls = new ArrayList<>();
+        for (String name : BundleClassWarmup.enumerateClassNames(org.apache.kafka.clients.consumer.KafkaConsumer.class,
+                none, report, false)) {
+            urls.add(new URL("file:/" + name.replace('.', '/') + ".class"));
+        }
+        return urls;
+    }
+
+    @Test
+    public void isStoppingOrStoppedOnlyForNonRunningBundleStates() {
+        Assert.assertFalse(bundleInState(Bundle.STARTING).isStoppingOrStopped());
+        Assert.assertFalse(bundleInState(Bundle.ACTIVE).isStoppingOrStopped());
+        Assert.assertTrue(bundleInState(Bundle.STOPPING).isStoppingOrStopped());
+        Assert.assertTrue(bundleInState(Bundle.RESOLVED).isStoppingOrStopped());
+        Assert.assertTrue(bundleInState(Bundle.INSTALLED).isStoppingOrStopped());
+        Assert.assertTrue(bundleInState(Bundle.UNINSTALLED).isStoppingOrStopped());
+        Assert.assertFalse(OsgiBundleInfo.of(BundleClassWarmupTest.class).isStoppingOrStopped());
+    }
+
+    @Test
+    public void warmAllClassesAbortsWhenBundleIsStopping() {
+        BundleClassWarmup.Report report = BundleClassWarmup.warmAllClasses(BundleClassWarmup.class,
+                bundleInState(Bundle.STOPPING));
+        Assert.assertEquals("bundle-stopping", report.aborted);
+        Assert.assertTrue("should stop after at most one state-check interval, attempted=" + report.attempted,
+                report.attempted <= BundleClassWarmup.BUNDLE_STATE_CHECK_INTERVAL);
     }
 }

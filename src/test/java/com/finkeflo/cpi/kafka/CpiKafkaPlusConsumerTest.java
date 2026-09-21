@@ -412,7 +412,7 @@ public class CpiKafkaPlusConsumerTest {
                 "Unable to load class 'org.apache.kafka.clients.consumer.ConsumerPartitionAssignor$GroupSubscription' "
                         + "because the bundle wiring for com.finkeflo.cpi.kafka.cpi-kafka-adapter-plus is no longer valid."));
 
-        Assert.assertTrue(CpiKafkaPlusConsumer.isBundleWiringInvalidFailure(failure));
+        Assert.assertTrue(ClassSpaceFaults.isWiringInvalid(failure));
     }
 
     @Test
@@ -422,12 +422,12 @@ public class CpiKafkaPlusConsumerTest {
                         "Unable to load class 'org.apache.kafka.clients.consumer.internals.ConsumerCoordinator$3' "
                                 + "because the bundle wiring for com.finkeflo.cpi.kafka.cpi-kafka-adapter-plus is no longer valid."));
 
-        Assert.assertTrue(CpiKafkaPlusConsumer.isBundleWiringInvalidFailure(failure));
+        Assert.assertTrue(ClassSpaceFaults.isWiringInvalid(failure));
     }
 
     @Test
     public void testIsBundleWiringInvalidFailureFalseForRegularClassNotFound() {
-        Assert.assertFalse(CpiKafkaPlusConsumer.isBundleWiringInvalidFailure(
+        Assert.assertFalse(ClassSpaceFaults.isWiringInvalid(
                 new ClassNotFoundException("org.example.DoesNotExist")));
     }
 

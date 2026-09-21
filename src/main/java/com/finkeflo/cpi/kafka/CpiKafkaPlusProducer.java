@@ -63,6 +63,10 @@ import com.finkeflo.cpi.kafka.ProducerBatchHelper.ProducerPath;
 public class CpiKafkaPlusProducer extends DefaultProducer {
 
     private static final Logger LOG = LoggerFactory.getLogger(CpiKafkaPlusProducer.class);
+
+    /** Rate limit for {@code send.bundle-wiring-invalid}: every failing exchange hits it until the iFlow is redeployed. */
+    private static final long CLASS_SPACE_GONE_LOG_INTERVAL_MS = 60_000L;
+    private volatile long lastClassSpaceGoneLogMs;
     private static final int MAX_CONSECUTIVE_SEND_FAILURES = 3;
     private static final Duration TXN_PRODUCER_CLOSE_TIMEOUT = Duration.ofSeconds(5);
     /**
@@ -561,6 +565,42 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
 
     @Override
     public void process(Exchange exchange) throws Exception {
+        try {
+            doProcess(exchange);
+        } catch (Throwable t) {
+            if (ClassSpaceFaults.isOnStaleClassSpace(t, getClass())) {
+                throw classSpaceGone(t);
+            }
+            throw t;
+        }
+    }
+
+    /**
+     * Same break as the consumer's {@code poll.bundle-wiring-invalid} (issue #148), seen from the
+     * send side: the adapter was updated while this integration flow kept running on the old bundle
+     * revision, and a first-time class/native-library load (typically the compression codec of the
+     * first batch) failed over the dead loader. Nothing inside the adapter can repair that; say so
+     * once per minute in the trace and give every failing exchange the actionable message instead
+     * of a generic send failure.
+     */
+    private IllegalStateException classSpaceGone(Throwable failure) {
+        long now = System.currentTimeMillis();
+        if (now - lastClassSpaceGoneLogMs >= CLASS_SPACE_GONE_LOG_INTERVAL_MS) {
+            lastClassSpaceGoneLogMs = now;
+            AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("send.bundle-wiring-invalid")
+                    .with("topic", endpoint.getEffectiveTopic())
+                    .with("classSpace", OsgiBundleInfo.describeClassSpace(getClass()))
+                    .with("action", "redeploy the integration flow"), failure);
+        }
+        return new IllegalStateException(
+                "The adapter bundle was updated while this integration flow was running; the class space of "
+                + "this route (topic='" + endpoint.getEffectiveTopic() + "') is gone and cannot be recovered "
+                + "from inside the adapter. Redeploy the integration flow to bind it to the new adapter version. "
+                + "Root cause: " + KafkaErrorHelper.describeChain(failure), failure);
+    }
+
+    /** Visible for tests: the unguarded send path behind {@link #process(Exchange)}. */
+    void doProcess(Exchange exchange) throws Exception {
         String batchMode = endpoint.getProducerBatchMode();
         // When every exchange goes through the transactional path (enableTransactions with a batch
         // mode), the shared non-transactional KafkaProducer is never used and must not gate

@@ -67,7 +67,12 @@ import org.slf4j.LoggerFactory;
  *   <li><b>Background daemon thread</b>: every {@code .class} in the bundle root and in every
  *       {@code Bundle-ClassPath} jar, loaded without initialisation. Kafka codec, consumer and
  *       record packages go first. Failures are expected for classes whose optional dependencies
- *       are not present on CPI; they are logged by name so the set can be reviewed.</li>
+ *       are not present on CPI; they are logged by name so the set can be reviewed. The thread
+ *       is deliberately <em>not</em> tied to the component lifecycle: the guard is per bundle
+ *       revision, so an iFlow undeploy must not abort the warm-up that protects the other
+ *       routes. It stops on its own when the <em>bundle</em> is stopping/stopped (checked every
+ *       {@link #BUNDLE_STATE_CHECK_INTERVAL} classes) or when class loads fail with the
+ *       "wiring no longer valid" signature.</li>
  * </ol>
  *
  * <p>Runs equally outside OSGi (unit/integration tests) by walking the code source of the anchor
@@ -93,7 +98,10 @@ final class BundleClassWarmup {
 
     /** Abort the background pass once the class space is evidently gone. */
     private static final int MAX_CONSECUTIVE_WIRING_FAILURES = 25;
+    /** Poll the bundle state this often (in classes) so the pass ends promptly on bundle stop. */
+    static final int BUNDLE_STATE_CHECK_INTERVAL = 200;
     private static final int MAX_FAILURES_LOGGED = 300;
+    private static final int MAX_PACKAGES_LOGGED = 20;
 
     private static final AtomicBoolean STARTED = new AtomicBoolean(false);
 
@@ -105,10 +113,12 @@ final class BundleClassWarmup {
      *
      * @param anchor a class of this bundle, used to find the class loader and the bundle content
      * @param trigger free-text origin for the log line (e.g. {@code component.createEndpoint})
+     * @return {@code true} if this call started the warm-up, {@code false} if it had already run
+     *         (or is running) for this class space
      */
-    static void ensureStarted(Class<?> anchor, String trigger) {
+    static boolean ensureStarted(Class<?> anchor, String trigger) {
         if (!STARTED.compareAndSet(false, true)) {
-            return;
+            return false;
         }
         OsgiBundleInfo bundle = OsgiBundleInfo.of(anchor);
         LOG.error("[CPI-KAFKA-PLUS-DIAG] class-warmup.start trigger={} loader={} bundleId={} bundleVersion={} "
@@ -151,6 +161,7 @@ final class BundleClassWarmup {
         worker.setDaemon(true);
         worker.setPriority(Thread.MIN_PRIORITY);
         worker.start();
+        return true;
     }
 
     /** Visible for tests: resets the once-guard. */
@@ -182,6 +193,7 @@ final class BundleClassWarmup {
         names.sort(Comparator.comparingInt(BundleClassWarmup::priorityRank).thenComparing(Comparator.naturalOrder()));
 
         int consecutiveWiringFailures = 0;
+        int sinceStateCheck = 0;
         for (String name : names) {
             if (name.startsWith(ADAPTER_PACKAGE_PREFIX)) {
                 continue; // stage 1 already covered these
@@ -189,6 +201,13 @@ final class BundleClassWarmup {
             if (Thread.currentThread().isInterrupted()) {
                 report.aborted = "interrupted";
                 break;
+            }
+            if (++sinceStateCheck >= BUNDLE_STATE_CHECK_INTERVAL) {
+                sinceStateCheck = 0;
+                if (bundle.isStoppingOrStopped()) {
+                    report.aborted = "bundle-stopping";
+                    break;
+                }
             }
             Throwable failure = load(name, false, loader, report);
             if (failure != null && isWiringGone(failure)) {
@@ -239,21 +258,55 @@ final class BundleClassWarmup {
         if (report.failures.isEmpty()) {
             return;
         }
+        // ERROR (the only level that reaches the tenant trace): count plus per-package tally, a
+        // few hundred bytes. The full class list would be several KB per revision and is DEBUG.
+        LOG.error("[CPI-KAFKA-PLUS-DIAG] class-warmup.{}.failures count={} (expected for classes whose optional dependencies "
+                        + "are absent on CPI; review if the set changes) packages={}",
+                stage, report.failures.size(), summarisePackages(report.failures.keySet(), MAX_PACKAGES_LOGGED));
+        if (LOG.isDebugEnabled()) {
+            StringBuilder sb = new StringBuilder();
+            int n = 0;
+            for (Map.Entry<String, String> e : report.failures.entrySet()) {
+                if (n++ >= MAX_FAILURES_LOGGED) {
+                    sb.append(", …+").append(report.failures.size() - MAX_FAILURES_LOGGED);
+                    break;
+                }
+                if (sb.length() > 0) {
+                    sb.append(", ");
+                }
+                sb.append(e.getKey()).append(" [").append(e.getValue()).append(']');
+            }
+            LOG.debug("[CPI-KAFKA-PLUS-DIAG] class-warmup.{}.failures.detail classes={}", stage, sb);
+        }
+    }
+
+    /**
+     * {@code package:count} pairs, most failures first, capped at {@code max} packages (the rest
+     * folded into {@code …+N packages}). Visible for tests.
+     */
+    static String summarisePackages(Iterable<String> classNames, int max) {
+        Map<String, Integer> perPackage = new LinkedHashMap<>();
+        for (String name : classNames) {
+            int dot = name.lastIndexOf('.');
+            String pkg = dot > 0 ? name.substring(0, dot) : "(default)";
+            perPackage.merge(pkg, 1, Integer::sum);
+        }
+        List<Map.Entry<String, Integer>> sorted = new ArrayList<>(perPackage.entrySet());
+        sorted.sort(Comparator.<Map.Entry<String, Integer>>comparingInt(Map.Entry::getValue).reversed()
+                .thenComparing(Map.Entry::getKey));
         StringBuilder sb = new StringBuilder();
         int n = 0;
-        for (Map.Entry<String, String> e : report.failures.entrySet()) {
-            if (n++ >= MAX_FAILURES_LOGGED) {
-                sb.append(", …+").append(report.failures.size() - MAX_FAILURES_LOGGED);
+        for (Map.Entry<String, Integer> e : sorted) {
+            if (n++ >= max) {
+                sb.append(",…+").append(sorted.size() - max).append(" packages");
                 break;
             }
             if (sb.length() > 0) {
-                sb.append(", ");
+                sb.append(',');
             }
-            sb.append(e.getKey()).append(" [").append(e.getValue()).append(']');
+            sb.append(e.getKey()).append(':').append(e.getValue());
         }
-        LOG.error("[CPI-KAFKA-PLUS-DIAG] class-warmup.{}.failures count={} (expected for classes whose optional dependencies "
-                        + "are absent on CPI; review if the set changes) classes={}",
-                stage, report.failures.size(), sb);
+        return sb.toString();
     }
 
     // ---------------------------------------------------------------------------------------------

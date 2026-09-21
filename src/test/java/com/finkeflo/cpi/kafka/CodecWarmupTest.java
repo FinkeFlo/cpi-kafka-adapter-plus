@@ -66,19 +66,19 @@ public class CodecWarmupTest {
     public void classSpaceFaultSignatureCoversNativeLoaderErrorsAndWrappedLinkageErrors() {
         // snappy-java's SnappyError extends Error directly (no LinkageError in the chain).
         Error snappyLike = new Error("[FAILED_TO_LOAD_NATIVE_LIBRARY] no native library is found") {};
-        Assert.assertTrue(CpiKafkaPlusConsumer.hasClassSpaceFaultSignature(snappyLike));
+        Assert.assertTrue(ClassSpaceFaults.hasFaultSignature(snappyLike));
 
         KafkaException wrapped = new KafkaException("Received exception when fetching the next record",
                 new NoClassDefFoundError("Could not initialize class org.xerial.snappy.Snappy"));
-        Assert.assertTrue(CpiKafkaPlusConsumer.hasClassSpaceFaultSignature(wrapped));
+        Assert.assertTrue(ClassSpaceFaults.hasFaultSignature(wrapped));
 
-        Assert.assertTrue(CpiKafkaPlusConsumer.hasClassSpaceFaultSignature(
+        Assert.assertTrue(ClassSpaceFaults.hasFaultSignature(
                 new RuntimeException(new ClassNotFoundException("x"))));
-        Assert.assertTrue(CpiKafkaPlusConsumer.hasClassSpaceFaultSignature(new UnsatisfiedLinkError("libx.so")));
+        Assert.assertTrue(ClassSpaceFaults.hasFaultSignature(new UnsatisfiedLinkError("libx.so")));
 
-        Assert.assertFalse(CpiKafkaPlusConsumer.hasClassSpaceFaultSignature(new KafkaException("timeout")));
-        Assert.assertFalse(CpiKafkaPlusConsumer.hasClassSpaceFaultSignature(new OutOfMemoryError("heap")));
-        Assert.assertFalse(CpiKafkaPlusConsumer.hasClassSpaceFaultSignature(new RuntimeException("plain")));
+        Assert.assertFalse(ClassSpaceFaults.hasFaultSignature(new KafkaException("timeout")));
+        Assert.assertFalse(ClassSpaceFaults.hasFaultSignature(new OutOfMemoryError("heap")));
+        Assert.assertFalse(ClassSpaceFaults.hasFaultSignature(new RuntimeException("plain")));
     }
 
     @Test

@@ -58,8 +58,6 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
     private static final int MAX_CONSECUTIVE_POLL_FAILURES = 5;
     private static final long MAX_POLL_FAILURE_DURATION_MS = 60_000L;
     private static final long STOPPED_BY_ERROR_REMINDER_INTERVAL_MS = 60_000L;
-    private static final String INVALID_BUNDLE_WIRING_SNIPPET = "bundle wiring";
-    private static final String INVALID_BUNDLE_WIRING_SUFFIX = "no longer valid";
     /**
      * Base cooldown before rebuilding the consumer after a {@link FencedInstanceIdException}
      * (KIP-345 static membership conflict). Chosen as {@code SESSION_TIMEOUT_MS_CONFIG} (30s) plus
@@ -818,7 +816,7 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
                 handleNonRetryablePollFailure(e);
             } else if (isFencedInstanceIdFailure(e)) {
                 handleFencedInstanceIdFailure(e);
-            } else if (isBundleWiringInvalidFailure(e) || isFailureOnStaleClassSpace(e)) {
+            } else if (isClassSpaceGoneFailure(e)) {
                 handleBundleWiringInvalidFailure(e);
             } else {
                 LOG.warn("[CPI-KAFKA-PLUS-DIAG] keepAlivePoll: best-effort poll failed: {}", e.getMessage());
@@ -925,7 +923,7 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
                 handleNonRetryablePollFailure(t);
             } else if (isFencedInstanceIdFailure(t)) {
                 handleFencedInstanceIdFailure(t);
-            } else if (isBundleWiringInvalidFailure(t) || isFailureOnStaleClassSpace(t)) {
+            } else if (isClassSpaceGoneFailure(t)) {
                 handleBundleWiringInvalidFailure(t);
             } else {
                 // A client without TLS against a TLS-only listener never gets far enough to see a
@@ -1005,63 +1003,12 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
     }
 
     /**
-     * Detects the known CPI hot-update class-space break where the active consumer thread runs
-     * against stale bundle wiring and Kafka client internals start failing with
-     * {@code NoClassDefFoundError}/{@code ClassNotFoundException} carrying
-     * "bundle wiring ... no longer valid". This is recoverable by rebuilding the KafkaConsumer.
+     * Detects the class-space break of issue #148 on the poll path: either the OSGi
+     * "bundle wiring ... no longer valid" text, or a class/link/native-library fault while this
+     * route's loader belongs to a bundle revision an adapter update has already replaced.
      */
-    static boolean isBundleWiringInvalidFailure(Throwable failure) {
-        Throwable current = failure;
-        while (current != null) {
-            boolean classLoadingFault = current instanceof NoClassDefFoundError
-                    || current instanceof ClassNotFoundException
-                    || current instanceof LinkageError;
-            String msg = current.getMessage();
-            boolean wiringSignature = msg != null
-                    && msg.contains(INVALID_BUNDLE_WIRING_SNIPPET)
-                    && msg.contains(INVALID_BUNDLE_WIRING_SUFFIX);
-            if (classLoadingFault && wiringSignature) {
-                return true;
-            }
-            Throwable next = current.getCause();
-            if (next == current) {
-                break;
-            }
-            current = next;
-        }
-        return false;
-    }
-
-    /**
-     * Second signature of the same break (issue #148): the poll died on a class, link or
-     * native-library load <em>and</em> the route's class loader belongs to a bundle revision that
-     * an adapter update has already replaced. Typical: {@code SnappyError
-     * FAILED_TO_LOAD_NATIVE_LIBRARY} on the first snappy batch after an update — a resource lookup
-     * over the dead loader that carries no "bundle wiring" text, later re-thrown by Kafka as
-     * {@code KafkaException → NoClassDefFoundError: Could not initialize class}.
-     */
-    private boolean isFailureOnStaleClassSpace(Throwable failure) {
-        return hasClassSpaceFaultSignature(failure)
-                && Boolean.TRUE.equals(OsgiBundleInfo.isClassSpaceStale(getClass()));
-    }
-
-    static boolean hasClassSpaceFaultSignature(Throwable failure) {
-        Throwable current = failure;
-        while (current != null) {
-            if (current instanceof LinkageError
-                    || current instanceof ClassNotFoundException
-                    || (current instanceof Error
-                        && !(current instanceof VirtualMachineError)
-                        && !(current instanceof ThreadDeath))) {
-                return true;
-            }
-            Throwable next = current.getCause();
-            if (next == current) {
-                break;
-            }
-            current = next;
-        }
-        return false;
+    private boolean isClassSpaceGoneFailure(Throwable failure) {
+        return ClassSpaceFaults.isOnStaleClassSpace(failure, getClass());
     }
 
     private static Throwable findNonRetryablePollFailureCause(Throwable failure) {
@@ -1538,7 +1485,7 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
     }
 
     private void logConsumerCloseFailure(String phase, Throwable t) {
-        if (isBundleWiringInvalidFailure(t) || t instanceof LinkageError) {
+        if (ClassSpaceFaults.isWiringInvalid(t) || t instanceof LinkageError) {
             AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("consumer.close.failed")
                     .with("phase", phase)
                     .with("topic", endpoint.getEffectiveTopic())
