@@ -331,7 +331,10 @@ Why this exists: deploying a new adapter version makes CPI purge the *old* bundl
 while every running integration flow keeps using its class loader. Any class or resource that had
 not been loaded by then fails with `NoClassDefFoundError`/`ClassNotFoundException … bundle wiring …
 no longer valid` or, for the compression codecs, `SnappyError FAILED_TO_LOAD_NATIVE_LIBRARY`. The
-warm-up leaves nothing to load lazily, so routes survive the update.
+warm-up removes the lazy loads: every class of the bundle is loaded up front, and the codecs'
+native libraries are extracted by a real round trip. Classes are loaded without running their
+static initialisers, so a resource lookup from a static initialiser other than the codecs' is the
+one path that can still fail — see `poll.bundle-wiring-invalid` below.
 
 ### `poll.bundle-wiring-invalid`
 

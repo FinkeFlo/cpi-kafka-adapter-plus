@@ -13,7 +13,7 @@ That class loader is now dead for anything it has not loaded yet. The first lazy
 fails with `NoClassDefFoundError`/`ClassNotFoundException … bundle wiring … no longer valid`; the
 first lookup of a resource (`getResourceAsStream`) returns `null`. HotSpot caches the failed
 resolution per call site, so the failure is permanent for that route. Observed signatures from the
-QAS/PRD incidents of 2026-08-20 and 2026-09-17 (about 8,500 lost messages per tenant each):
+production incidents that led to this work:
 
 - `Lz4Compression$Builder` on the first LZ4-compressed batch after an update;
 - `CloseOptions` in `KafkaConsumer.close()` on stop, so the member never sent `LeaveGroup` and the
@@ -43,7 +43,10 @@ redeploy flows; a Camel route restart stays on the dead loader. Only a platform-
 rebinds a flow.
 
 **Leave nothing to load lazily (chosen).** If the old revision has already loaded every class and
-extracted every native library it can ever need, the purge has nothing to break.
+extracted every native library it can ever need, the purge has nothing to break. The residual gap
+is accepted knowingly: stage 2 loads without initialising, so a resource lookup from a static
+initialiser other than the codecs' would still fail. No such path is known in the shipped code,
+and `poll.bundle-wiring-invalid` reports one if it appears.
 
 ## Decision
 `BundleClassWarmup.ensureStarted` runs once per class space (a `static` guard is automatically per
