@@ -9,6 +9,11 @@ on:
   pull_request:
     types: [ opened, synchronize, reopened, labeled, unlabeled ]
 
+# Least privilege: every job here only checks out, builds and uploads an artifact. Nothing writes
+# back to the repository, so the default write-capable token is more than these jobs need.
+permissions:
+  contents: read
+
 jobs:
   unit-tests:
     runs-on: ubuntu-latest
