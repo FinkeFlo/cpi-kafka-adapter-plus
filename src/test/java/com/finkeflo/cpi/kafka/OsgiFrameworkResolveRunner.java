@@ -32,7 +32,6 @@ import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import java.util.jar.Attributes;
@@ -57,6 +56,16 @@ public final class OsgiFrameworkResolveRunner {
     private static final String BUNDLE_SYMBOLIC_NAME = "Bundle-SymbolicName";
     private static final String IMPORT_PACKAGE = "Import-Package";
 
+    /**
+     * Namespace of the adapter bundle's symbolic name ({@code <groupId>.<artifactId>} in the
+     * pom). Derived from this class' package so it cannot drift away from the shipped bundle.
+     */
+    private static final String ADAPTER_BUNDLE_NAMESPACE =
+            OsgiFrameworkResolveRunner.class.getPackage().getName();
+
+    /** Symbolic-name suffix of the ADK-generated monitor bundle. */
+    private static final String MONITOR_BUNDLE_SUFFIX = ".monitor";
+
     private OsgiFrameworkResolveRunner() {
     }
 
@@ -72,7 +81,7 @@ public final class OsgiFrameworkResolveRunner {
                 System.out.println("Missing ESA path for resolve mode");
                 System.exit(2);
             }
-            runResolve(new File(args[1]), args.length > 2 ? args[2] : "");
+            runResolve(new File(args[1]));
             System.exit(0);
         }
         if ("negative".equals(mode)) {
@@ -84,8 +93,8 @@ public final class OsgiFrameworkResolveRunner {
         System.exit(2);
     }
 
-    private static void runResolve(File esa, String finalName) throws Exception {
-        List<BundleArchive> standaloneBundles = readStandaloneBundles(esa, finalName);
+    private static void runResolve(File esa) throws Exception {
+        List<BundleArchive> standaloneBundles = readStandaloneBundles(esa);
         if (standaloneBundles.isEmpty()) {
             System.out.println("No standalone dependency bundles found in ESA " + esa.getAbsolutePath());
             return;
@@ -139,7 +148,7 @@ public final class OsgiFrameworkResolveRunner {
         }
     }
 
-    private static List<BundleArchive> readStandaloneBundles(File esa, String finalName) throws IOException {
+    private static List<BundleArchive> readStandaloneBundles(File esa) throws IOException {
         List<BundleArchive> bundles = new ArrayList<BundleArchive>();
         JarFile esaJar = new JarFile(esa);
         try {
@@ -149,9 +158,6 @@ public final class OsgiFrameworkResolveRunner {
                 if (entry.isDirectory() || !entry.getName().endsWith(".jar")) {
                     continue;
                 }
-                if (isProjectOwnedBundle(entry.getName(), finalName)) {
-                    continue;
-                }
 
                 byte[] content = readAllBytes(esaJar.getInputStream(entry));
                 Manifest manifest = readNestedManifest(content);
@@ -159,7 +165,11 @@ public final class OsgiFrameworkResolveRunner {
                     continue;
                 }
                 Attributes attributes = manifest.getMainAttributes();
-                if (!hasText(attributes.getValue(BUNDLE_SYMBOLIC_NAME))) {
+                String symbolicName = attributes.getValue(BUNDLE_SYMBOLIC_NAME);
+                if (!hasText(symbolicName)) {
+                    continue;
+                }
+                if (isProjectOwnedBundle(symbolicName)) {
                     continue;
                 }
                 bundles.add(new BundleArchive(entry.getName(), content));
@@ -170,15 +180,31 @@ public final class OsgiFrameworkResolveRunner {
         return bundles;
     }
 
-    private static boolean isProjectOwnedBundle(String entryName, String finalName) {
-        if (!hasText(entryName)) {
+    /**
+     * Decides whether a nested ESA bundle is built by this project (and therefore installed by
+     * CPI itself rather than by the resolve harness). The decision is taken on the bundle's
+     * declared {@code Bundle-SymbolicName}, not on the jar file name, so renamed artifacts or
+     * version bumps cannot silently change which bundles the resolve test installs.
+     */
+    static boolean isProjectOwnedBundle(String symbolicName) {
+        String name = stripManifestAttributes(symbolicName);
+        if (!hasText(name)) {
             return false;
         }
-        String lower = entryName.toLowerCase(Locale.ROOT);
-        if (lower.endsWith(".monitor.jar")) {
+        if (name.equals(ADAPTER_BUNDLE_NAMESPACE) || name.startsWith(ADAPTER_BUNDLE_NAMESPACE + ".")) {
             return true;
         }
-        return hasText(finalName) && entryName.endsWith(finalName + ".jar");
+        return name.endsWith(MONITOR_BUNDLE_SUFFIX);
+    }
+
+    /** Drops the {@code ;singleton:=true}-style attributes a symbolic-name header may carry. */
+    private static String stripManifestAttributes(String header) {
+        if (header == null) {
+            return null;
+        }
+        int separator = header.indexOf(';');
+        String name = separator < 0 ? header : header.substring(0, separator);
+        return name.trim();
     }
 
     private static Manifest readNestedManifest(byte[] jarBytes) throws IOException {
