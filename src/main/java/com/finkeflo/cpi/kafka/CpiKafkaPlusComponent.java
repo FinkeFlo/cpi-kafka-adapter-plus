@@ -31,6 +31,18 @@ public class CpiKafkaPlusComponent extends DefaultComponent {
 
     private static final Logger LOG = LoggerFactory.getLogger(CpiKafkaPlusComponent.class);
 
+    public CpiKafkaPlusComponent() {
+        // Earliest hook this bundle gets: pre-load the whole class space before a later adapter
+        // update can purge this revision underneath running routes (issue #148).
+        BundleClassWarmup.ensureStarted(CpiKafkaPlusComponent.class, "component.init");
+    }
+
+    @Override
+    protected void doStart() throws Exception {
+        super.doStart();
+        BundleClassWarmup.ensureStarted(CpiKafkaPlusComponent.class, "component.start");
+    }
+
     @Override
     public Endpoint createEndpoint(String uri) throws Exception {
         // Trim whitespace from all query parameter values before Camel parses the URI.

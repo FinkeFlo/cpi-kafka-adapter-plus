@@ -316,21 +316,48 @@ and both counters restart afterwards — the line therefore appears once per rec
 failed poll, and seeing it repeat at a steady cadence means the outage is ongoing rather than that
 the adapter is thrashing. The individual poll failures are logged separately with the cause.
 
-### `poll: detected invalid OSGi bundle wiring`
+### `class-warmup.*` at start-up
 
-This line means Kafka class loading failed with the CPI hot-update signature
-`bundle wiring ... no longer valid` (typically wrapped in `NoClassDefFoundError` or
-`ClassNotFoundException`). In this state the route can still tick "alive" while poll/assignment
-logic is broken.
+Four to five lines per adapter bundle revision, written once when the first Kafka endpoint of that
+revision starts. `class-warmup.stage1.completed` (the adapter's own classes, synchronous),
+`class-warmup.codecs.completed codecs=gzip:ok,snappy:ok,lz4:ok,zstd:ok` (one compress/decompress
+round trip per codec so that the native libraries are extracted while the bundle revision is still
+live) and `class-warmup.stage2.completed` (every class in the bundle, on a low-priority daemon
+thread, ~2 s on a tenant). `class-warmup.stage2.failures count=61` is expected: those classes need
+optional libraries (grpc, jose4j, joni, asm) that are deliberately not shipped. Review the list only
+if the count changes after a dependency upgrade.
 
-From this version onward, the adapter treats that signature as a dedicated recoverable state: it
-closes the current consumer immediately and rebuilds it on the next poll cycle, rather than waiting
-for the generic failure thresholds. If wiring remains stale, it additionally tries a bounded
-automatic restart of the affected Camel route (`stopRoute`/`startRoute`, max 2 attempts, 15-minute
-cooldown), which mirrors the manual "restart iFlow" fix path.
+Why this exists: deploying a new adapter version makes CPI purge the *old* bundle revision at once,
+while every running integration flow keeps using its class loader. Any class or resource that had
+not been loaded by then fails with `NoClassDefFoundError`/`ClassNotFoundException … bundle wiring …
+no longer valid` or, for the compression codecs, `SnappyError FAILED_TO_LOAD_NATIVE_LIBRARY`. The
+warm-up removes the lazy loads: every class of the bundle is loaded up front, and the codecs'
+native libraries are extracted by a real round trip. Classes are loaded without running their
+static initialisers, so a resource lookup from a static initialiser other than the codecs' is the
+one path that can still fail — see `poll.bundle-wiring-invalid` below.
 
-If the line keeps repeating even after those attempts, the tenant runtime still serves a stale class
-space and needs platform-side runtime recovery.
+### `poll.bundle-wiring-invalid` / `send.bundle-wiring-invalid`
+
+The route runs on a bundle revision that an adapter update has already replaced *and* a poll failed
+on a class, link or native-library load. The line carries `classSpace=… stale=true` naming the
+revision (`bundleId`, `bundleLastModified`, `loader`), and `action=redeploy the integration flow`.
+
+Nothing inside that revision can repair this — rebuilding the consumer or restarting the Camel
+route re-uses the same dead class loader and fails again on the next cold load (older versions
+attempted exactly that, in a ~6 s loop). The adapter therefore stops polling, reports the state to
+the integration-flow monitor once and repeats a reminder line every few minutes. Redeploy (or stop
+and start) the integration flow; it then binds to the current adapter revision.
+
+The producer has no polling loop to stop; instead every exchange that hits the dead class space
+fails with the same message ("The adapter bundle was updated while this integration flow was
+running … Redeploy the integration flow …") in the message-processing log, and the trace carries
+one `send.bundle-wiring-invalid` line per minute with the same `classSpace` fields.
+
+When to expect it: only for integration flows that were started on an adapter version *without*
+the warm-up (older than this one) and are then updated across. Redeploy the Kafka integration flows
+once after the first rollout of a warm-up-capable adapter; every later adapter update is
+transparent to running flows. On an already warmed revision the line indicates a code path the
+warm-up does not cover — please report it with the `classSpace` fields.
 
 ### `adapter.mpl.unavailable`
 

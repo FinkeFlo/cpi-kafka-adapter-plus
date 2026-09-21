@@ -32,7 +32,6 @@ import java.util.Set;
 import org.apache.camel.CamelExchangeException;
 import org.apache.camel.Exchange;
 import org.apache.camel.Processor;
-import org.apache.camel.Route;
 import org.apache.camel.support.ScheduledPollConsumer;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
@@ -59,10 +58,6 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
     private static final int MAX_CONSECUTIVE_POLL_FAILURES = 5;
     private static final long MAX_POLL_FAILURE_DURATION_MS = 60_000L;
     private static final long STOPPED_BY_ERROR_REMINDER_INTERVAL_MS = 60_000L;
-    private static final String INVALID_BUNDLE_WIRING_SNIPPET = "bundle wiring";
-    private static final String INVALID_BUNDLE_WIRING_SUFFIX = "no longer valid";
-    private static final int MAX_ROUTE_RESTART_ATTEMPTS = 2;
-    private static final long ROUTE_RESTART_COOLDOWN_MS = 15 * 60_000L;
     /**
      * Base cooldown before rebuilding the consumer after a {@link FencedInstanceIdException}
      * (KIP-345 static membership conflict). Chosen as {@code SESSION_TIMEOUT_MS_CONFIG} (30s) plus
@@ -130,10 +125,6 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
     private volatile boolean stoppedByErrorPolicy = false;
     private volatile Throwable stoppedByError;
     private volatile long lastStoppedByErrorReminderMs = 0L;
-    private volatile boolean routeRestartInProgress = false;
-    private volatile int routeRestartAttempts = 0;
-    private volatile long lastRouteRestartAttemptMs = 0L;
-    private volatile String owningRouteId;
     /**
      * Last CPI connection/consumption status published for this consumer. Drives transition-based
      * reporting so the monitor is neither stuck nor spammed:
@@ -234,10 +225,6 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
         stoppedByErrorPolicy = false;
         stoppedByError = null;
         lastStoppedByErrorReminderMs = 0L;
-        routeRestartInProgress = false;
-        routeRestartAttempts = 0;
-        lastRouteRestartAttemptMs = 0L;
-        owningRouteId = null;
         lastEmitTimeMs = 0L;
 
         // Fail-fast: validate shared configuration (Schema Registry, JSON Schema, SASL)
@@ -295,8 +282,10 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
         }
 
         super.doStart();
-        LOG.error("[CPI-KAFKA-PLUS-DIAG] doStart called — Consumer for topic='{}' group='{}'",
-                endpoint.getEffectiveTopic(), endpoint.getGroupId());
+        BundleClassWarmup.ensureStarted(CpiKafkaPlusConsumer.class, "consumer.start");
+        LOG.error("[CPI-KAFKA-PLUS-DIAG] doStart called — Consumer for topic='{}' group='{}' {}",
+                endpoint.getEffectiveTopic(), endpoint.getGroupId(),
+                OsgiBundleInfo.describeClassSpace(CpiKafkaPlusConsumer.class));
         LOG.info("Starting CPI Kafka Plus Consumer for topic '{}' with group '{}' (lazy init — Kafka resources created on first poll)",
                 endpoint.getEffectiveTopic(), endpoint.getGroupId());
 
@@ -349,10 +338,15 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
             try {
                 BundleBackedClassLoader.runWithBundleClassLoader(getClass(),
                         () -> consumerRef.close(Duration.ofSeconds(15)));
-            } catch (Exception e) {
-                LOG.warn("[CPI-KAFKA-PLUS-DIAG] doStop: error closing KafkaConsumer: {}", e.getMessage());
+            } catch (Throwable t) {
+                // Throwable, not Exception: close() loads classes lazily (CloseOptions, …). If this
+                // revision's class space was purged by an adapter update in the meantime, that is
+                // a NoClassDefFoundError — the member cannot leave the group and will expire after
+                // session.timeout.ms. Do not let it abort the remaining cleanup (issue #148).
+                logConsumerCloseFailure("doStop", t);
+            } finally {
+                kafkaConsumer = null;
             }
-            kafkaConsumer = null;
         }
 
         // Step 4: Close helpers AFTER the consumer is closed — the poll thread's
@@ -382,10 +376,6 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
         stoppedByErrorPolicy = false;
         stoppedByError = null;
         lastStoppedByErrorReminderMs = 0L;
-        routeRestartInProgress = false;
-        routeRestartAttempts = 0;
-        lastRouteRestartAttemptMs = 0L;
-        owningRouteId = null;
         lastEmitTimeMs = 0L;
         if (circuitBreaker != null) {
             circuitBreaker.reset();
@@ -826,7 +816,7 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
                 handleNonRetryablePollFailure(e);
             } else if (isFencedInstanceIdFailure(e)) {
                 handleFencedInstanceIdFailure(e);
-            } else if (isBundleWiringInvalidFailure(e)) {
+            } else if (isClassSpaceGoneFailure(e)) {
                 handleBundleWiringInvalidFailure(e);
             } else {
                 LOG.warn("[CPI-KAFKA-PLUS-DIAG] keepAlivePoll: best-effort poll failed: {}", e.getMessage());
@@ -846,10 +836,6 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
             LOG.info("[CPI-KAFKA-PLUS-DIAG] connection: OK — poll succeeded for topic='{}' group='{}'",
                     endpoint.getEffectiveTopic(), endpoint.getGroupId());
         }
-        // Any successful poll means the consumer is healthy again. Reset restart guards so a
-        // future independent wiring incident can self-heal again.
-        routeRestartAttempts = 0;
-        lastRouteRestartAttemptMs = 0L;
         fencedBackoffAttempt = 0;
     }
 
@@ -937,7 +923,7 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
                 handleNonRetryablePollFailure(t);
             } else if (isFencedInstanceIdFailure(t)) {
                 handleFencedInstanceIdFailure(t);
-            } else if (isBundleWiringInvalidFailure(t)) {
+            } else if (isClassSpaceGoneFailure(t)) {
                 handleBundleWiringInvalidFailure(t);
             } else {
                 // A client without TLS against a TLS-only listener never gets far enough to see a
@@ -1017,31 +1003,12 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
     }
 
     /**
-     * Detects the known CPI hot-update class-space break where the active consumer thread runs
-     * against stale bundle wiring and Kafka client internals start failing with
-     * {@code NoClassDefFoundError}/{@code ClassNotFoundException} carrying
-     * "bundle wiring ... no longer valid". This is recoverable by rebuilding the KafkaConsumer.
+     * Detects the class-space break of issue #148 on the poll path: either the OSGi
+     * "bundle wiring ... no longer valid" text, or a class/link/native-library fault while this
+     * route's loader belongs to a bundle revision an adapter update has already replaced.
      */
-    static boolean isBundleWiringInvalidFailure(Throwable failure) {
-        Throwable current = failure;
-        while (current != null) {
-            boolean classLoadingFault = current instanceof NoClassDefFoundError
-                    || current instanceof ClassNotFoundException
-                    || current instanceof LinkageError;
-            String msg = current.getMessage();
-            boolean wiringSignature = msg != null
-                    && msg.contains(INVALID_BUNDLE_WIRING_SNIPPET)
-                    && msg.contains(INVALID_BUNDLE_WIRING_SUFFIX);
-            if (classLoadingFault && wiringSignature) {
-                return true;
-            }
-            Throwable next = current.getCause();
-            if (next == current) {
-                break;
-            }
-            current = next;
-        }
-        return false;
+    private boolean isClassSpaceGoneFailure(Throwable failure) {
+        return ClassSpaceFaults.isOnStaleClassSpace(failure, getClass());
     }
 
     private static Throwable findNonRetryablePollFailureCause(Throwable failure) {
@@ -1164,107 +1131,35 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
         firstPollFailureMs = 0L;
     }
 
+    /**
+     * The route's class loader belongs to a bundle revision that CPI purged when a newer adapter
+     * version was deployed. Nothing that runs inside this revision can repair that: rebuilding
+     * the KafkaConsumer or restarting the Camel route re-uses the very same dead class space and
+     * fails again on the next cold class load (verified on a DEV tenant: restart loop every ~6 s
+     * until the iFlow was redeployed, issue #148). So stop polling, say so once and clearly, and
+     * leave the fix — redeploying the iFlow, which wires it to the new revision — to the operator.
+     */
     private void handleBundleWiringInvalidFailure(Throwable failure) {
-        LOG.error("[CPI-KAFKA-PLUS-DIAG] poll: detected invalid OSGi bundle wiring for topic='{}' group='{}' "
-                        + "(class-space stale after runtime update). Forcing immediate consumer rebuild. "
-                        + "exClass={} exMsg='{}' topStack={}",
-                endpoint.getEffectiveTopic(), endpoint.getGroupId(),
-                failure.getClass().getName(), failure.getMessage(), describeTopStack(failure, 6));
-        reportConnectionError(failure);
+        IllegalStateException policyError = new IllegalStateException(
+                "The adapter bundle was updated while this integration flow was running; the class space of "
+                + "this route (topic='" + endpoint.getEffectiveTopic() + "' group='" + endpoint.getGroupId()
+                + "') is gone and cannot be recovered from inside the adapter. Polling has been stopped. "
+                + "Redeploy the integration flow to bind it to the new adapter version.", failure);
+        AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("poll.bundle-wiring-invalid")
+                .with("topic", endpoint.getEffectiveTopic())
+                .with("groupId", endpoint.getGroupId())
+                .with("classSpace", OsgiBundleInfo.describeClassSpace(getClass()))
+                .with("action", "redeploy the integration flow"), failure);
+        stoppedByErrorPolicy = true;
+        stoppedByError = policyError;
         initialized = false;
-        closeConsumerQuietly();
         consecutivePollFailures = 0;
         firstPollFailureMs = 0L;
-        scheduleRouteRestartForInvalidWiring(failure);
-    }
-
-    static boolean shouldAttemptWiringRouteRestart(
-            boolean restartInProgress, int restartAttempts, long lastRestartAttemptMs, long nowMs) {
-        if (restartInProgress || restartAttempts >= MAX_ROUTE_RESTART_ATTEMPTS) {
-            return false;
-        }
-        return lastRestartAttemptMs == 0L || (nowMs - lastRestartAttemptMs) >= ROUTE_RESTART_COOLDOWN_MS;
-    }
-
-    private void scheduleRouteRestartForInvalidWiring(Throwable failure) {
-        long now = System.currentTimeMillis();
-        if (!shouldAttemptWiringRouteRestart(
-                routeRestartInProgress, routeRestartAttempts, lastRouteRestartAttemptMs, now)) {
-            LOG.error("[CPI-KAFKA-PLUS-DIAG] wiring-recovery: auto route restart suppressed for topic='{}' group='{}' "
-                            + "(inProgress={} attempts={} lastAttemptAgoMs={})",
-                    endpoint.getEffectiveTopic(), endpoint.getGroupId(),
-                    routeRestartInProgress, routeRestartAttempts,
-                    lastRouteRestartAttemptMs == 0L ? -1L : (now - lastRouteRestartAttemptMs));
-            return;
-        }
-
-        String routeId = resolveOwningRouteId();
-        if (routeId == null) {
-            LOG.error("[CPI-KAFKA-PLUS-DIAG] wiring-recovery: cannot resolve owning Camel route for topic='{}' group='{}'; "
-                            + "auto restart skipped. Please restart the iFlow once manually.",
-                    endpoint.getEffectiveTopic(), endpoint.getGroupId());
-            return;
-        }
-
-        routeRestartInProgress = true;
-        routeRestartAttempts++;
-        lastRouteRestartAttemptMs = now;
-        int attempt = routeRestartAttempts;
-
-        Thread restartThread = new Thread(() -> {
-            try {
-                if (shutdownRequested) {
-                    LOG.info("[CPI-KAFKA-PLUS-DIAG] wiring-recovery: route restart aborted (shutdown requested), route='{}'",
-                            routeId);
-                    return;
-                }
-                LOG.error("[CPI-KAFKA-PLUS-DIAG] wiring-recovery: restarting route='{}' topic='{}' group='{}' attempt={}/{} "
-                                + "after invalid bundle wiring exClass={} exMsg='{}'",
-                        routeId, endpoint.getEffectiveTopic(), endpoint.getGroupId(),
-                        attempt, MAX_ROUTE_RESTART_ATTEMPTS,
-                        failure.getClass().getName(), failure.getMessage());
-                endpoint.getCamelContext().getRouteController().stopRoute(routeId);
-                endpoint.getCamelContext().getRouteController().startRoute(routeId);
-                LOG.error("[CPI-KAFKA-PLUS-DIAG] wiring-recovery: route restart finished route='{}' topic='{}' group='{}'",
-                        routeId, endpoint.getEffectiveTopic(), endpoint.getGroupId());
-            } catch (Exception e) {
-                AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("wiring-recovery.route-restart.failed")
-                        .with("routeId", routeId)
-                        .with("topic", endpoint.getEffectiveTopic())
-                        .with("groupId", endpoint.getGroupId())
-                        .with("attempt", attempt)
-                        .with("maxAttempts", MAX_ROUTE_RESTART_ATTEMPTS), e);
-            } finally {
-                routeRestartInProgress = false;
-            }
-        }, "cpi-kafka-plus-route-restart-" + endpoint.getGroupId());
-        restartThread.setDaemon(true);
-        restartThread.start();
-    }
-
-    private String resolveOwningRouteId() {
-        if (owningRouteId != null) {
-            return owningRouteId;
-        }
-        if (endpoint.getCamelContext() == null) {
-            return null;
-        }
-        String endpointUri = endpoint.getEndpointUri();
-        for (Route route : endpoint.getCamelContext().getRoutes()) {
-            if (route == null || route.getEndpoint() == null) {
-                continue;
-            }
-            if (route.getEndpoint() == endpoint) {
-                owningRouteId = route.getId();
-                return owningRouteId;
-            }
-            String routeEndpointUri = route.getEndpoint().getEndpointUri();
-            if (endpointUri != null && endpointUri.equals(routeEndpointUri)) {
-                owningRouteId = route.getId();
-                return owningRouteId;
-            }
-        }
-        return null;
+        closeConsumerQuietly();
+        connStatus = ConnStatus.ERROR;
+        tracingHelper.publishConnectionStatus(false, policyError);
+        lastStoppedByErrorReminderMs = 0L;
+        logStoppedByErrorReminderIfDue();
     }
 
     private void logStoppedByErrorReminderIfDue() {
@@ -1581,10 +1476,25 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
             try {
                 BundleBackedClassLoader.runWithBundleClassLoader(getClass(),
                         () -> kafkaConsumer.close(Duration.ofSeconds(5)));
-            } catch (Exception e) {
-                LOG.warn("[CPI-KAFKA-PLUS-DIAG] closeConsumerQuietly: error closing consumer: {}", e.getMessage());
+            } catch (Throwable t) {
+                logConsumerCloseFailure("closeConsumerQuietly", t);
+            } finally {
+                kafkaConsumer = null;
             }
-            kafkaConsumer = null;
+        }
+    }
+
+    private void logConsumerCloseFailure(String phase, Throwable t) {
+        if (ClassSpaceFaults.isWiringInvalid(t) || t instanceof LinkageError) {
+            AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("consumer.close.failed")
+                    .with("phase", phase)
+                    .with("topic", endpoint.getEffectiveTopic())
+                    .with("groupId", endpoint.getGroupId())
+                    .with("reason", "class space of this bundle revision is gone (adapter updated while the iFlow was "
+                            + "running); the consumer cannot leave the group and will expire after session.timeout.ms")
+                    .with("action", "redeploy the integration flow"), t);
+        } else {
+            LOG.warn("[CPI-KAFKA-PLUS-DIAG] {}: error closing KafkaConsumer: {}", phase, t.getMessage());
         }
     }
 }

@@ -412,7 +412,7 @@ public class CpiKafkaPlusConsumerTest {
                 "Unable to load class 'org.apache.kafka.clients.consumer.ConsumerPartitionAssignor$GroupSubscription' "
                         + "because the bundle wiring for com.finkeflo.cpi.kafka.cpi-kafka-adapter-plus is no longer valid."));
 
-        Assert.assertTrue(CpiKafkaPlusConsumer.isBundleWiringInvalidFailure(failure));
+        Assert.assertTrue(ClassSpaceFaults.isWiringInvalid(failure));
     }
 
     @Test
@@ -422,12 +422,12 @@ public class CpiKafkaPlusConsumerTest {
                         "Unable to load class 'org.apache.kafka.clients.consumer.internals.ConsumerCoordinator$3' "
                                 + "because the bundle wiring for com.finkeflo.cpi.kafka.cpi-kafka-adapter-plus is no longer valid."));
 
-        Assert.assertTrue(CpiKafkaPlusConsumer.isBundleWiringInvalidFailure(failure));
+        Assert.assertTrue(ClassSpaceFaults.isWiringInvalid(failure));
     }
 
     @Test
     public void testIsBundleWiringInvalidFailureFalseForRegularClassNotFound() {
-        Assert.assertFalse(CpiKafkaPlusConsumer.isBundleWiringInvalidFailure(
+        Assert.assertFalse(ClassSpaceFaults.isWiringInvalid(
                 new ClassNotFoundException("org.example.DoesNotExist")));
     }
 
@@ -450,36 +450,6 @@ public class CpiKafkaPlusConsumerTest {
     public void testIsFencedInstanceIdFailureFalseForUnrelatedException() {
         Assert.assertFalse(CpiKafkaPlusConsumer.isFencedInstanceIdFailure(
                 new RuntimeException("unrelated")));
-    }
-
-    @Test
-    public void testShouldAttemptWiringRouteRestartFirstAttempt() {
-        Assert.assertTrue(CpiKafkaPlusConsumer.shouldAttemptWiringRouteRestart(
-                false, 0, 0L, 1_000L));
-    }
-
-    @Test
-    public void testShouldAttemptWiringRouteRestartFalseWhenInProgress() {
-        Assert.assertFalse(CpiKafkaPlusConsumer.shouldAttemptWiringRouteRestart(
-                true, 0, 0L, 1_000L));
-    }
-
-    @Test
-    public void testShouldAttemptWiringRouteRestartFalseWhenAttemptsExhausted() {
-        Assert.assertFalse(CpiKafkaPlusConsumer.shouldAttemptWiringRouteRestart(
-                false, 2, 0L, 1_000L));
-    }
-
-    @Test
-    public void testShouldAttemptWiringRouteRestartRespectsCooldown() {
-        long now = 1_000_000L;
-        long fourteenMinutesAgo = now - (14 * 60_000L);
-        long sixteenMinutesAgo = now - (16 * 60_000L);
-
-        Assert.assertFalse(CpiKafkaPlusConsumer.shouldAttemptWiringRouteRestart(
-                false, 1, fourteenMinutesAgo, now));
-        Assert.assertTrue(CpiKafkaPlusConsumer.shouldAttemptWiringRouteRestart(
-                false, 1, sixteenMinutesAgo, now));
     }
 
     @Test
