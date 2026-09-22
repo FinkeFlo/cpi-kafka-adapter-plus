@@ -49,6 +49,8 @@ public class CpiKafkaPlusMetadataVersionTest {
             Pattern.compile("version::(\\d+)\\.(\\d+)\\.(\\d+)");
     private static final Pattern ADAPTER_VERSION =
             Pattern.compile("(?m)^Adapter-Version=(\\d+\\.\\d+\\.\\d+)\\s*$");
+    private static final Pattern FILE_NAME =
+            Pattern.compile("metadata-(sender|receiver)-(\\d+)\\.(\\d+)\\.(\\d+)\\.xml");
 
     @Test
     public void eachMetadataFileHasExactlyOneVersion() throws IOException {
@@ -128,6 +130,39 @@ public class CpiKafkaPlusMetadataVersionTest {
                         + " copy the current variant into a NEW file instead of editing it in place.",
                     lines != null && lines.contains(line));
             }
+        }
+    }
+
+    /**
+     * Naming guard: a metadata file's name must declare the same line (MAJOR.MINOR) as its
+     * content. The name records the line's baseline — the micro at which the line started —
+     * while {@code version::} inside the file carries the running micro, so the two are
+     * deliberately compared on MAJOR.MINOR only. A name that claims a different line than its
+     * content is a trap: it invites freezing, copying or restoring the wrong variant. This is
+     * not hypothetical — the 1.3 definitions shipped under a {@code -1.2.0.xml} name until
+     * 1.3.6, a leftover of the 1.3.0 release that raised the 1.2 files in place. The micro in
+     * the name is intentionally NOT checked: it drifts from the content by design (a line keeps
+     * its baseline name across every micro), and older files predate the baseline convention.
+     */
+    @Test
+    public void metadataFileNameDeclaresTheSameLineAsItsContent() throws IOException {
+        for (File f : metadataFiles()) {
+            Matcher m = FILE_NAME.matcher(f.getName());
+            Assert.assertTrue(
+                "metadata file " + f.getName() + " does not follow the required naming scheme"
+                    + " metadata-<sender|receiver>-<major>.<minor>.<micro>.xml",
+                m.matches());
+            String nameLine = m.group(2) + "." + m.group(3);
+            String version = versionsIn(f).iterator().next();
+            String[] parts = version.split("\\.");
+            String contentLine = parts[0] + "." + parts[1];
+            Assert.assertEquals(
+                "metadata file " + f.getName() + " is named after line " + nameLine
+                    + " but declares version::" + version + " (line " + contentLine + ")."
+                    + " The file name must match the line of its content — rename the file to"
+                    + " metadata-" + m.group(1) + "-" + contentLine + ".0.xml, or, for a minor"
+                    + " bump, add a NEW file for the new line and leave this one untouched.",
+                contentLine, nameLine);
         }
     }
 
