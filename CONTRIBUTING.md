@@ -26,6 +26,10 @@ Unit tests must pass **without** a running Kafka broker. Integration tests
 The CI `build` workflow uploads the unit-test JaCoCo report as an artifact so it
 can be downloaded from the Actions run.
 
+Keep the `clean` in `mvn clean install`. On a `target/` that still holds the staging directory of a
+previous version, the ADK build goal aborts with *"Currently only one camel component is supported"* —
+which looks like a defect in the adapter but is only a stale build directory.
+
 ### Local ESA build
 
 To produce a deployable `.esa` locally with exact CI parity (`linux/amd64`), use the build script:
@@ -57,7 +61,10 @@ Every pull request must update `CHANGELOG.md` with a short summary of the change
 `## [Unreleased]`. This applies to all changes, even minor fixes or typos.
 
 CI enforces it: the `changelog` job fails a pull request that leaves the file untouched. For a
-change that genuinely needs no entry, add the **`no-changelog`** label to the pull request.
+change that genuinely needs no entry, add the **`no-changelog`** label to the pull request. The
+`build` workflow listens for label changes, so applying the label re-runs the gate — no extra push
+needed. Dependabot pull requests carry the label automatically, since Dependabot cannot write an
+entry itself; if such a bump does have a user-visible effect, write the entry and drop the label.
 
 The pull request — not the individual commit — is the unit that has to carry the entry, because
 merges are squashed into a single commit on `main`.
@@ -219,11 +226,38 @@ Example (from `CpiKafkaPlusConsumer.java`):
 
 ## Versioning and Releases
 
-We follow standard [Semantic Versioning (SemVer)](https://semver.org/) driven by our Conventional Commits.
+We follow [Semantic Versioning (SemVer)](https://semver.org/), but with a constraint that is
+specific to SAP CPI: **the version determines whether deployed iFlows keep working.** A micro bump
+reaches every iFlow on its line automatically, a minor bump requires a manual "Update Version" click
+per iFlow, and a released metadata file must never be edited or deleted — otherwise iFlows bound to
+that line become undeployable.
 
-To create a new release:
-1. Bump the version in `pom.xml`.
-2. Document the release using GitHub Releases.
+**[`VERSIONING.md`](VERSIONING.md) is authoritative.** Read it before touching a version; the rules
+there are not duplicated here on purpose.
+
+The short version:
+
+1. Set the version in **`config.adk`** (`Adapter-Version`) — that is the source of truth. Keep
+   `pom.xml` in sync; it is derived, not leading.
+2. Update the metadata files as the bump requires: a **micro** edits its variant file in place, a
+   **minor** adds a new file and leaves the old one untouched.
+3. Move the `## [Unreleased]` heading in `CHANGELOG.md` to the new version and date.
+4. Open a pull request as usual and get it merged. This one **needs** its changelog entry, so do not
+   add `no-changelog`.
+5. Tag the merge commit and push the tag:
+
+   ```bash
+   git tag v1.3.6 && git push origin v1.3.6
+   ```
+
+   `release.yml` takes it from there: it validates the tag against `config.adk`, builds, extracts the
+   matching `CHANGELOG.md` section, and publishes the GitHub release with the `.esa` attached. Do not
+   create the release by hand.
+
+`mvn test` guards the parts that are easy to get wrong: the version must be aligned across
+`config.adk`, `pom.xml` and the metadata files, released metadata files must stay byte-identical,
+every released line must still ship, and a metadata file's name must declare the same line as its
+content. `mvn verify` additionally runs the ADK's own `check` goal, which rejects duplicate variants.
 
 ---
 
