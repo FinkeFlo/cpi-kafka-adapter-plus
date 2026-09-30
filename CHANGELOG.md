@@ -8,6 +8,9 @@ and the project follows [Semantic Versioning](https://semver.org/). See
 iFlow compatibility.
 
 ## [Unreleased]
+### Fixed
+- With `producerBatchMode` set to `JSON_ARRAY` or `XML_LIST`, the receiver channel never wrote the sent payload to the message processing log trace; only failures were traced. Batch sends now write one `RECEIVER_OUTBOUND` trace per message before the send, as single-message mode does, in the plain and the transactional path. The trace holds the batch as received, before Avro or Schema Registry serialization. See issue #166.
+
 ### Changed
 - `CONTRIBUTING.md` described a release procedure that no longer existed. It told contributors to bump `pom.xml` and to document the release by hand on GitHub — but `config.adk` is the source of truth (`pom.xml` is derived), the release is triggered by pushing a `v*` tag, and `release.yml` publishes it with the `.esa` and the extracted changelog section. The section also said nothing about metadata files, which is the part that can break deployed iFlows: editing or dropping a released line leaves every iFlow bound to it undeployable, exactly what happened in 1.3.0. It now describes the real procedure and points at `VERSIONING.md` as authoritative instead of duplicating its rules. Two smaller corrections: `mvn clean install` now warns that dropping the `clean` makes the ADK build abort with *"Currently only one camel component is supported"* on a stale `target/`, and the changelog section records that the gate re-runs on label changes and that Dependabot pull requests carry `no-changelog` automatically.
 

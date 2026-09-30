@@ -167,6 +167,19 @@ public class AdapterTracingHelper {
     }
 
     /**
+     * Trace an outbound message given as text, encoded as UTF-8.
+     *
+     * <p>The encoding is deferred until trace is known to be active: a batch body can be tens of
+     * megabytes, and MPL trace is off for almost every message, so encoding it up front would copy
+     * the whole payload for nothing.
+     */
+    public void traceOutbound(Exchange exchange, String body) {
+        if (body == null || body.isEmpty()) return;
+        writeTrace(exchange, () -> body.getBytes(StandardCharsets.UTF_8),
+                "RECEIVER_OUTBOUND", "Sending CPI Kafka Connector message");
+    }
+
+    /**
      * Marks a successfully sent message that only got through because of a producer retry.
      *
      * <p>Written as a searchable MPL property rather than only to the tenant trace, so that
@@ -579,11 +592,20 @@ public class AdapterTracingHelper {
         }
     }
 
-    @SuppressWarnings("unchecked")
     private void writeTrace(Exchange exchange, byte[] traceData, String enumValue, String logMessage) {
         if (traceData == null || traceData.length == 0) {
             return;
         }
+        writeTrace(exchange, () -> traceData, enumValue, logMessage);
+    }
+
+    /**
+     * Writes a trace whose payload is only produced once trace is known to be active, so a caller
+     * that has to build the bytes pays nothing while trace is off.
+     */
+    @SuppressWarnings("unchecked")
+    private void writeTrace(Exchange exchange, java.util.function.Supplier<byte[]> traceDataSupplier,
+                            String enumValue, String logMessage) {
         Object adapterMessageLogFactory = resolveMessageLogFactory(exchange);
         if (adapterMessageLogFactory == null) {
             return;
@@ -621,6 +643,9 @@ public class AdapterTracingHelper {
             Method isTraceActiveMethod = messageLogInterface.getMethod("isTraceActive");
             Boolean isActive = (Boolean) isTraceActiveMethod.invoke(mplLog);
             if (!Boolean.TRUE.equals(isActive)) return;
+
+            byte[] traceData = traceDataSupplier.get();
+            if (traceData == null || traceData.length == 0) return;
 
             Object traceType = Enum.valueOf((Class<Enum>) traceMessageTypeClass, enumValue);
 
