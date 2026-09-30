@@ -653,7 +653,17 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
                     + "(producerBatchMode={})", batchMode);
         }
 
-        java.util.List<BatchRecord> records = parseBatchRecords(in, batchMode);
+        // Read the body once: an unconverted InputStream body cannot be read a second time, and
+        // the trace below must show the same content that was parsed.
+        String body = in.getBody(String.class);
+        java.util.List<BatchRecord> records = parseBatchRecords(body, batchMode);
+
+        // Trace before the send, as processSingle does: setResponseHeadersAndBody replaces the
+        // body with the send summary afterwards. Once per message, outside the transactional
+        // retry loop, so a retried transaction does not write the payload again.
+        if (body != null) {
+            tracingHelper.traceOutbound(exchange, body.getBytes(StandardCharsets.UTF_8));
+        }
 
         String fallbackKey = in.getHeader("kafka.KEY", String.class);
         Integer partition = parsePartitionHeader(in);
@@ -982,8 +992,7 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
         tracingHelper.annotateRetrySuccess(in.getExchange(), attempts);
     }
 
-    private java.util.List<BatchRecord> parseBatchRecords(Message in, String batchMode) {
-        String body = in.getBody(String.class);
+    private java.util.List<BatchRecord> parseBatchRecords(String body, String batchMode) {
         if ("JSON_ARRAY".equalsIgnoreCase(batchMode)) {
             return BatchParser.parseJson(body);
         } else if ("XML_LIST".equalsIgnoreCase(batchMode)) {
