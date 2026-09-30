@@ -354,6 +354,188 @@ prüft laut Stichprobe nur Versionskonsistenz. Bestätige das und skizziere den 
 (`CpiKafkaPlusEndpoint.java:203-216`); ein auskommentierter `retries`-Parameter
 (`:222-227`). Bewerte, ob und wann das entfernt werden sollte (Major-Grenze).
 
+## V-D: Sender (Kafka → CPI) – Fehlerpfad, Commit, DLQ
+
+Herkunft: Teilreview per Code-Lektüre (kein Broker-Lauf). Status pro Befund:
+`VORGEPRÜFT` = Kernaussage vor Aufnahme am Code nachgelesen; `GEMELDET` = nicht nachgeprüft, du
+musst sie verifizieren. Zeilenangaben sind Stand 1.3.6.
+
+**V15 – Fehlgeschlagene Datensätze werden übersprungen statt erneut geliefert (Kritisch,
+VORGEPRÜFT).** Ohne DLQ ist `maxRetries = 0` (`RecordProcessor.java:364`). Schlägt die Route fehl,
+gibt `processRecordWithRetry` `0` zurück, ohne zu committen (`:562-571`); `processSingleRecords`
+läuft mit dem nächsten Datensatz weiter (`:232-234`). Es gibt keinen `seek()` zurück auf den
+fehlgeschlagenen Offset (`seek` nur in `CpiKafkaPlusConsumer.java:773` und `:895`), und
+`OffsetCommitTracker.markProcessed` speichert nur den höchsten Offset (`OffsetCommitTracker.java`,
+Methode `markProcessed`). Der nächste erfolgreiche Datensatz committet damit über den
+fehlgeschlagenen hinweg. Beispiel: Offsets 100–109, Datensatz 103 schlägt fehl, 104 gelingt →
+Commit 105, Datensatz 103 ist verloren. Dasselbe gilt für eine fehlgeschlagene DLQ-Zustellung
+(`RecordProcessor.java:541-561`, der Kommentar dort behauptet „polled again on the next cycle“).
+**Dokumentation widerspricht dem Code:** `docs/features/dead-letter-queue.md:142-145` („offsets are
+not committed … re-delivered on the next poll cycle“, „poison pill will block the consumer“),
+`docs/faq.md:66-72`. `AutoPauseIT` bildet das Überspringen ab (prüfen). Zu klären: tatsächliche
+Semantik je Modus (Batch/Einzeln, mit/ohne DLQ, Drain), Fix (`seek` + Partition anhalten, Consumer
+neu aufbauen, explizite „Überspringen“-Option, DLQ-Pflicht) und Korrektur der Doku.
+
+**V16 – Auto-Pause löst bei gewöhnlichen Fehlern nie aus (Hoch, VORGEPRÜFT).**
+`recordFailure()` wird nur im `catch` in `CpiKafkaPlusConsumer.java:722-733` aufgerufen.
+`RecordProcessor` fängt Route-Exceptions selbst (`:407`) und kehrt normal zurück; danach ruft
+`CpiKafkaPlusConsumer.java:719-721` `recordSuccess()` auf und setzt den Zähler zurück.
+`AutoPauseIT` funktioniert nur, weil der Test einen `Error` wirft
+(`DownstreamProcessingError extends Error`, `AutoPauseIT.java:310`). Die UI verspricht Schutz bei
+ausgefallenem Backend (`metadata-sender-1.3.0.xml:395`). Prüfe die Wirkung mit echten
+Route-Fehlern.
+
+**V17 – JSON-Schema-Verstoß: Commit auch bei gescheitertem DLQ-Write; Commit vor der
+Verarbeitung (Hoch, VORGEPRÜFT).** `filterInvalidRecords` fängt einen DLQ-Fehler, loggt ihn und
+committet den Offset trotzdem (`RecordProcessor.java:196-216`); dasselbe Muster in
+`handleSchemaValidationFailure` (`:447-467`, GEMELDET). Im Batch-Modus läuft der Filter über den
+ganzen Poll, bevor gültige Datensätze verarbeitet werden: ein ungültiger Datensatz bei Offset 105
+committet 106, bevor 100–104 verarbeitet sind (GEMELDET; Reihenfolge in `processBatchRecords`
+prüfen). Bei ausgefallener DLQ gehen Datensätze verloren, obwohl DLQ konfiguriert ist.
+
+**V18 – Commit-Fehler werden wie Verarbeitungsfehler behandelt (Hoch, GEMELDET).**
+`commitSingleOffset` (`RecordProcessor.java:403-405`) und `commitOffsets` (`:324-325`) laufen im
+selben `try/catch` wie die Route; nur `CommitFailedException`/`RebalanceInProgressException` werden
+abgefangen (`:905`). `doStop` ruft `wakeup()` (`CpiKafkaPlusConsumer.java:305`): ein laufender
+`commitSync` kann `WakeupException` werfen → fälschlich Route-Retry/DLQ-Eintrag für einen
+erfolgreich verarbeiteten Datensatz. Verarbeitungsschleifen prüfen `shutdownRequested` nicht
+(nur `:672`).
+
+**V19 – DLQ-Producer wird bei jedem Consumer-Reconnect neu gebaut, der alte nicht geschlossen
+(Hoch, VORGEPRÜFT).** `createConsumerHelpers` überschreibt `dlqHelper` ohne vorheriges
+`close()` (`CpiKafkaPlusConsumer.java:520-521`); `closeConsumerQuietly` schließt nur den
+`KafkaConsumer` (`:1474-1484`); `dlqHelper.close()` gibt es nur in `doStop` (`:354-360`) und bei
+Helper-Initfehlern (`:533-535`). Gleiches für `avroHelper`. Bei Ausfällen mit Reconnect-Zyklen
+sammeln sich Producer samt Threads und Sockets an. `UNVERIFIZIERT`: ob der `KafkaProducer` schon im
+Konstruktor von `DlqProducerHelper` entsteht.
+
+**V20 – Transiente Fehler werden als dauerhaft eingestuft (Hoch, GEMELDET).** `isRetryable`
+(`RecordProcessor.java:246-263`) kennt nur `java.net.*`, `TimeoutException` und Kafka-
+`RetriableException`. HTTP 503/429 aus einem Receiver oder `SchemaRegistryException` zählen als
+„permanent“ und gehen mit dem Default `retryOnlyTransientErrors=true` ohne Retry direkt in die DLQ.
+Avro-Fehler laufen über `handleDeserializationFailure` (`:354-357`, `:594-635`) ohne Retry. Eine
+Schema-Registry-Störung bei kaltem Cache kann so gültige Datensätze massenhaft in die DLQ schieben.
+Ein fehlender `schemaRegistryCredentialAlias` liefert still keine Auth (`AvroDeserializerHelper`
+Zeilen ~56-63), der erste Datensatz erhält HTTP 401 und gilt ebenfalls als „Poison“.
+
+**V21 – DLQ-Konfiguration wird kaum validiert (Hoch, teils VORGEPRÜFT).**
+- `dlqTopic` gleich einem Quell-Topic wird akzeptiert; geprüft wird nur „nicht leer“
+  (`CpiKafkaPlusConsumer.java:244-250`, VORGEPRÜFT) → Endlosschleife aus Fehlschlag und
+  Wiederverarbeitung möglich.
+- Der DLQ-Producer setzt kein `max.request.size` (`DlqProducerHelper.java:530-551`), der Consumer
+  darf bis zu 50 MB holen → große Datensätze scheitern an der DLQ (GEMELDET).
+- `dlqCredentialAlias` ist als „für einen anderen Cluster“ beschrieben
+  (`metadata-sender-1.3.0.xml:360`), der DLQ-Producer nutzt aber immer `endpoint.getBootstrapServers()`
+  (`DlqProducerHelper.java:532`) (GEMELDET). Prüfe, ob ein Cluster-Wechsel überhaupt möglich ist,
+  sonst Tooltip korrigieren.
+- Existenz des DLQ-Topics wird erst beim ersten Dead-Letter geprüft; ein Send kann pro Datensatz bis
+  zu 60 s (`max.block.ms`-Default) blockieren (GEMELDET).
+
+**V22 – Zahlenparameter ohne Bereichsprüfung (Hoch, teils VORGEPRÜFT).** Geprüft wird beim Start nur
+`pollingIntervalSeconds`, `retryDelaySeconds`, `maxPartitionFetchSizeKb`, `minBacklogToDrain`
+(`CpiKafkaPlusConsumer.java:254-282`). Alle Felder sind `isparameterized=true`, Werte können also
+ungeprüft aus externalisierten Parametern kommen. Gemeldete Folgen:
+- `batchSize = 0`: `i += batchSize` (`RecordProcessor.java:151`) macht keinen Fortschritt (VORGEPRÜFT);
+  prüfe, ob daraus Endlosschleife oder sofort eine Exception wird (leere Sub-Liste in
+  `processOneBatch`, `batch.get(0)`); negativ → `IndexOutOfBoundsException`.
+- `dlqMaxRetries < 0`: Schleife `for (attempt <= maxRetries)` (`:383`) läuft nie, die Route wird nie
+  aufgerufen, danach NPE/Verlust beim DLQ-Send.
+- `maxPollRecords <= 0`, `fetchMinBytes`/`fetchMaxWaitMs < 0`: Kafka-`ConfigException` erst beim
+  ersten Poll. `batchTimeout < 0`: Verhalten `UNVERIFIZIERT`.
+- `autoPauseErrorThreshold <= 0`: pausiert beim ersten Fehler; `autoPauseCooldownSeconds <= 0`:
+  faktisch keine Pause, aber ERROR-Status.
+
+**V23 – Lazy Init im Detail (Mittel–Hoch, GEMELDET).** Erst beim ersten Poll (ca. 5 s nach
+Deployment) fallen auf: `bootstrapServers`/`groupId` leer (NPE bei `Properties.put(key, null)`,
+`CpiKafkaPlusConsumer.java:1344-1345`), fehlender Credential- oder Keystore-Alias (Konstruktor des
+`KafkaConsumer` bzw. `CpiKafkaPlusSslEngineFactory.configure`), ungültige JSON-Schema-Syntax
+(`:517`), unbekannte Werte für `securityProtocol`/`autoOffsetReset` (`ConfigException`).
+Still falsch statt Fehler:
+- Unbekannter `saslMechanism` (z. B. `OAUTHBEARER`) bekommt `PlainLoginModule`
+  (`SecurityConfigHelper.java:97-101`, VORGEPRÜFT).
+- Unbekannter `commitStrategy` (Tippfehler über externalisierten Parameter) ist weder `AUTO` noch
+  `BATCH_COMPLETE` (`CpiKafkaPlusConsumer.java:657`, `:1356`, VORGEPRÜFT): dann gilt
+  `enable.auto.commit=false` *und* kein Commit nach Erfolg → Offsets werden nie committet
+  (GEMELDET, herleiten).
+- Unbekannte `batchOutputFormat`/`avroOutputFormat` fallen still auf JSON (GEMELDET).
+- Fehlendes Topic meldet keinen Fehler; `allow.auto.create.topics` bleibt auf dem Default `true`
+  (GEMELDET) – auf Brokern mit Auto-Create legt ein Tippfehler ein leeres Topic an.
+- Der Betreiber sieht: Status „Started“, keinen MPL-Eintrag (es gibt keine Exchange), aber bei
+  jedem Tick eine ERROR-Zeile (bei 5 s Intervall etwa 17.000 pro Tag, bis 8 KB je Zeile), ohne
+  Backoff und ohne dauerhaften Stopp bei deterministischen Konfigurationsfehlern
+  (`KafkaErrorHelper.INIT_FAILURE_ESCALATION_THRESHOLD`, `:42`, laut Teilreview ungenutzt).
+
+**V24 – JSON-Verarbeitung verändert Payloads (Mittel, GEMELDET, vom Teilreview lokal mit Jackson
+nachgestellt).** `BatchFormatter:69,79` und `JsonSchemaValidator:81` nutzen `readTree(String)` mit
+Defaults: `true story` → Boolean `true`, `null pointer` → `null`; `{"a":1} {"b":2}` und
+`{"a":1}garbage` behalten nur den ersten Wert, und der Validator lässt solche Nachrichten durch;
+`1.10` → `1.1`, `12345678901234567.89` → `1.2345678901234568E16`; leerer Wert → `null`.
+Prüfe `FAIL_ON_TRAILING_TOKENS`, `USE_BIG_DECIMAL_FOR_FLOATS` und „nur einbetten, wenn der ganze
+String ein Objekt/Array ist“.
+
+**V25 – Avro-Ausgabe (Mittel, GEMELDET).** Avros `JsonEncoder` erzeugt für nullable Unions
+`{"name":{"string":"Bob"}}` (`AvroDeserializerHelper.java:134`) – undokumentiert und unvereinbar mit
+einem JSON-Schema für „normales“ JSON; nicht-Record-Top-Level-Schema → `ClassCastException`
+(`:110`); XML-Ausgabe nutzt `toString()` für verschachtelte Strukturen; Avro gilt für *alle*
+abonnierten Topics, ein Nicht-Avro-Topic in der Liste scheitert am Magic Byte.
+
+**V26 – `isolation.level` nicht gesetzt (Mittel, GEMELDET).** Default `read_uncommitted`: der Sender
+liest abgebrochene Transaktionen mit. Der transaktionale Receiver dieses Adapters setzt auf
+`read_committed` (`docs/features/producer-retry.md:21`), ein Parameter fehlt. Prüfe, ob das für
+Kafka→Kafka-Szenarien mit diesem Adapter eine Falle ist.
+
+**V27 – `max.poll.interval.ms` passt nicht zu Retry-Einstellungen (Mittel, GEMELDET).**
+`max.poll.interval.ms = pollingInterval + 10 min` (`CpiKafkaPlusConsumer.java:1285-1290`), die
+Backoff-Schlafzeit ist pro Schlaf auf 300 s gedeckelt (`RecordProcessor.java:476-490`). Mit
+`retryDelaySeconds=30` und `dlqMaxRetries=5` schläft ein fehlschlagender Datensatz
+30+60+120+240+300 = 750 s; der Consumer wird aus der Gruppe geworfen, Commits scheitern mit
+`CommitFailedException` (wird verschluckt) → Duplikate. Kein Start-Check, nur ein Doku-Hinweis
+(`docs/features/dead-letter-queue.md:90`). Dieselbe Klasse von Regel wie V2 (Cross-Field).
+
+**V28 – `group.instance.id` kollidiert zwischen iFlows/Stages (Mittel, GEMELDET).**
+`groupId + "-" + CF_INSTANCE_INDEX` (`CpiKafkaPlusConsumer.java:1420-1423`) enthält weder Topic
+noch iFlow. Zwei iFlows oder DEV/QA/PROD mit gleicher `groupId` erhalten auf Index 0 dieselbe ID →
+`FencedInstanceIdException`-Schleifen (`:1111-1132`). Die UI warnt nur im Tooltip
+(`metadata-sender-1.3.0.xml:58`). `UNVERIFIZIERT`: ob `close()` bei Static Membership ein
+LeaveGroup sendet (der Kommentar `:331-335` behauptet es) und ob in einem CPI-Cluster nur der
+Cluster-Lock-Halter pollt (Annahme nur im Kommentar `:419-423`).
+
+**V29 – `jsonSchemaReportError` im Batch- vs. Einzelpfad uneinheitlich (Mittel, GEMELDET).** Im
+Batch-Pfad läuft `callback.handleException` unabhängig vom Flag (`RecordProcessor.java:210-213`,
+VORGEPRÜFT), im Einzelpfad nicht. `reportValidationErrorToMpl` (`:946`) wirft absichtlich und fängt
+selbst, geloggt als `consumer.mpl.report.failed` – ein irreführender ERROR im Normalfall.
+Ohne DLQ wird der Datensatz verworfen und committet (die Doku nennt das so:
+`docs/features/dead-letter-queue.md:136-140`), aber nur per `WARN` – in Produktion unsichtbar.
+
+**V30 – Weitere Niedrig-Befunde (GEMELDET).**
+- Keep-Alive-Poll-Fehler nur als `WARN` (`CpiKafkaPlusConsumer.java:822`), zählen nicht zum
+  Reconnect; eine tote Verbindung fällt erst beim nächsten Emit-Zyklus auf (bis
+  `pollingIntervalSeconds`, maximal 6 h).
+- `TlsListenerProbe.java:107,131` cached ein „INCONCLUSIVE“ dauerhaft; lief die erste Probe bei
+  ausgefallenem Broker, bleibt der Schutz gegen Node-Crash für die JVM-Lebenszeit aus.
+- `CpiKafkaPlusTopic`-Header im Multi-Topic-Batch ist die Komma-Liste
+  (`RecordProcessor.java:692-695`), obwohl jeder Batch nur ein Topic hat; `batchSize` ist als
+  „sammelt bis zu …“ beschrieben, Batches überspannen aber keine Polls (effektiv höchstens
+  Datensätze je Partition und Poll).
+- Speicher: Der ganze Poll wird deserialisiert und zusätzlich als String, Jackson-Baum und
+  UTF-8-Kopie gehalten (`:317`), kein Größenlimit für den Body; Auswirkung auf den Node-Heap
+  `UNVERIFIZIERT`.
+- `LOG.error` für Nicht-Fehler (Konsequenz: Fehlalarme beim Alerting; drei ERROR-Ereignisse je
+  fehlgeschlagenem Datensatz) – Zeilen `CpiKafkaPlusConsumer.java:286, 446, 641, 1379, 1424, 1427`
+  (letztere Liste nicht vollständig nachgeprüft).
+- Felder `kafkaConsumer`, `recordProcessor`, `circuitBreaker` (`:99, 123-124`) sind nicht
+  `volatile`, werden aber vom Poll- und vom Stop-Thread benutzt (praktische Wirkung
+  `UNVERIFIZIERT`).
+- `AUTO` wird beim Start nur zusammen mit Drain im SCHEDULED-Modus abgelehnt
+  (`CpiKafkaPlusConsumer.java:255`), nicht mit DLQ, Batch oder Schema-Validierung; unter `AUTO` ist
+  jeder Fehler per Definition höchstens einmal zugestellt.
+- `batchSize > maxPollRecords` wird nicht validiert (GEMELDET; das wirkt nur als Obergrenze).
+- Doku ↔ UI (VORGEPRÜFT): `docs/configuration.md:97-98` listet `autoRegisterSchemas` und
+  `subjectNameStrategy` in der **Sender**-Tabelle, die Sender-Variante verweist aber auf keines der
+  beiden (`metadata-sender-1.3.0.xml:286-322`; nur als `AttributeMetadata` definiert, `:810-832`).
+  Laut Teilreview nutzt der Consumer `subjectNameStrategy` ohnehin nicht. Doku bereinigen oder
+  Parameter erklären.
+
 # Ausgabeformat
 
 Liefere **einen** Bericht in Markdown mit genau diesen Abschnitten:
