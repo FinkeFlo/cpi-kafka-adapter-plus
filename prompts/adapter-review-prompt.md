@@ -224,6 +224,11 @@ Jede Abweichung zwischen Doku, Tooltip und Code als eigenen Befund aufnehmen.
 Zeilenangaben beziehen sich auf Adapter 1.3.6 (Commit `e31faa8`). Prüfe sie gegen den aktuellen
 Stand, falls der Code sich bewegt hat. Schweregrade sind Erstschätzungen.
 
+**Prüfreihenfolge:** zuerst die kritischen und hohen Befunde (V1–V5, V15–V21, V31–V37), dann
+mittlere, zuletzt niedrige. Wird dein Kontext knapp, prüfe lieber weniger Befunde gründlich als
+alle oberflächlich, und sage im Bericht, welche du nicht mehr geschafft hast. Doppelte Befunde
+(z. B. V2/V38, V10/V37, V24/V43, V30/V46) führst du zu einem zusammen.
+
 ## V-A: Validierungslücke und Parameter-Abhängigkeiten
 
 **V1 – Nur zwei Felder haben eine `Restriction` (Hoch).**
@@ -535,6 +540,209 @@ Ohne DLQ wird der Datensatz verworfen und committet (die Doku nennt das so:
   beiden (`metadata-sender-1.3.0.xml:286-322`; nur als `AttributeMetadata` definiert, `:810-832`).
   Laut Teilreview nutzt der Consumer `subjectNameStrategy` ohnehin nicht. Doku bereinigen oder
   Parameter erklären.
+
+## V-E: Receiver (CPI → Kafka) und gemeinsame Sicherheits-/Schema-Registry-Bausteine
+
+Herkunft und Statuslogik wie in V-D (`VORGEPRÜFT` / `GEMELDET`). `UNVERIFIZIERT` = hängt an
+Kafka-Client-Interna, die ohne `kafka-clients`-JAR nicht prüfbar waren. Dateien unter
+`src/main/java/com/finkeflo/cpi/kafka/`, „Producer“ = `CpiKafkaPlusProducer.java`.
+
+**V31 – Avro-Serialisierung schaltet sich nach einem Producer-Rebuild still ab (Kritisch,
+VORGEPRÜFT).** `helpersInitialized` wird nur in `doStop` zurückgesetzt (`Producer:430`).
+`closeProducerQuietly` setzt `avroHelper = null` (`:2170`), `ensureHelpersInitializedLocked`
+kehrt wegen `helpersInitialized == true` sofort zurück (`:486-488`), und `serializeValue` fällt bei
+`avroHelper == null` auf den Roh-Body durch (`:1215-1220`; Batch-Pfad `:1005-1016`). Folge (Herleitung
+prüfen, Aufrufpfad `handleSendFailure` → `triggerReconnect` → `closeProducerQuietly`): Nach einem
+einzigen Fehler, der einen Rebuild auslöst (z. B. Authentifizierungs- oder Autorisierungsfehler,
+unklassifizierter Fehler), landen alle folgenden Nachrichten als **Klartext-JSON ohne Magic Byte und
+Schema-ID** im Avro-Topic, mit `CpiKafkaPlusStatus=OK` und ohne Log-Zeile. Zweiter Einstieg:
+`ensureHelpersInitialized()` ignoriert sein Ergebnis (`:611`); der Fehlerpfad (`:539-548`) nullt
+`avroHelper`, die transaktionale Batch-Variante sendet dann ebenfalls Roh-JSON (GEMELDET). Kein Test
+referenziert `avroHelper`/`helpersInitialized` (GEMELDET). Fix-Richtung: Flag gemeinsam mit
+`avroHelper` zurücksetzen und bei konfiguriertem Avro ohne Helper hart fehlschlagen.
+
+**V32 – Topic-Probe verliert den Keystore-Alias (Hoch, VORGEPRÜFT).** `buildTopicCheckProperties`
+kopiert nur Schlüssel mit `ssl.`, `sasl.` oder `security.protocol` (`Producer:2130-2136`). Der Alias
+steckt in `cpi.kafka.ssl.keystore.alias` (`CpiKafkaPlusSslEngineFactory.java:57`), wird also nicht
+kopiert, während `ssl.engine.factory.class` durchkommt. `CpiKafkaPlusSslEngineFactory.configure`
+wirft dann `IllegalArgumentException("… requires config …")` (`:77-81`). Folge für **jeden** Channel
+mit `sslKeystoreAlias` (GEMELDET, herleiten): `AdminClient.create` scheitert, die Probe bleibt
+immer INCONCLUSIVE, das Fail-fast bei fehlendem Topic/Auth/TLS greift nie, und der Probe-Fehler wird
+jeder Sendefehler-Meldung angehängt (`:1840-1849`), auch bei `RecordTooLarge`. Kein Test für
+Alias + Probe gefunden (GEMELDET).
+
+**V33 – Nicht-transaktionaler Batch wird bei Serialisierungsfehler teilweise geschrieben (Hoch,
+VORGEPRÜFT).** `ProducerBatchHelper.java:214-222` serialisiert Datensatz *i* innerhalb der
+Sende-Schleife; das `try/catch` ab `:243` deckt nur `producer.send`. Wirft der Value-Serializer
+(z. B. Avro passt nicht zum Schema) bei Datensatz 5 von 100, sind 0–4 bereits unterwegs, der
+Exchange schlägt fehl und ein Wiederholungsversuch des Aufrufers dupliziert sie. Über
+`handleSendFailure` wird das außerdem als `UNKNOWN_FATAL` gewertet und löst einen Rebuild aus
+(→ V31, GEMELDET). Fix-Richtung: erst alle serialisieren, dann senden.
+
+**V34 – Retry-Duplikatgarantie und Sichtbarkeit abgebrochener Transaktionen (Hoch, GEMELDET).**
+- Einzelpfad: `Producer:1066-1069`, `:1078-1117` und `ProducerRetryPolicy.java:56-58, 247-256`
+  begründen „kein Duplikat“ mit der Broker-Deduplizierung auf (PID, Sequenz). Die greift nur für
+  Kafka-interne Wiederholungen; ein neues `send()` bekommt neue Sequenznummern. Nach einer
+  `TimeoutException` (als `RETRIABLE` klassifiziert), bei der der Datensatz doch geschrieben wurde,
+  dupliziert der Retry (`UNVERIFIZIERT` gegen das JAR).
+- Transaktionaler Pfad: Abgebrochene Versuche sind nur für `read_committed`-Leser unsichtbar. Der
+  eigene Sender setzt `isolation.level` nie (→ V26).
+- Doku (VORGEPRÜFT): `docs/features/producer-retry.md:50` nennt für das Budget `5–300` (Code:
+  5–900, `Producer:90`); `:122` nennt `~970 s` für 120 s / 2 Versuche (Formel ergibt 302 s bzw.
+  432 s, → V2/V38); laut Teilreview behauptet die Datei MPL-Statustext, `KafkaAdapterError`-Anhang
+  und `retryAttempts` für Receiver-Fehler, der Producer ruft aber `reportFailure` nie auf (Grep im
+  Producer: keine Treffer, VORGEPRÜFT; Behauptung in der Doku selbst prüfen).
+
+**V35 – `CamelKafkaTopic` leckt und überschreibt das Ziel-Topic (Hoch, VORGEPRÜFT).**
+`ProducerBatchHelper.java:275` setzt `CamelKafkaTopic` nach jedem Batch-Send; `Producer:630` liest
+diesen Header als Topic-Override. Ein zweiter Kafka-Receiver im selben Exchange schreibt dadurch in
+das vorige Topic (Herleitung prüfen). `resolveTopic` (`:1183-1199`) wertet laut Teilreview außerdem
+Simple-Ausdrücke im Header aus; Erreichbarkeit durch nicht vertrauenswürdige Aufrufer
+`UNVERIFIZIERT`.
+
+**V36 – `transactional.id` enthält weder iFlow noch Endpoint noch Tenant (Hoch, teils VORGEPRÜFT).**
+Form: `prefix-<sha256(topic)[:8]>-<CF_INSTANCE_INDEX|HOSTNAME>-<slot>` (`Producer:319-325`,
+`:738-739`). Zwei iFlows oder DEV/TEST-Tenants am selben Cluster mit gleichem Prefix und Topic
+kollidieren auf Node 0, Slot 0 und fencen sich gegenseitig (`ProducerFencedException`, standardmäßig
+nicht wiederholt; GEMELDET). Der Hash nutzt den *konfigurierten* Topic-Text (`:319`), ein
+Ausdruck-Topic hasht den Ausdruck (GEMELDET). Die UI sagt nur „unique prefix“. Prüfe, ob ein Hash
+aus `adapterInstanceID`/Endpoint-ID ergänzt werden kann, ohne laufende `transactional.id`s
+unkontrolliert zu ändern (Versionsklasse!).
+
+**V37 – `allowedHeaders='*'` ohne Sperrliste (Hoch, GEMELDET; klärt V10).** Übersprungen werden nur
+`Camel*`, `org.apache.camel*`, `kafka.*`, `CpiKafkaPlus*` (`Producer:1238-1243`,
+`HeaderFilterStrategy.java:45-47`). Weitergegeben werden u. a. `SAP_MessageProcessingLogID`,
+`SAP_ApplicationID`, allgemein `SAP_*` sowie jeder `Authorization`-/`Cookie`-/`X-*`-Header auf dem
+Exchange (ob CPI-Sender-Adapter `Authorization`/`Cookie` auf dem Exchange belassen:
+`UNVERIFIZIERT`). Jeder Topic-Leser sieht sie. Werte gehen per `toString()` (`:1249`), Binärwerte
+werden verfälscht. Header aus der Batch-Payload umgehen den Filter und ersetzen gleichnamige
+(`ProducerBatchHelper.java:234-241`, in der UI dokumentiert). Der `Camel`-Filter ist
+case-sensitiv, Camels Header-Zugriff nicht.
+
+**V38 – Retry-Start-Check im Detail (Mittel–Hoch, teils VORGEPRÜFT; ergänzt V2).**
+- `producerRetryMaxAttempts=5` mit Transaktionen und `deliveryTimeoutSeconds=120`: `5×215+4×2 = 1083 s`
+  > 900 s Obergrenze → mit den Defaults unmöglich; Lieferzeit müsste ≤ 83 s sein (GEMELDET). Für zwei
+  Versuche in 30 s: ohne Transaktionen ≤ 7 s, mit Transaktionen ≤ 2 s (nachgerechnet).
+- Auch ein nicht-transaktionaler **Batch**-Channel scheitert: `Producer:391-397` warnt „no effect“,
+  `:408-423` wirft trotzdem (VORGEPRÜFT).
+- Die Bereichsprüfungen `Producer:359-379` laufen **auch bei ausgeschaltetem Retry**
+  (`maxAttempts == 1` kehrt erst danach zurück, `:381-383`). Ein Wert wie `producerRetryDelaySeconds=0`
+  blockiert das Deployment, obwohl das Feature aus ist (VORGEPRÜFT; gleiche Klasse wie V3).
+- Die in der Doku empfohlenen `deliveryTimeoutSeconds=2` setzen `max.block.ms` und
+  `request.timeout.ms` auf 2 s (`ProducerConfigFactory.java:115-125`); für einen kalten
+  Wegwerf-Producer mit Verbindungsaufbau, TLS, SASL und `InitProducerId` sehr knapp
+  (`UNVERIFIZIERT`).
+
+**V39 – Blockierung von Worker-Threads (Mittel, GEMELDET).** `txnSlotSemaphore.acquire()`
+(`Producer:714`) ist unbegrenzt; bei Ausfall warten Threads auf 5 Slots × bis zu 215 s × Versuche,
+das Retry-Budget schließt die Slot-Wartezeit nicht ein. Im Shared-Pfad kann eine Nachricht vor jedem
+Retry bis rund 70 s blockieren (Topic-Probe 5 s, `close()` bis ~10 s `UNVERIFIZIERT`,
+Prewarm-`partitionsFor` 30 s bei jeder Nachricht während eines Fehlers `:1298`, Send 30 s plus Acks)
+– mehr als ein typischer Aufrufer-Timeout von 60 s. Der Default `deliveryTimeoutSeconds=120` hat für
+nicht-transaktionale Channels keine Obergrenze.
+
+**V40 – Receiver-spezifische Fehlkonfigurationen, die erst beim ersten Send auffallen (Mittel–Hoch,
+teils VORGEPRÜFT).**
+- `bootstrapServers` leer: NPE bei `Properties.put` (`ProducerConfigFactory.java:91`, VORGEPRÜFT);
+  leer oder nur Host: `ConfigException` beim Producer-Bau.
+- Credential-Alias fehlt im Secure Store: Start läuft weiter (`SecurityConfigHelper.java:62-81`,
+  VORGEPRÜFT), jede Nachricht scheitert mit „Could not find a 'KafkaClient' entry in the JAAS
+  configuration“ ohne den Alias-Namen (GEMELDET).
+- `securityProtocol` klein geschrieben (nur über externalisierte Parameter): `contains("SASL")`/
+  `contains("SSL")` sind case-sensitiv (`SecurityConfigHelper.java:49,53`, VORGEPRÜFT), Kafka
+  akzeptiert aber Kleinschreibung → kein JAAS, keine Keystore-Factory. `saslMechanism` null → NPE
+  (`:59`).
+- `subjectNameStrategy` `RecordNameStrategy`/`TopicRecordNameStrategy` werden von der UI angeboten,
+  `AvroSerializerHelper.java:178-186` wirft laut Teilreview bei jeder Nachricht (GEMELDET; die Doku
+  nennt nur `TopicNameStrategy` als unterstützt, `docs/configuration.md:209`). Fehlender
+  Schema-Registry-Alias → keine Auth → 401 bei der ersten Nachricht.
+- `producerBatchMode` unbekannt/leer: Exception erst bei der ersten Nachricht (`Producer:995-1003`).
+  `acks="ALL"` wird nur bei aktiver Idempotenz still zu `all` korrigiert
+  (`ProducerConfigFactory.java:96`), sonst `ConfigException`.
+- Zahlen: `deliveryTimeoutSeconds=0` → `max.block.ms=0`, jeder Send scheitert; `bufferMemoryKb=0`
+  und `maxRequestSizeKb=0` scheitern beim Senden. Int-Überlauf bei `*1024`
+  (`ProducerConfigFactory.java:103,105`; VORGEPRÜFT, Typ `int`): `5242880` (Bytes statt KB
+  eingegeben) ergibt 1 GiB, `4194304` ergibt 0; `deliveryTimeoutSeconds ≥ 2.147.484` läuft bei
+  `*1000` (`:111`) negativ.
+- Kombinationen: Default `maxRequestSizeKb=5120` liegt über dem `message.max.bytes`-Default eines
+  Standard-Brokers (~1 MB; Confluent Cloud abweichend, prüfen) → 1–5-MB-Datensätze scheitern am
+  Broker. `bufferMemoryKb` kleiner als `maxRequestSizeKb`/`producerBatchSizeKb` scheitert beim Senden.
+
+**V41 – `enableTransactions=true` mit `producerBatchMode=NONE` ist still nicht-transaktional
+(Mittel, VORGEPRÜFT).** Einzelnachrichten laufen über den geteilten, nicht-transaktionalen Producer
+(`Producer:604-611`, `:642-647`; `transactionalOnlyPath` schließt `NONE` aus), der Start verlangt
+trotzdem Prefix, Slots und rechnet das falsche Worst-Case-Modell. Zusätzlich setzt
+`ProducerConfigFactory.java:163-165` `transaction.timeout.ms` anhand des Endpoint-Flags, also auch
+für den geteilten Producer; der Code-Kommentar dort sagt, Kafka lehne die Option bei einem
+nicht-transaktionalen Producer ab – dann würde diese Kombination jeden Send scheitern lassen
+(`UNVERIFIZIERT`, am JAR/Broker testen). Die UI verhindert die Kombination nicht.
+
+**V42 – Schema-Registry-Client (Mittel, GEMELDET).** `SchemaRegistryHttpClient.java`: Basic-Auth geht
+an jede konfigurierte URL inklusive `http://`, ohne Schema-/Host-Prüfung und ohne
+Redirect-Kontrolle (`:199-209`; ob das JDK `Authorization` bei Redirects weiterreicht,
+`UNVERIFIZIERT`); nur JVM-Default-TLS, `sslKeystoreAlias` wird nicht genutzt → Registry mit privater
+CA unbenutzbar oder Nutzer weichen auf `http` aus; handgeschriebene JSON-Verarbeitung erwartet die
+exakte Form `"schema":"` und dekodiert `\uXXXX` falsch (`:245, 257-264`), eine formatierende
+Registry scheitert; „latest“ wird ewig gecacht (`:121-127`), neue Schemaversionen greifen erst nach
+Redeploy; Auto-Register leitet das Schema aus der ersten Nachricht ab
+(`AvroSerializerHelper.java:157-164`), Feldnamen mit Bindestrich werfen (`:209-211`); der
+Avro-JSON-Decoder (`:111`) erwartet Avros JSON-Kodierung (Unions als `{"string":"x"}`), Plain-JSON
+für nullable Felder scheitert (`UNVERIFIZIERT`); die URL wird auf INFO mit evtl. Userinfo geloggt
+(`:81-83`).
+
+**V43 – Batch-Parser und Re-Serialisierung (Mittel, GEMELDET).** XML_LIST: `BatchParser.java:210,
+222, 228` nutzen tiefes `getElementsByTagName`; ein `<record>` in einem `<value>` wird zum
+zusätzlichen oder fehlschlagenden Datensatz, ein `<key>` im Payload zum Message-Key. JSON_ARRAY
+(`BatchParser.java:52, 106-108`): Standard-`ObjectMapper`, `99.90` → `99.9`, hohe Dezimalpräzision
+geht vor Avro/JSON verloren (→ V24, gleiche Ursache auf der Receiver-Seite).
+
+**V44 – Leerer/fehlender Body wird zum Tombstone (Mittel, GEMELDET).** `Producer:1203-1212` liefert
+`null` für fehlenden Body, `AvroSerializerHelper.java:101-103` für einen leeren String; der Record
+wird trotzdem gebaut (`:1050`). Auf einem Compacted Topic löscht das den Key. Nur der Batch-Modus
+dokumentiert Tombstones.
+
+**V45 – Hängende Transaktion nach fehlgeschlagenem Versuch (Mittel, GEMELDET).** `Producer:765-770`
+ruft bewusst kein `abort` auf; `close(5s)` (`:871-876`) kann bei unerreichbarem Broker nichts
+abbrechen. Das abgeleitete `transaction.timeout.ms` (Standard 150 s, bis 900 s) hält die LSO für
+`read_committed`-Leser offen, bis die `transactional.id` wiederverwendet wird oder der Timeout
+abläuft.
+
+**V46 – Weitere Niedrig-Befunde (GEMELDET, sofern nicht anders vermerkt).**
+- Deploy-Diagnose nur als `WARN` (Topic-Probe `:2020, :2039`), obwohl das Projekt selbst sagt, dass
+  `WARN` den Trace nicht erreicht (`:554-556`).
+- `docs/features/producer-batch.md:155` sagt „Avro serialization is not supported in batch mode
+  (v1)“, der Code wendet Avro im Batch an (`Producer:1005-1016`; VORGEPRÜFT); dort steht außerdem
+  „async send + flush“, ein `flush` wurde nicht gefunden.
+- `MAX_CONSECUTIVE_SEND_FAILURES` (`Producer:70`) ist laut Teilreview tot, obwohl das Javadoc
+  (`:1415`) behauptet, sie steuere den Reconnect.
+- `LOG.error` für Nicht-Fehler (Heartbeat `:1397`, `producer.retry.effect` `:985`, `send.recovered`
+  `:1359`, SLOW-Prewarm `:1310`, `Endpoint:446`) – Fehlalarme bei ERROR-basiertem Alerting.
+- Der transaktionale Pfad ruft nie `publishConnectionStatus`; das „Producer READY“-OK (`:464`)
+  bedeutet nur, dass das Client-Objekt existiert.
+- `kafkaProducer` ist nicht `volatile`, `triggerReconnect` (`:2146`) nicht synchronisiert; es kann
+  einen gerade neu gebauten Producer schließen. Wiederverwendung des Semaphors nach Stop/Start
+  `UNVERIFIZIERT`.
+- Pro transaktionalem Producer-Bau: Secure-Store-Lookup, Keystore-`SSLContext` und INFO-Logs;
+  gleiche `client.id` paralleler Wegwerf-Producer erzeugen vermutlich JMX-AppInfo-WARNs
+  (`UNVERIFIZIERT`).
+- `CredentialHelper.java:131,163` nullt das `char[]` aus `getPassword()`; liefert CPI ein internes
+  Array, könnte ein späterer Lookup Leerwerte liefern (`UNVERIFIZIERT`); `:183-187` prüft Key
+  Manager nicht auf `null`.
+- Jackson-Parse-Fehlertexte enthalten einen Payload-Ausschnitt in MPL und Logs
+  (`BatchParser.java:71-73`, für Jackson 2.22 `UNVERIFIZIERT`).
+- `TlsListenerProbe` cached auch `INCONCLUSIVE` dauerhaft (→ V30) und läuft innerhalb von
+  `computeIfAbsent` und `synchronized(this)` (`Producer:446, :503`): parallele Erstsends stauen sich
+  hinter der Probe (bis 3 s + 3 s je Server, DNS unbegrenzt).
+
+**Vom Teilreview geprüfte Nicht-Probleme (nur bei Gegenindiz neu aufrollen, GEMELDET):**
+Hostname-Verifikation bleibt aktiv (`ssl.endpoint.identification.algorithm` wird nie gesetzt, die
+Factory wendet Kafkas `https`-Default an, `CpiKafkaPlusSslEngineFactory.java:161-167`); kein
+Trust-All (Trust Manager kommen aus dem CPI-`KeystoreService`); JAAS-Escaping von `\` und `"` ist
+korrekt (`SecurityConfigHelper.java:103-104`, VORGEPRÜFT); es werden nur Aliase geloggt, nie
+Geheimnisse; Slot-Semaphor und Flag-Array sind innerhalb einer Producer-Lebenszeit korrekt; der
+Retry-Entscheidungsbaum ist in sich konsistent (stoppt bei `COMMIT`/`COMMITTED`, Fehler wird einmal
+gemeldet); Wegwerf-Producer werden im `finally` mit 5 s Timeout geschlossen; XXE ist durch
+`disallow-doctype-decl` blockiert.
 
 # Ausgabeformat
 
