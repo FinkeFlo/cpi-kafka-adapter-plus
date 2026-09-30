@@ -660,10 +660,9 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
 
         // Trace before the send, as processSingle does: setResponseHeadersAndBody replaces the
         // body with the send summary afterwards. Once per message, outside the transactional
-        // retry loop, so a retried transaction does not write the payload again.
-        if (body != null) {
-            tracingHelper.traceOutbound(exchange, body.getBytes(StandardCharsets.UTF_8));
-        }
+        // retry loop, so a retried transaction does not write the payload again. The String
+        // overload encodes only while trace is active, sparing every other batch a full copy.
+        tracingHelper.traceOutbound(exchange, body);
 
         String fallbackKey = in.getHeader("kafka.KEY", String.class);
         Integer partition = parsePartitionHeader(in);

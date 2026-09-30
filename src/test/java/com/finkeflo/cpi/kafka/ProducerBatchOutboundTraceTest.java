@@ -95,6 +95,32 @@ public class ProducerBatchOutboundTraceTest {
     }
 
     @Test
+    public void xmlListBatchIsTracedOnce() throws Exception {
+        String xml = "<kafkaRecords><record><key>k1</key><value>hello</value></record>"
+                + "<record><key>k2</key><value>world</value></record></kafkaRecords>";
+        try (DefaultCamelContext ctx = new DefaultCamelContext()) {
+            ctx.start();
+            CpiKafkaPlusEndpoint endpoint = newEndpoint(ctx, false);
+            CpiKafkaPlusProducer producer = new CpiKafkaPlusProducer(endpoint);
+            RecordingTracingHelper tracing = new RecordingTracingHelper(endpoint);
+            setField(producer, "tracingHelper", tracing);
+
+            Exchange exchange = new DefaultExchange(ctx);
+            Message in = exchange.getIn();
+            in.setBody(xml);
+
+            try (StubProducer kafkaProducer = new StubProducer(0)) {
+                setField(producer, "kafkaProducer", kafkaProducer);
+                invokeProcessBatch(producer, exchange, in, "orders", "XML_LIST");
+                Assert.assertEquals(2, kafkaProducer.sendCalls.get());
+            }
+
+            Assert.assertEquals(1, tracing.outbound.size());
+            Assert.assertEquals(xml, new String(tracing.outbound.get(0), StandardCharsets.UTF_8));
+        }
+    }
+
+    @Test
     public void streamBodyIsTracedWithTheContentThatWasParsed() throws Exception {
         try (DefaultCamelContext ctx = new DefaultCamelContext()) {
             ctx.start();
@@ -227,6 +253,11 @@ public class ProducerBatchOutboundTraceTest {
         @Override
         public void traceOutbound(Exchange exchange, byte[] body) {
             outbound.add(body);
+        }
+
+        @Override
+        public void traceOutbound(Exchange exchange, String body) {
+            outbound.add(body.getBytes(StandardCharsets.UTF_8));
         }
     }
 
