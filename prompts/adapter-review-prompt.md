@@ -5,7 +5,9 @@ systematisch prüfen: Code-Robustheit, Parameter-Usability und – der Schwerpun
 zwischen *„die UI akzeptiert es“* und *„das Deployment schlägt fehl“*.
 
 **Benutzung:** Alles unterhalb der Linie `=== PROMPT ===` in eine neue Session im Repo-Root
-einfügen. Der Prompt ist bewusst read-only (kein Edit, kein Commit, kein PR).
+einfügen. Der Prompt ist bewusst read-only (kein Edit, kein Commit, kein PR). Die Session braucht lesenden
+Git-Zugriff auf `github.com/SAP-docs/btp-integration-suite` (SAP-Dokumentation, siehe
+Arbeitspaket E); ohne ihn sind die SAP-Abgleiche als `UNVERIFIZIERT` zu kennzeichnen.
 Stand der Vorab-Befunde: Adapter-Version 1.3.6, Branch `main` (Commit `e31faa8`).
 
 === PROMPT ===
@@ -50,10 +52,21 @@ Cloud Integration). Drei Fragen sind zu beantworten:
   `metadata-<sender|receiver>-<neu>.xml`, Alt-iFlows müssen „Update Version“ klicken) oder *Major*.
   **Freigegebene (frozen) Metadaten-Dateien** (`metadata-*-1.0.0/1.1.x/1.2.8.xml`, siehe
   `src/test/resources/released-metadata-checksums.txt`) dürfen nie geändert werden – Vorschläge
-  dafür sind wertlos.
-- **Quellen.** Externe Quellen nennst du mit URL und Abrufstatus. Wenn eine Seite (z. B.
-  `community.sap.com`, `help.sap.com`) nicht erreichbar ist, schreibe das hin und markiere die
-  Aussage als `UNVERIFIZIERT` – ersetze sie nicht durch Erinnerung.
+  dafür sind wertlos. SAP selbst (`versioning-rules-for-custom-adapters-61a988b.md`): Micro =
+  „label and tooltip updates“ (gleiche Datei, Version auf Komponenten- *und* Variantenebene),
+  Minor = neues Feature (Pflichtfelder „not recommended“, Laufzeit muss abwärtskompatibel sein),
+  Major = „not supported“. Ob das Hinzufügen einer `Restriction` oder `EditCondition` noch ein Micro
+  ist, ist ein Grenzfall – ordne es begründet ein und nenne das Risiko (bereits gespeicherte Werte
+  können beim nächsten Öffnen des Channels ungültig sein).
+- **Quellen.** Die SAP-Dokumentation zur Adapter-Entwicklung liegt als Markdown im öffentlichen
+  Repo `SAP-docs/btp-integration-suite`, Verzeichnis `docs/ISuite_Integrations_APIs/` (identisch
+  unter `docs/ci/Development/`). Die Einstiegsseite `developing-custom-adapters-7392cc4.md` ist
+  leer; der Inhalt steht in den Geschwisterdateien (Liste unter „Arbeitspaket E“). Hole das Repo
+  flach (`GIT_LFS_SKIP_SMUDGE=1 git clone --depth 1 https://github.com/SAP-docs/btp-integration-suite`)
+  und lies die Dateien selbst; verlasse dich nicht auf Zusammenfassungen. Andere externe Quellen
+  nennst du mit URL und Abrufstatus. Ist eine Seite (z. B. `community.sap.com`, `help.sap.com`)
+  nicht erreichbar, schreibe das hin und markiere die Aussage als `UNVERIFIZIERT` – ersetze sie
+  nicht durch Erinnerung.
 
 # Kontext, den du kennen musst
 
@@ -68,15 +81,30 @@ es eine `<AttributeReference>` (Tab/Gruppe, Tooltip, `EditCondition`, `Restricti
 `ErrorMessage`) und eine `<AttributeMetadata>` (Typ, Default, `FixedValues`, `Usage`). Die
 Java-Seite liest die Werte als `@UriParam` in `CpiKafkaPlusEndpoint`.
 
-**Bereits belegte Mechanik der UI-Validierung** (Issue #44, Kommentar des Maintainers):
-Die Design-UI prüft ein `AttributeReference`-Feld nur dann, wenn ein
-`<Restriction>Constraint.isValidRegex(...)</Restriction>` gesetzt ist. `<Usage>true</Usage>` prüft
-nur „nicht leer“. Ein `<ErrorMessage>` ohne `Restriction` hat daher vermutlich **keine Wirkung**.
-Nur zwei Stellen nutzen heute eine `Restriction`: `pollingIntervalSeconds` (Sender) und
-`credentialAlias` (beide Richtungen). Cross-Field-Regeln sind mit `Restriction` nicht ausdrückbar;
-`EditCondition`/`OrCondition` blenden Felder nur ein/aus bzw. machen sie editierbar/ausgegraut.
-→ Prüfe dies gegen die offizielle ADK-Dokumentation/das Metadaten-XSD und erweitere es, falls es
-weitere Constraint-Typen gibt (z. B. für Zahlen, Pflichtfelder in Abhängigkeit).
+**Belegte Mechanik der UI-Validierung** (SAP-Doku `component-metadata-550b19e.md`, Issue #44,
+Kommentar des Maintainers). Lies die SAP-Seite selbst; Kern:
+- Validiert wird ein `AttributeReference`-Feld nur über `<Restriction>Constraint.<Name>(…)</Restriction>`.
+  Unterstützt laut SAP: `isValidRegex` (Java-Regex), `isAlphaNumeric`, `isStartsWithLetter`,
+  `isValidURIString` (akzeptiert http(s), ftp, file, ldap), `isValidXMLString`, `isValidNCName`,
+  `isValidXpath`. Einen Zahlenbereichs- oder Cross-Field-Constraint gibt es nicht.
+- `<ErrorMessage>` gehört zur `Restriction`: „If the constraint specified in the restriction tag
+  fails, the system shows the error message set in this tag.“ Ohne `Restriction` wird es nie
+  angezeigt. Nur zwei Stellen nutzen heute eine `Restriction`: `pollingIntervalSeconds` (Sender)
+  und `credentialAlias` (beide Richtungen); alle anderen `ErrorMessage`-Tags sind Totext.
+- `<Usage>true</Usage>` = Pflichtfeld (prüft nur „nicht leer“). `<Length>` = maximale,
+  `<Minlength>` = minimale Zeichenzahl. `FixedValues` = Dropdown/Combo; `isEditable` macht eine
+  Combo frei editierbar.
+- `EditCondition` steuert Sichtbarkeit/Editierbarkeit und lässt sich mit `AndCondition`,
+  `OrCondition` und `NotCondition` verschachteln. Der Adapter nutzt bisher nur `OrCondition` und
+  einfache `EditCondition`. SAP beschreibt die `EditCondition` zusätzlich als „Constraint to be
+  executed, this is on top of base constraint defined at Attribute Level“ → offen, ob eine
+  `Restriction` bei ausgeblendetem Feld noch greift (`TENANT-TEST NÖTIG`).
+- Weitere, vom Adapter ungenutzte Bausteine: `AttributeBehavior=SecureAlias` (Feld verweist auf
+  den Alias eines Security-Material-Artefakts), `HelpService` (Browse-Dialog für Ressourcen bzw.
+  Zertifikate), `xsd:id`/`xsd:idref` (Ressourcenverweis mit Existenzprüfung zur Designzeit).
+- Der Maven-Build führt das ADK-`check`-Goal aus
+  (`mvn com.sap.cloud.adk:com.sap.cloud.adk.build.archive:check`, laut SAP „used explicitly for
+  validation“). Prüfe, was es an den Metadaten tatsächlich validiert.
 
 **Laufzeit-Besonderheiten von CPI** (`docs/troubleshooting.md`, ADR 0004): Nur `ERROR` erreicht
 das Tenant-Trace-File; `WARN`/`INFO` sind in Produktion unsichtbar. Der Trace-Appender verwirft
@@ -122,12 +150,21 @@ Prüfe insbesondere:
 
 1. **Einzelfeld-Regeln → `Restriction`/`FixedValues`:** Zahlenbereiche, positive Ganzzahlen,
    Pflichtfelder in Abhängigkeit. Formuliere konkrete `Constraint.isValidRegex`-Ausdrücke
-   (XML-escaped) samt Testfällen. Kläre: Verträgt die Regex leere optionale Felder? Wird sie nur
-   erzwungen, wenn das Feld sichtbar/editierbar ist? Wie verhält sie sich bei externalisierten
-   Werten (`{{param}}`; die Felder sind `isparameterized=true`)? → ggf. `TENANT-TEST NÖTIG`.
+   (XML-escaped) samt Testfällen und prüfe, wo ein anderer SAP-Constraint besser passt (z. B.
+   `isValidURIString` für `schemaRegistryUrl`; er lässt aber auch ftp/file/ldap zu, eine eigene
+   Regex wie `^https?://.+` kann strenger sein). Nutze `<Minlength>`/`<Length>` für Textfelder.
+   Kläre: Verträgt die Regex leere optionale Felder? Wird sie nur erzwungen, wenn das Feld
+   sichtbar/editierbar ist? Wie verhält sie sich bei externalisierten Werten (`{{param}}`; die
+   Felder sind `isparameterized=true`)? → ggf. `TENANT-TEST NÖTIG`.
 2. **Kleine Wertebereiche → `FixedValues` (Dropdown) statt freiem Zahlenfeld** (z. B.
-   `producerRetryMaxAttempts` 1–5). Vorteil: ungültige Werte unmöglich, und `EditCondition` kann auf
-   konkrete Werte reagieren (heute nur Gleichheit auf einen Literalwert).
+   `producerRetryMaxAttempts` 1–5). Vorteil: ungültige Werte unmöglich. Für Sichtbarkeitslogik
+   „Wert ≠ 1“ genügt auch eine `NotCondition`, für „A und nicht B“ eine `AndCondition` (beide
+   bisher ungenutzt); vergleiche, was für Nutzer verständlicher ist. Eine editierbare Combo
+   (`isEditable`) mit Vorschlagswerten wäre für Zahlen wie `pollingIntervalSeconds` denkbar.
+   Prüfe außerdem `AttributeBehavior=SecureAlias` für die Alias-Felder (`credentialAlias`,
+   `schemaRegistryCredentialAlias`, `dlqCredentialAlias`, `sslKeystoreAlias`) und
+   `xsd:idref`/`HelpService` als Alternative zum 50.000-Zeichen-Inline-`jsonSchema`
+   (`TENANT-TEST NÖTIG`: was bewirkt `SecureAlias` zur Designzeit, beim Transport, beim Deployment?).
 3. **Cross-Field-Regeln** (nicht per Metadaten prüfbar): Welche Alternativen gibt es?
    (a) Defaults so wählen, dass jede Ein-Schalter-Änderung deploybar bleibt, (b) abgeleitete statt
    eingegebene Werte (z. B. Retry-Budget aus `deliveryTimeoutSeconds` und `maxAttempts` berechnen),
@@ -205,9 +242,28 @@ Prüfe mindestens diese Bereiche; jede Schwäche mit Szenario, Auswirkung und Fi
 
 Vergleiche Adapter-Verhalten und Dokumentation mit:
 
-- **SAP:** ADK-Dokumentation/Metadaten-XSD (Constraints, `EditCondition`, `Usage`, Externalisierung),
-  Doku und bekannte Fehlerbilder des SAP-Standard-Kafka-Adapters (Sender/Receiver-Konfiguration,
-  Deployment-Fehler, Einschränkungen wie Consumer-Group, Keystore, SCRAM).
+- **SAP-Adapter-Entwicklungsdoku** (Repo `SAP-docs/btp-integration-suite`, Verzeichnis
+  `docs/ISuite_Integrations_APIs/`). Lies mindestens diese Dateien vollständig und gleiche den
+  Adapter damit ab:
+  `component-metadata-550b19e.md` (Metadaten, Constraints, Conditions, `Usage`, `AttributeBehavior`),
+  `versioning-rules-for-custom-adapters-61a988b.md`,
+  `adapter-development-prerequisites-5638d4a.md` (Header-Regeln, Logging, Manifest/Allowlisting),
+  `managing-cluster-lock-in-custom-adapters-b0106a1.md`,
+  `enabling-scheduler-support-for-adk-sender-adapter-d423a4b.md`,
+  `enabling-connection-status-for-integration-flow-3972bf8.md`,
+  `enabling-tracing-for-custom-adapter-a7cafa6.md`,
+  `enabling-adk-persistency-958480b.md`,
+  `develop-adapters-using-archetype-0a84b13.md` (Build, `check`-Goal, Java/Camel-Stand),
+  `importing-custom-integration-adapter-482286e.md`,
+  `accessing-user-credentials-e4e4edc.md`, `accessing-trust-and-key-managers-8518837.md`,
+  `blueprint-metadata-ab38cc8.md`, `sdk-api-c5c7933.md`,
+  `additional-metadata-to-support-edge-integration-cell-f87349e.md`.
+  Jede Abweichung des Adapters von diesen Vorgaben ist ein eigener Befund (siehe V47–V52 als
+  Startpunkt).
+- **SAP-Standard-Kafka-Adapter:** Dokumentation und bekannte Fehlerbilder (Sender/Receiver-
+  Konfiguration, Deployment-Fehler, Einschränkungen wie Consumer-Group, Keystore, SCRAM) als
+  Vergleichsmaßstab für die Usability. Quellen dafür waren aus der Umgebung nur teilweise
+  erreichbar; kennzeichne Nicht-Geprüftes.
 - **Apache Kafka / Confluent:** Konfigurationsregeln und Wechselwirkungen
   (`enable.idempotence`/`acks`, `transaction.timeout.ms` ≤ Broker-`transaction.max.timeout.ms`,
   `delivery.timeout.ms` ≥ `linger.ms` + `request.timeout.ms`, `max.poll.interval.ms`,
@@ -224,7 +280,7 @@ Jede Abweichung zwischen Doku, Tooltip und Code als eigenen Befund aufnehmen.
 Zeilenangaben beziehen sich auf Adapter 1.3.6 (Commit `e31faa8`). Prüfe sie gegen den aktuellen
 Stand, falls der Code sich bewegt hat. Schweregrade sind Erstschätzungen.
 
-**Prüfreihenfolge:** zuerst die kritischen und hohen Befunde (V1–V5, V15–V21, V31–V37), dann
+**Prüfreihenfolge:** zuerst die kritischen und hohen Befunde (V1–V5, V15–V21, V31–V37, V47), dann
 mittlere, zuletzt niedrige. Wird dein Kontext knapp, prüfe lieber weniger Befunde gründlich als
 alle oberflächlich, und sage im Bericht, welche du nicht mehr geschafft hast. Doppelte Befunde
 (z. B. V2/V38, V10/V37, V24/V43, V30/V46) führst du zu einem zusammen.
@@ -234,12 +290,14 @@ alle oberflächlich, und sage im Bericht, welche du nicht mehr geschafft hast. D
 **V1 – Nur zwei Felder haben eine `Restriction` (Hoch).**
 `metadata-sender-1.3.0.xml:78` (`credentialAlias`), `:145` (`pollingIntervalSeconds`),
 `metadata-receiver-1.3.0.xml:73` (`credentialAlias`). Alle anderen `<ErrorMessage>`-Tags haben keine
-`Restriction` und sind nach der Mechanik aus Issue #44 vermutlich wirkungslos: Sender `:155, 160,
-178, 183, 188, 207, 259, 293, 343, 352, 377, 400, 409`; Receiver `:139, 171, 180, 199, 204, 209,
-264, 318, 323, 332`. Sie versprechen Bereiche („1–51200“, „0–300“, „1–5“, „5–900“), die erst beim
-Start geprüft werden (`CpiKafkaPlusConsumer.java:271-279`, `CpiKafkaPlusProducer.java:357-379`).
-Zu klären: Welche davon sind als einfache Regex ausdrückbar? `TENANT-TEST NÖTIG`: Wirkt ein
-`ErrorMessage` ohne `Restriction` wirklich nicht?
+`Restriction` und sind damit wirkungslos: Issue #44 und die SAP-Doku
+(`component-metadata-550b19e.md`: die `ErrorMessage` erscheint, wenn der Constraint der
+`Restriction` fehlschlägt) stützen das. Betroffen: Sender `:155, 160, 178, 183, 188, 207, 259, 293,
+343, 352, 377, 400, 409`; Receiver `:139, 171, 180, 199, 204, 209, 264, 318, 323, 332`. Sie
+versprechen Bereiche („1–51200“, „0–300“, „1–5“, „5–900“), die erst beim Start geprüft werden
+(`CpiKafkaPlusConsumer.java:271-279`, `CpiKafkaPlusProducer.java:357-379`). Zu klären: Welche
+davon sind als einfache Regex ausdrückbar? `TENANT-TEST NÖTIG` nur noch für die Randfälle (leeres
+optionales Feld, ausgeblendetes Feld, externalisierter Wert).
 
 **V2 – Retry-Defaults sind gegeneinander unbrauchbar (Hoch).**
 Defaults: `deliveryTimeoutSeconds=120`, `producerRetryTotalBudgetSeconds=30`,
@@ -325,15 +383,21 @@ committed wird (Datenverlust) und ob der Default `false` vertretbar ist.
   erst beim Start abgelehnt (`CpiKafkaPlusProducer.java:275-279`).
 - Der Receiver zeigt `acks` nur bei ausgeschalteter Idempotenz; sonst wird der Wert still auf `all`
   gezwungen (`ProducerConfigFactory.java:95-100`). Sinnvoll, aber undokumentiert in der UI?
-- `EditCondition` kennt nur Gleichheit auf einen Literalwert; „`maxAttempts > 1`“ ist so nur über
-  Dropdown-Werte ausdrückbar.
+- Die Sichtbarkeit „Wert ≠ 1“ ist mit `NotCondition`, „A und nicht B“ mit `AndCondition`
+  ausdrückbar (SAP-Doku `component-metadata-550b19e.md`); der Adapter nutzt beides nicht. Damit
+  lassen sich z. B. die Retry-Felder bei `producerRetryMaxAttempts=1` ausblenden und
+  `enableIdempotence` bei `enableTransactions=true` sperren. (Korrigiert eine frühere Annahme, dass
+  nur Gleichheit auf einen Literalwert möglich sei; ein Vergleich wie „> 1“ geht weiterhin nur über
+  aufgezählte Werte.)
 
 **V10 – Gefährliche oder unklare Defaults (Mittel).**
 `allowedHeaders=*` (`CpiKafkaPlusEndpoint.java:218-220`; `HeaderFilterStrategy.java:45-47` kennt
 keine Sperrliste): Prüfe in `addRecordHeaders`, ob `Authorization`, `Cookie`, `SAP_*` und
 Camel-interne Header nach Kafka gelangen. `commitStrategy=AUTO` wird ohne Warnung angeboten
 (`metadata-sender-1.3.0.xml:587-589`). `autoOffsetReset=latest` überspringt bei neuer Consumer-Group
-alle vorhandenen Daten.
+alle vorhandenen Daten. SAP-Vorgabe (`adapter-development-prerequisites-5638d4a.md`): nur
+protokollkonforme oder vom Protokoll benötigte Header propagieren, eine Konfiguration zum Zulassen
+weiterer Header anbieten und propagierte Header dokumentieren – ein Default `*` widerspricht dem.
 
 ## V-C: Betrieb, Fehlersichtbarkeit, Lieferkette
 
@@ -743,6 +807,85 @@ Geheimnisse; Slot-Semaphor und Flag-Array sind innerhalb einer Producer-Lebensze
 Retry-Entscheidungsbaum ist in sich konsistent (stoppt bei `COMMIT`/`COMMITTED`, Fehler wird einmal
 gemeldet); Wegwerf-Producer werden im `finally` mit 5 s Timeout geschlossen; XXE ist durch
 `disallow-doctype-decl` blockiert.
+
+## V-F: Abweichungen von der SAP-Adapter-Entwicklungsdoku
+
+Quelle: `SAP-docs/btp-integration-suite`, `docs/ISuite_Integrations_APIs/` (Dateinamen je Befund).
+Der Abgleich Adapter ↔ Doku ist `VORGEPRÜFT` (Suche im Repo), die *Wirkung* auf der Plattform ist es
+meist nicht und braucht einen Tenant-Test oder SAP-Auskunft.
+
+**V47 – Cluster-Lock: Code nimmt ihn an, die Metadaten fordern ihn nicht an (Mittel–Hoch).**
+SAP (`managing-cluster-lock-in-custom-adapters-b0106a1.md`): Ein Custom Adapter muss Cluster-Locks
+selbst über den `LockManager` holen und dafür in den Metadaten
+`<AdditionalMetadata><Name>requiredIntegrationFlowProperties</Name><Value>adapterInstanceID</Value>…`
+deklarieren. Alternativ liefert die referenzierte Scheduler-Komponente einen „in-built locking
+feature“ (`enabling-scheduler-support-for-adk-sender-adapter-d423a4b.md`: `ReferencedComponents`
+mit `sap:Scheduler`, Consumer „extending ScheduledPollingConsumer“, `useDefaultScheduler=false`).
+Der Adapter: `useDefaultScheduler="false"` (`metadata-sender-1.3.0.xml:22`), aber **kein**
+`ReferencedComponent`, **kein** `AdditionalMetadata`/`requiredIntegrationFlowProperties`, **kein**
+`AttributeBehavior` in irgendeiner der acht Metadaten-Dateien (Grep: 0 Treffer) und kein
+`LockManager` im Code; der Consumer erbt von Camels `ScheduledPollConsumer`
+(`CpiKafkaPlusConsumer.java:55`; ob SAPs „ScheduledPollingConsumer“ derselbe Typ ist:
+`UNVERIFIZIERT`). Dennoch behaupten Kommentare, nur der Knoten mit Cluster-Lock pollt und erzeugt
+den `KafkaConsumer` (`CpiKafkaPlusConsumer.java:419-423`, `CpiKafkaPlusEndpoint.java:45-49`). Zu
+klären mit Belegen, nicht per Annahme: Läuft der Sender auf **allen** Worker-Knoten (dann teilen
+sich N Consumer eine Gruppe, und V28 trifft nur unter den Knoten desselben iFlows zu), oder gibt es
+einen Lock? Was sagen die E2E-Tests (`tests/e2e/`) dazu? `TENANT-TEST NÖTIG`.
+Folgefrage: `adapterInstanceID` wird per `getGlobalOption("adapterInstanceID")` gelesen
+(`CpiKafkaPlusConsumer.java:1437`, `ProducerConfigFactory.java:144`, jeweils mit Null-Prüfung), ist
+aber nach SAP nur verfügbar, wenn die Metadaten es anfordern. Ist der Wert im Betrieb also leer?
+Wäre er (iFlow-eindeutig) eine Lösung für V28 (`group.instance.id`) und V36 (`transactional.id`)?
+
+**V48 – Versionierungspraxis gegen SAPs Regeln (Niedrig–Mittel).**
+`versioning-rules-for-custom-adapters-61a988b.md`: Micro nur für Labels/Tooltips, Minor = neues
+Feature ohne neue Pflichtfelder, Major = „not supported“. `VERSIONING.md` beschreibt Major als
+„Löschen und Neuanlegen, letztes Mittel“. Prüfe, ob frühere Micro-Änderungen SAPs Definition
+überschritten haben (z. B. Design-Time-Validierung in 1.0.7, `CHANGELOG.md`), und ob ein künftiger
+Bruch (Entfernen von `transactionV2Enabled`, V14) damit überhaupt vorgesehen ist. Laut SAP-Doku
+(`component-metadata-550b19e.md`) erfordert das Umbenennen oder Löschen einer Variante vorher ein
+Undeploy des Adapters; vgl. `required-metadata-lines.txt`.
+
+**V49 – Java-Stand der Laufzeit (Mittel, UNVERIFIZIERT).** SAP nennt an mehreren Stellen Java 8
+(`adapter-development-prerequisites-5638d4a.md`: „The Java standard libraries of Java 8 can be
+used“; `sdk-api-c5c7933.md`; Archetype-Voraussetzungen „Java 8“, Camel 3.14 in
+`develop-adapters-using-archetype-0a84b13.md`). Der Adapter kompiliert mit `--release 11` und
+bettet `kafka-clients` 4.3.1 (Class-File 55) ein; `pom.xml:445-451` begründet das mit „CPI runtime is
+>= Java 11“. Prüfe, worauf diese Annahme beruht (SAP-Aussage? nur E2E-Lauf?) und ob ein
+Regressionstest sie absichert. Die Doku kann veraltet sein; sage, was du belegen kannst.
+
+**V50 – Tracing gegenüber SAPs Empfehlungen (Niedrig–Mittel).**
+`enabling-tracing-for-custom-adapter-a7cafa6.md`: Inbound mit ursprünglicher Payload **und
+Headern** tracen, „Security-relevant header values must be obfuscated“, Outbound nach der
+Transformation tracen, Trace nur bei aktivem Adapter-Trace, Zeichenkodierung setzen. Der
+`AdapterTracingHelper` enthält laut Grep keine Header-Behandlung (nur `addCustomHeaderProperty`
+für MPL-Felder, `AdapterTracingHelper.java:189,220`); der Receiver traced den Batch „as received,
+before Avro or Schema Registry serialization“ (`CHANGELOG.md`, Abschnitt Unreleased). Bewerte die
+Abweichungen und ob sie bewusst sind; Schnittstelle zu V37 (welche Header fließen wohin).
+
+**V51 – Connection-Status-API als Hebel für Konfigurationsfehler (Mittel).**
+`enabling-connection-status-for-integration-flow-3972bf8.md`: `IFlowMonitorService.publishEvent`
+meldet den Verbindungsstatus an das Integration-Flow-Monitoring. Der Adapter ruft die API
+reflektiv auf (`AdapterTracingHelper.java:680-720`); der Consumer veröffentlicht ERROR bei
+Init-Fehlern (`CpiKafkaPlusConsumer.java:552`) und OK nach erfolgreichem Poll, der **Producer ruft
+`publishConnectionStatus` gar nicht auf** (Grep im Producer: keine Treffer). Frage: Lassen sich die
+D2-Fehler aus V5/V23/V40 (fehlender Alias, ungültige Bootstrap-Liste, unbekannter Enum-Wert) beim
+Start als rote Verbindung im Monitoring sichtbar machen, statt nur als ERROR-Zeile im Trace?
+`TENANT-TEST NÖTIG`: Was genau sieht der Betreiber bei `EventStatus.ERROR` für einen Sender bzw.
+Receiver?
+
+**V52 – Laufzeit-Importe und Allowlisting (Niedrig–Mittel).**
+`adapter-development-prerequisites-5638d4a.md`: Zur Laufzeit sind nur ADK-APIs, Camel Core und
+Logging zugänglich; weitere Pakete müssen gebündelt und importiert werden. Der Adapter importiert
+`com.sap.it.api.*` optional (`pom.xml:367`) und setzt `<DynamicImport-Package>*</DynamicImport-Package>`
+(`pom.xml:395`) – das ist sehr breit und steht in Spannung zur Allowlist-Regel; die
+Class-Space-Probleme #148/#154 gehören in dieselbe Klasse. Der Adapter hängt typisiert an
+`com.sap.cloud.adk:generic.api`/`adapter.api` 3.21.0 (`provided`, `pom.xml:70-82`; `CredentialHelper`
+importiert `com.sap.it.api.*` direkt), ruft `IFlowMonitorService` und `MessageLog` aber reflektiv
+auf (`AdapterTracingHelper.java:189,220,694,719`). Prüfe, warum (Off-Platform-Tests? fehlender
+Zugriff im Bundle? Plattform-Versionsunterschiede?), ob ein typisierter Zugriff möglich ist, ob
+`DynamicImport-Package: *` eingeschränkt werden kann, und ob die Warmup-Lösung (ADR 0005) robust
+gegen künftige Plattformänderungen ist. (Die Stubs unter `src/stubs/` betreffen nur `org.ietf.jgss`
+für SASL/GSSAPI, nicht die ADK.)
 
 # Ausgabeformat
 
