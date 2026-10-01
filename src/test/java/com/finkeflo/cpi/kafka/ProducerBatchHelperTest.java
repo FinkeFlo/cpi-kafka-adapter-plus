@@ -20,6 +20,7 @@
  */
 package com.finkeflo.cpi.kafka;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -119,6 +120,71 @@ public class ProducerBatchHelperTest {
         Assert.assertTrue("Abort path waited " + elapsedMs + " ms for two buffered records with a "
                 + SHORT_BUDGET_MS + " ms budget", elapsedMs < SHORT_BUDGET_MS * 2);
         Assert.assertEquals("flush() would be an unbounded abort-path wait", 0, producer.flushCount);
+    }
+
+    @Test
+    public void serializationFailureWritesNothing() throws Exception {
+        StubProducer producer = new StubProducer(
+                CompletableFuture.completedFuture(metadata(10L)),
+                CompletableFuture.completedFuture(metadata(11L)),
+                CompletableFuture.completedFuture(metadata(12L)));
+
+        try {
+            ProducerBatchHelper.sendBatch(
+                    producer, threeRecords(), "orders", null, null, null, null, null,
+                    failingSerializerAt("v3"), null,
+                    ProducerSendGuard.of(SHORT_BUDGET_MS, "PLAINTEXT"),
+                    ProducerPath.SHARED, "test-client-id");
+            Assert.fail("Expected the serializer failure to fail the batch");
+        } catch (RuntimeException expected) {
+            // expected
+        }
+
+        // A record handed to send() is flushed by the producer rebuild's close(), and the retried
+        // batch then writes it a second time.
+        Assert.assertEquals("no record may reach the producer when one cannot be serialized",
+                0, producer.sentRecords.size());
+    }
+
+    @Test
+    public void serializationFailureIsClassifiedAsDataError() throws Exception {
+        StubProducer producer = new StubProducer(
+                CompletableFuture.completedFuture(metadata(10L)),
+                CompletableFuture.completedFuture(metadata(11L)),
+                CompletableFuture.completedFuture(metadata(12L)));
+
+        try {
+            ProducerBatchHelper.sendBatch(
+                    producer, threeRecords(), "orders", null, null, null, null, null,
+                    failingSerializerAt("v3"), null,
+                    ProducerSendGuard.of(SHORT_BUDGET_MS, "PLAINTEXT"),
+                    ProducerPath.SHARED, "test-client-id");
+            Assert.fail("Expected the serializer failure to fail the batch");
+        } catch (RuntimeException e) {
+            // UNKNOWN_FATAL would rebuild the shared producer for a payload problem.
+            Assert.assertEquals(KafkaErrorHelper.Classification.FATAL_DATA_ERROR,
+                    KafkaErrorHelper.classify(e));
+            Assert.assertTrue(e.getMessage(), e.getMessage().contains("record index 2"));
+        }
+    }
+
+    private static List<BatchRecord> threeRecords() {
+        return Arrays.asList(new BatchRecord("k1", "v1"),
+                new BatchRecord("k2", "v2"),
+                new BatchRecord("k3", "v3"));
+    }
+
+    /** Behaves like the Avro serializer: plain RuntimeException for one specific value. */
+    private static ProducerBatchHelper.ByteSerializer failingSerializerAt(final String badValue) {
+        return new ProducerBatchHelper.ByteSerializer() {
+            @Override
+            public byte[] serialize(String topic, String data) {
+                if (badValue.equals(data)) {
+                    throw new RuntimeException("Avro serialization failed: Expected int. Got VALUE_STRING");
+                }
+                return data.getBytes(StandardCharsets.UTF_8);
+            }
+        };
     }
 
     private static final class StubProducer implements Producer<byte[], byte[]> {
