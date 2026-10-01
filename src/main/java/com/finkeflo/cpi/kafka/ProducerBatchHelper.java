@@ -46,6 +46,12 @@ public final class ProducerBatchHelper {
     private ProducerBatchHelper() {}
 
     /**
+     * Exchange property holding the {@code CamelKafkaTopic} value the batch response set. A later
+     * Kafka receiver in the same exchange recognises the header as this response, not as an override.
+     */
+    static final String RESPONSE_TOPIC_PROPERTY = "CpiKafkaPlusResponseTopic";
+
+    /**
      * Producer path identifier for diagnostics. Every diagnostic line from the producer path must
      * include this tag so the first question in any investigation ("which path was in play?") is
      * answered immediately.
@@ -304,6 +310,9 @@ public final class ProducerBatchHelper {
                                                   String batchMode, BatchSendResult result) {
         message.setHeader("SAP_Receiver", topic);
         message.setHeader("CamelKafkaTopic", topic);
+        if (message.getExchange() != null) {
+            message.getExchange().setProperty(RESPONSE_TOPIC_PROPERTY, topic);
+        }
         message.setHeader("CpiKafkaPlusTopic", topic);
         message.setHeader("CpiKafkaPlusStatus", "OK");
         message.setHeader("CpiKafkaPlusRecordCount", result.getRecordCount());

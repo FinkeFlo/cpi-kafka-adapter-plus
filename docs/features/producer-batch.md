@@ -99,7 +99,7 @@ Priority (high to low):
 | Header | Description |
 |--------|-------------|
 | `SAP_Receiver` | Topic name (MPL monitoring) |
-| `CamelKafkaTopic` | Topic |
+| `CamelKafkaTopic` | Topic. A later Kafka receiver in the same iFlow that has its own topic configured does not treat this response header as a topic override; set `CamelKafkaTopic` explicitly to route it elsewhere. |
 | `CpiKafkaPlusTopic` | Topic (adapter-native header, aligned with the consumer's header name) |
 | `CpiKafkaPlusStatus` | `OK` on success |
 | `CpiKafkaPlusRecordCount` | Number of records sent |

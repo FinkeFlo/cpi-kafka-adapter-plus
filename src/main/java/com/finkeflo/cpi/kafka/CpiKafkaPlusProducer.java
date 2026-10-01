@@ -648,11 +648,7 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
 
         Message in = exchange.getIn();
 
-        // Determine topic - header overrides config
-        String topic = resolveTopic(exchange, in.getHeader("CamelKafkaTopic", String.class));
-        if (topic == null || topic.isEmpty()) {
-            topic = resolveTopic(exchange, endpoint.getEffectiveTopic());
-        }
+        String topic = targetTopic(exchange);
 
         // Fail-fast for both send paths: a topic that does not exist would otherwise make the
         // producer block for max.block.ms and then report only a metadata timeout, hiding the actual
@@ -1194,6 +1190,28 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
             }
         }
         return null;
+    }
+
+    /**
+     * The topic to send to: a {@code CamelKafkaTopic} header overrides the configured one — unless it
+     * is still the value a batch receiver earlier in the same exchange left as its response. That
+     * response used to redirect the next receiver to the previous receiver's topic (#185). A receiver
+     * without a topic of its own keeps following the header, as before.
+     */
+    // Package-private for ProducerTopicHeaderTest.
+    String targetTopic(Exchange exchange) {
+        String header = exchange.getIn().getHeader("CamelKafkaTopic", String.class);
+        String configured = endpoint.getEffectiveTopic();
+        boolean ownResponse = header != null && header.equals(
+                exchange.getProperty(ProducerBatchHelper.RESPONSE_TOPIC_PROPERTY, String.class));
+        if (ownResponse && configured != null && !configured.trim().isEmpty()) {
+            header = null;
+        }
+        String topic = resolveTopic(exchange, header);
+        if (topic == null || topic.isEmpty()) {
+            topic = resolveTopic(exchange, endpoint.getEffectiveTopic());
+        }
+        return topic;
     }
 
     static String resolveTopic(Exchange exchange, String topicCandidate) {
