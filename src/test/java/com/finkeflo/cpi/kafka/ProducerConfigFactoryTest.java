@@ -54,6 +54,48 @@ public class ProducerConfigFactoryTest {
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
+    // #175: sizes and timeouts must not overflow int
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    @Test
+    public void kilobyteSizesBeyondIntAreClampedNotWrapped() throws Exception {
+        CpiKafkaPlusEndpoint endpoint = createEndpoint();
+        endpoint.setMaxRequestSizeKb(4_194_304);       // 4 GiB: int arithmetic wraps to 0
+        endpoint.setProducerBatchSizeKb(5_242_880);    // 5 GiB: int arithmetic wraps to 1 GiB
+
+        Properties props = ProducerConfigFactory.buildProducerProperties(endpoint);
+
+        Assert.assertEquals(Integer.MAX_VALUE, ((Number) props.get(ProducerConfig.MAX_REQUEST_SIZE_CONFIG)).longValue());
+        Assert.assertEquals(Integer.MAX_VALUE, ((Number) props.get(ProducerConfig.BATCH_SIZE_CONFIG)).longValue());
+    }
+
+    @Test
+    public void deliveryTimeoutBeyondIntIsClampedNotWrapped() throws Exception {
+        CpiKafkaPlusEndpoint endpoint = createEndpoint();
+        endpoint.setDeliveryTimeoutSeconds(3_000_000);  // * 1000 wraps to a negative int
+
+        Properties props = ProducerConfigFactory.buildProducerProperties(endpoint);
+
+        Assert.assertEquals(Integer.MAX_VALUE, ((Number) props.get(ProducerConfig.DELIVERY_TIMEOUT_MS_CONFIG)).longValue());
+        Assert.assertEquals(30_000L, ((Number) props.get(ProducerConfig.REQUEST_TIMEOUT_MS_CONFIG)).longValue());
+        Assert.assertEquals(30_000L, ((Number) props.get(ProducerConfig.MAX_BLOCK_MS_CONFIG)).longValue());
+    }
+
+    @Test
+    public void ordinarySizesAreUnchanged() throws Exception {
+        CpiKafkaPlusEndpoint endpoint = createEndpoint();
+        endpoint.setMaxRequestSizeKb(1024);
+        endpoint.setProducerBatchSizeKb(16);
+        endpoint.setDeliveryTimeoutSeconds(120);
+
+        Properties props = ProducerConfigFactory.buildProducerProperties(endpoint);
+
+        Assert.assertEquals(1_048_576L, ((Number) props.get(ProducerConfig.MAX_REQUEST_SIZE_CONFIG)).longValue());
+        Assert.assertEquals(16_384L, ((Number) props.get(ProducerConfig.BATCH_SIZE_CONFIG)).longValue());
+        Assert.assertEquals(120_000L, ((Number) props.get(ProducerConfig.DELIVERY_TIMEOUT_MS_CONFIG)).longValue());
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
     // c3: Stable client.id
     // ─────────────────────────────────────────────────────────────────────────────
 

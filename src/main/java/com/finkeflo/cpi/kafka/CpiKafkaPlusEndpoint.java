@@ -513,10 +513,20 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
     public void setGroupId(String groupId) { this.groupId = groupId; }
 
     public String getSecurityProtocol() { return securityProtocol; }
-    public void setSecurityProtocol(String securityProtocol) { this.securityProtocol = securityProtocol; }
+    /**
+     * Normalised to upper case: Kafka accepts {@code sasl_ssl}, but every check in the adapter compares
+     * against the upper-case names, so a lower-case value from an externalized parameter configured
+     * neither SASL nor the keystore alias (#175).
+     */
+    public void setSecurityProtocol(String securityProtocol) { this.securityProtocol = normaliseName(securityProtocol); }
 
     public String getSaslMechanism() { return saslMechanism; }
-    public void setSaslMechanism(String saslMechanism) { this.saslMechanism = saslMechanism; }
+    /** Normalised to upper case, like {@link #setSecurityProtocol(String)}. */
+    public void setSaslMechanism(String saslMechanism) { this.saslMechanism = normaliseName(saslMechanism); }
+
+    private static String normaliseName(String value) {
+        return value == null ? null : value.trim().toUpperCase(java.util.Locale.ROOT);
+    }
 
     public String getCredentialAlias() { return credentialAlias; }
     public void setCredentialAlias(String credentialAlias) { this.credentialAlias = credentialAlias; }

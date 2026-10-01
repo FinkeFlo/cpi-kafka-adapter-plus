@@ -95,6 +95,39 @@ public class SecurityConfigHelperTest {
     }
 
     @Test
+    public void lowercaseSaslSslStillConfiguresSaslAndSsl() {
+        CredentialHelper.setCredentialResolver(alias -> new CredentialHelper.UserCredentials("alice", "secret"));
+        CpiKafkaPlusEndpoint endpoint = new CpiKafkaPlusEndpoint();
+        endpoint.setSecurityProtocol(" sasl_ssl ");   // as an externalized parameter may deliver it
+        endpoint.setSaslMechanism("scram-sha-512");
+        endpoint.setCredentialAlias("kafka-user");
+        endpoint.setSslKeystoreAlias("tenant-kafka");
+        Properties props = new Properties();
+
+        SecurityConfigHelper.configureSecurityProperties(props, endpoint);
+
+        Assert.assertEquals("SASL_SSL", props.getProperty("security.protocol"));
+        Assert.assertEquals("SCRAM-SHA-512", props.getProperty("sasl.mechanism"));
+        Assert.assertNotNull("JAAS config is required to authenticate", props.getProperty("sasl.jaas.config"));
+        Assert.assertEquals("tenant-kafka",
+                props.getProperty(CpiKafkaPlusSslEngineFactory.SSL_KEYSTORE_ALIAS_CONFIG));
+    }
+
+    @Test
+    public void lowercaseSslStillUsesTheKeystoreAlias() {
+        CpiKafkaPlusEndpoint endpoint = new CpiKafkaPlusEndpoint();
+        endpoint.setSecurityProtocol("ssl");
+        endpoint.setSslKeystoreAlias("tenant-kafka");
+        Properties props = new Properties();
+
+        SecurityConfigHelper.configureSecurityProperties(props, endpoint);
+
+        Assert.assertEquals("SSL", props.getProperty("security.protocol"));
+        Assert.assertEquals(CpiKafkaPlusSslEngineFactory.class.getName(),
+                props.getProperty(SslConfigs.SSL_ENGINE_FACTORY_CLASS_CONFIG));
+    }
+
+    @Test
     public void testConfigureSslWithoutKeystoreAliasUsesDefaultTruststoreBehavior() {
         Properties props = new Properties();
         CpiKafkaPlusEndpoint endpoint = new CpiKafkaPlusEndpoint();

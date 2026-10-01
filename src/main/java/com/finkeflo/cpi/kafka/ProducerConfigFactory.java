@@ -100,15 +100,15 @@ public final class ProducerConfigFactory {
         }
         props.put(ProducerConfig.ACKS_CONFIG, acks);
         props.put(ProducerConfig.COMPRESSION_TYPE_CONFIG, endpoint.getCompressionType());
-        props.put(ProducerConfig.MAX_REQUEST_SIZE_CONFIG, endpoint.getMaxRequestSizeKb() * 1024);
+        props.put(ProducerConfig.MAX_REQUEST_SIZE_CONFIG, kilobytesToBytes(endpoint.getMaxRequestSizeKb()));
         props.put(ProducerConfig.LINGER_MS_CONFIG, 0L);
-        props.put(ProducerConfig.BATCH_SIZE_CONFIG, endpoint.getProducerBatchSizeKb() * 1024);
+        props.put(ProducerConfig.BATCH_SIZE_CONFIG, kilobytesToBytes(endpoint.getProducerBatchSizeKb()));
         props.put(ProducerConfig.BUFFER_MEMORY_CONFIG, endpoint.getBufferMemoryKb() * 1024L);
         props.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, endpoint.isEnableIdempotence());
         
         // retries: not configurable — Kafka uses Integer.MAX_VALUE with idempotence,
         // deliveryTimeoutSeconds is the effective limit
-        int deliveryMs = endpoint.getDeliveryTimeoutSeconds() * 1000;
+        int deliveryMs = clampToInt(endpoint.getDeliveryTimeoutSeconds() * 1000L);
         props.put(ProducerConfig.DELIVERY_TIMEOUT_MS_CONFIG, deliveryMs);
         
         // request.timeout.ms must be <= delivery.timeout.ms; cap it accordingly
@@ -170,5 +170,17 @@ public final class ProducerConfigFactory {
         }
 
         return props;
+    }
+
+    /**
+     * Kilobytes to bytes for an {@code int} Kafka setting. Computed as {@code long} and clamped: in
+     * {@code int} arithmetic 4,194,304 KB wrapped to 0 and 5,242,880 KB to 1 GiB (#175).
+     */
+    static int kilobytesToBytes(int kilobytes) {
+        return clampToInt(kilobytes * 1024L);
+    }
+
+    private static int clampToInt(long value) {
+        return (int) Math.max(Integer.MIN_VALUE, Math.min(Integer.MAX_VALUE, value));
     }
 }
