@@ -388,6 +388,41 @@ public class RecordProcessorProgressTest {
     }
 
     @Test
+    public void batchFormatFailureWithoutDlqIsRetriedByDefault() throws Exception {
+        CpiKafkaPlusEndpoint endpoint = batchEndpoint(false, null);
+        endpoint.setSchemaRegistryEnabled(true);
+        endpoint.setSchemaRegistryUrl("http://localhost:1");
+        endpoint.setAvroValueDeserialization(true);
+        MockConsumer<byte[], byte[]> consumer = consumerWith(P0, "BAD", "b");
+        RecordProcessor processor = processor(endpoint, null, failingAvro(endpoint));
+
+        PollProgress progress = processBatch(processor, consumer);
+
+        // The whole batch is retried, the good record in it included.
+        Assert.assertTrue(invoked.isEmpty());
+        Assert.assertTrue(progress.isBlocked(P0));
+        Assert.assertEquals(-1L, committed(consumer, P0));
+        Assert.assertEquals(0L, consumer.position(P0));
+    }
+
+    @Test
+    public void deserializationFailureInTheSchemaFilterIsRetriedWithoutDlq() throws Exception {
+        CpiKafkaPlusEndpoint endpoint = batchEndpoint(false, SCHEMA);
+        endpoint.setSchemaRegistryEnabled(true);
+        endpoint.setSchemaRegistryUrl("http://localhost:1");
+        endpoint.setAvroValueDeserialization(true);
+        MockConsumer<byte[], byte[]> consumer = consumerWith(P0, "BAD", "{\"id\":\"b\"}");
+        RecordProcessor processor = processor(endpoint, null, failingAvro(endpoint));
+
+        PollProgress progress = processBatch(processor, consumer);
+
+        Assert.assertTrue(invoked.isEmpty());
+        Assert.assertEquals(Long.valueOf(0L), progress.blockedOffset(P0));
+        Assert.assertEquals(-1L, committed(consumer, P0));
+        Assert.assertEquals(0L, consumer.position(P0));
+    }
+
+    @Test
     public void batchFormatFailureWithoutDlqDoesNotEscapeThePoll() throws Exception {
         CpiKafkaPlusEndpoint endpoint = skip(batchEndpoint(false, null));
         endpoint.setSchemaRegistryEnabled(true);

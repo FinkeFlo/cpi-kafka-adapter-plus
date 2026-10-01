@@ -343,7 +343,7 @@
                 </AttributeReference>
                 <AttributeReference>
                     <ReferenceName>retryDelaySeconds</ReferenceName>
-                    <description>Initial delay in seconds before a failed message is retried. The delay doubles after each attempt (exponential backoff), capped at 300 seconds. With a Dead Letter Queue it applies to the retries before the message is dead-lettered (0 = retry immediately). With Retry Failed Message it is the first wait before the same offset is retried; the wait is at least 1 second. Example: with 2 seconds the waits are 2s, 4s, 8s.</description>
+                    <description>Initial delay in seconds before a failed message is retried. The delay doubles after each attempt (exponential backoff), capped at 300 seconds. With a Dead Letter Queue it applies to the retries before the message is dead-lettered (0 = retry immediately). With Retry Failed Message it is the first wait before the same offset is retried; the wait is at least 1 second. Example with 2 seconds: before the DLQ, with Max Retries 3, the waits are 2s, 4s, 8s; with Retry Failed Message they are 2s, 4s, 8s, 16s and so on, up to 300s between attempts, until the message succeeds.</description>
                     <ErrorMessage>Please enter a number of seconds between 0 and 300 (e.g. 2)</ErrorMessage>
                 </AttributeReference>
             </AttributeGroup>

@@ -159,6 +159,12 @@ adapter:
 | **Retry Failed Message** (`RETRY`, default) | The record is retried at the same offset until it succeeds. Its partition waits meanwhile: nothing after the record is processed or committed. The retries back off — **Retry Delay** (at least 1 second), doubling up to 5 minutes — and every attempt writes a failed message processing log. Other partitions keep flowing, unless Auto-Pause is enabled (see below). Nothing is lost. |
 | **Skip Failed Message** (`SKIP`) | The failed message processing log is written, the record (or batch) is skipped and its offset is committed. The record is lost (at-most-once). |
 
+In batch mode the unit that fails is the batch: with *Retry Failed Message* the whole batch is
+retried, including the records in it that would have succeeded on their own, and a single bad
+record holds back its batch and everything after it in the partition. Only a DLQ isolates the bad
+record — with a DLQ a failed batch is retried record by record and only the failing records are
+dead-lettered.
+
 This applies to failed IFlow processing (batch and non-batch), to batches that cannot be formatted
 and to records that cannot be deserialized (Avro). It does not apply to:
 

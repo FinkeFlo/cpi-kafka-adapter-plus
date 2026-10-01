@@ -452,6 +452,6 @@ The parameter only affects idle detection for an empty topic.
 
 ## Offset Commit
 
-With **Offset Commit Strategy** (`commitStrategy`) set to **After Successful Processing (At-Least-Once)** (`BATCH_COMPLETE`) (recommended), offsets are committed only after each batch has been processed successfully, and never past a record that is still open. If the IFlow fails, the batch's records are retried individually and dead-lettered when a DLQ is configured; without a DLQ the failed batch is retried (default) or skipped, as **Error Handling** says (see [Error Handling Without DLQ](dead-letter-queue.md#error-handling-without-dlq)).
+With **Offset Commit Strategy** (`commitStrategy`) set to **After Successful Processing (At-Least-Once)** (`BATCH_COMPLETE`) (recommended), offsets are committed only after each batch has been processed successfully, and never past a record that is still open. If the IFlow fails, the batch's records are retried individually and dead-lettered when a DLQ is configured; without a DLQ the whole failed batch, good records included, is retried (default) or skipped, as **Error Handling** says (see [Error Handling Without DLQ](dead-letter-queue.md#error-handling-without-dlq)).
 
 With **Offset Commit Strategy** (`commitStrategy`) set to **Auto Commit (Periodic)** (`AUTO`), Kafka commits periodically in the background, independently of whether processing succeeded. This is not recommended for production-critical scenarios.
