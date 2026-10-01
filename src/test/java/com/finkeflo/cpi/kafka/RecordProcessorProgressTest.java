@@ -276,7 +276,113 @@ public class RecordProcessorProgressTest {
         Assert.assertEquals(2, progress.failuresSinceLastSuccess());
     }
 
+    // --- batch mode (#173, option C in the individual fallback) ---
+
+    @Test
+    public void invalidRecordIsNotCommittedPastAnEarlierBlockedRecord() throws Exception {
+        // The filter dead-letters offset 2 first. The batch around it fails, and the individual
+        // fallback blocks at offset 0 because its DLQ write fails: offset 2 must stay uncommitted.
+        failing.addAll(Arrays.asList("0:0-3", "0:0-0"));
+        MockConsumer<byte[], byte[]> consumer =
+                consumerWith(P0, "{\"id\":\"a\"}", "{\"id\":\"b\"}", "{}", "{\"id\":\"d\"}");
+        RecordProcessor processor = processor(batchEndpoint(true, SCHEMA), dlqFailingFromWrite(2), null);
+
+        processBatch(processor, consumer);
+
+        Assert.assertEquals(-1L, committed(consumer, P0));
+        Assert.assertEquals(0L, consumer.position(P0));
+    }
+
+    @Test
+    public void deserializationFailureInTheSchemaFilterReachesTheDlq() throws Exception {
+        CpiKafkaPlusEndpoint endpoint = batchEndpoint(true, SCHEMA);
+        endpoint.setSchemaRegistryEnabled(true);
+        endpoint.setSchemaRegistryUrl("http://localhost:1");
+        endpoint.setAvroValueDeserialization(true);
+        MockConsumer<byte[], byte[]> consumer = consumerWith(P0, "BAD", "{\"id\":\"b\"}");
+        MockProducer<byte[], byte[]> dlq = okDlqProducer();
+        RecordProcessor processor = processor(endpoint, dlqHelper(dlq), failingAvro(endpoint));
+
+        processBatch(processor, consumer);
+
+        Assert.assertEquals(1, dlq.history().size());
+        Assert.assertEquals(Collections.singletonList("0:1-1"), invoked);
+        Assert.assertEquals(2L, committed(consumer, P0));
+    }
+
+    @Test
+    public void failedBatchWithoutDlqIsSkipped() throws Exception {
+        failing.add("0:0-1");
+        MockConsumer<byte[], byte[]> consumer = consumerWith(P0, "a", "b");
+        RecordProcessor processor = processor(batchEndpoint(false, null), null, null);
+
+        processBatch(processor, consumer);
+
+        Assert.assertEquals(2L, committed(consumer, P0));
+        Assert.assertEquals(2L, consumer.position(P0));
+    }
+
+    @Test
+    public void batchFormatFailureWithoutDlqDoesNotEscapeThePoll() throws Exception {
+        CpiKafkaPlusEndpoint endpoint = batchEndpoint(false, null);
+        endpoint.setSchemaRegistryEnabled(true);
+        endpoint.setSchemaRegistryUrl("http://localhost:1");
+        endpoint.setAvroValueDeserialization(true);
+        MockConsumer<byte[], byte[]> consumer = consumerWith(P0, "BAD", "b");
+        RecordProcessor processor = processor(endpoint, null, failingAvro(endpoint));
+
+        processBatch(processor, consumer);
+
+        Assert.assertTrue(invoked.isEmpty());
+        Assert.assertEquals(2L, committed(consumer, P0));
+    }
+
+    @Test
+    public void wakeupDuringBatchCommitDoesNotReprocessTheBatch() throws Exception {
+        MockConsumer<byte[], byte[]> consumer =
+                failingCommits(consumerWith(P0, "a", "b"), new AtomicInteger(), new WakeupException());
+        MockProducer<byte[], byte[]> dlq = okDlqProducer();
+        RecordProcessor processor = processor(batchEndpoint(true, null), dlqHelper(dlq), null);
+
+        PollProgress progress = processBatch(processor, consumer);
+
+        Assert.assertEquals(Collections.singletonList("0:0-1"), invoked);
+        Assert.assertTrue(dlq.history().isEmpty());
+        Assert.assertTrue(progress.isStopped());
+        Assert.assertEquals(Collections.singletonMap(P0, new OffsetAndMetadata(2L)), tracker.snapshot());
+    }
+
+    @Test
+    public void individualFallbackStopsAtTheFirstBlockedRecord() throws Exception {
+        failing.addAll(Arrays.asList("0:0-2", "0:1-1"));
+        MockConsumer<byte[], byte[]> consumer = consumerWith(P0, "a", "b", "c");
+        RecordProcessor processor = processor(batchEndpoint(true, null), failingDlq(), null);
+
+        processBatch(processor, consumer);
+
+        Assert.assertEquals(Arrays.asList("0:0-2", "0:0-0", "0:1-1"), invoked);
+        Assert.assertEquals(1L, committed(consumer, P0));
+        Assert.assertEquals(1L, consumer.position(P0));
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────────────
+
+    private PollProgress processBatch(RecordProcessor processor, MockConsumer<byte[], byte[]> consumer)
+            throws Exception {
+        ConsumerRecords<byte[], byte[]> records = consumer.poll(Duration.ZERO);
+        PollProgress progress = new PollProgress(records);
+        processor.processBatchRecords(consumer, records, true, progress);
+        processor.rewind(consumer, progress);
+        return progress;
+    }
+
+    private CpiKafkaPlusEndpoint batchEndpoint(boolean dlq, String jsonSchema) throws Exception {
+        CpiKafkaPlusEndpoint endpoint = endpoint(dlq, jsonSchema);
+        endpoint.setBatchMode(true);
+        endpoint.setBatchSize(10);
+        endpoint.setBatchOutputFormat("JSON_ARRAY");
+        return endpoint;
+    }
 
     private PollProgress processSingle(RecordProcessor processor, MockConsumer<byte[], byte[]> consumer)
             throws Exception {
@@ -323,8 +429,11 @@ public class RecordProcessorProgressTest {
                 new RecordProcessor.ConsumerCallback() {
                     @Override
                     public void processExchange(Exchange exchange) throws Exception {
+                        Object offset = exchange.getIn().getHeader("CpiKafkaPlusOffset");
                         String id = exchange.getIn().getHeader("CpiKafkaPlusPartition") + ":"
-                                + exchange.getIn().getHeader("CpiKafkaPlusOffset");
+                                + (offset != null ? offset
+                                        : exchange.getIn().getHeader("CpiKafkaPlusFirstOffset") + "-"
+                                        + exchange.getIn().getHeader("CpiKafkaPlusLastOffset"));
                         invoked.add(id);
                         if (failing.contains(id)) {
                             throw new IllegalStateException("backend rejected " + id);
@@ -416,6 +525,24 @@ public class RecordProcessorProgressTest {
                 true, null, new ByteArraySerializer(), new ByteArraySerializer()) {
             @Override
             public synchronized Future<RecordMetadata> send(ProducerRecord<byte[], byte[]> record) {
+                CompletableFuture<RecordMetadata> future = new CompletableFuture<>();
+                future.completeExceptionally(new TopicAuthorizationException("no WRITE on orders-dlq"));
+                return future;
+            }
+        };
+        return dlqHelper(producer);
+    }
+
+    /** A DLQ that accepts the first {@code firstFailingWrite - 1} writes and rejects the rest. */
+    private static DlqProducerHelper dlqFailingFromWrite(int firstFailingWrite) {
+        AtomicInteger writes = new AtomicInteger();
+        MockProducer<byte[], byte[]> producer = new MockProducer<byte[], byte[]>(
+                true, null, new ByteArraySerializer(), new ByteArraySerializer()) {
+            @Override
+            public synchronized Future<RecordMetadata> send(ProducerRecord<byte[], byte[]> record) {
+                if (writes.incrementAndGet() < firstFailingWrite) {
+                    return super.send(record);
+                }
                 CompletableFuture<RecordMetadata> future = new CompletableFuture<>();
                 future.completeExceptionally(new TopicAuthorizationException("no WRITE on orders-dlq"));
                 return future;

@@ -138,7 +138,7 @@ final class RecordProcessor {
                 records.count(), byPartition.size());
 
         IdentityHashMap<byte[], String> cache = new IdentityHashMap<>();
-        int[] filterCounts = filterInvalidRecords(kafkaConsumer, byPartition, commitAfterSuccess, cache);
+        int[] filterCounts = filterInvalidRecords(kafkaConsumer, byPartition, cache, progress);
         int schemaValidationFailures = filterCounts[0];
         int dlqCount = filterCounts[1];
 
@@ -157,6 +157,9 @@ final class RecordProcessor {
             }
 
             for (int i = 0; i < partitionRecords.size(); i += batchSize) {
+                if (stopRequested(progress) || progress.isBlocked(tp)) {
+                    break;
+                }
                 List<ConsumerRecord<byte[], byte[]>> batch = partitionRecords.subList(
                         i, Math.min(i + batchSize, partitionRecords.size()));
 
@@ -165,6 +168,17 @@ final class RecordProcessor {
             }
         }
 
+        // Records the schema filter resolved after the last batch of a partition are only
+        // committable now, once everything before them is resolved as well.
+        if (commitAfterSuccess) {
+            for (TopicPartition tp : byPartition.keySet()) {
+                if (progress.isStopped()) {
+                    markProgress(tp, progress);
+                } else {
+                    commitProgress(kafkaConsumer, tp, progress);
+                }
+            }
+        }
         return totalProcessed;
     }
 
@@ -172,13 +186,19 @@ final class RecordProcessor {
      * Pre-filters records that fail JSON Schema validation. Invalid records are routed
      * to DLQ (if enabled), reported to MPL, and removed from the partition lists.
      *
+     * <p>Nothing is committed here: the filter runs before any batch of the poll, and committing an
+     * invalid record's offset would commit past the earlier records of its partition before they
+     * were processed (#173). The filtered records are resolved in {@code progress} and committed
+     * together with the batches around them. A record whose DLQ write fails blocks its partition:
+     * only the valid records before it stay in the list.
+     *
      * @return int[2] with {schemaValidationFailures, dlqCount}
      */
     private int[] filterInvalidRecords(
             Consumer<byte[], byte[]> kafkaConsumer,
             Map<TopicPartition, List<ConsumerRecord<byte[], byte[]>>> byPartition,
-            boolean commitAfterSuccess,
-            IdentityHashMap<byte[], String> cache) {
+            IdentityHashMap<byte[], String> cache,
+            PollProgress progress) {
         if (jsonSchemaValidator == null) {
             return new int[]{0, 0};
         }
@@ -187,11 +207,23 @@ final class RecordProcessor {
         int dlqCount = 0;
 
         for (Map.Entry<TopicPartition, List<ConsumerRecord<byte[], byte[]>>> entry : byPartition.entrySet()) {
+            TopicPartition tp = entry.getKey();
             List<ConsumerRecord<byte[], byte[]>> partitionRecords = entry.getValue();
             List<ConsumerRecord<byte[], byte[]>> validRecords = new ArrayList<>();
 
             for (ConsumerRecord<byte[], byte[]> record : partitionRecords) {
-                String value = deserializeValue(record.topic(), record.value(), cache);
+                progress.processing(tp, record.offset());
+                String value;
+                try {
+                    value = deserializeValue(record.topic(), record.value(), cache);
+                } catch (Exception deserErr) {
+                    // Committed with the batches around it, never from here.
+                    handleDeserializationFailure(kafkaConsumer, record, deserErr, false, progress);
+                    if (progress.isBlocked(tp)) {
+                        break;
+                    }
+                    continue;
+                }
                 if (value != null) {
                     String validationError = jsonSchemaValidator.validate(value);
                     if (validationError != null) {
@@ -201,6 +233,7 @@ final class RecordProcessor {
                         if (endpoint.isJsonSchemaReportError()) {
                             reportValidationErrorToMpl(value, validationError, record);
                         }
+                        boolean dlqFailed = false;
                         if (dlqHelper != null) {
                             try {
                                 dlqHelper.sendToDlq(record, new RuntimeException(validationError), 0);
@@ -212,16 +245,20 @@ final class RecordProcessor {
                                         .with("topic", record.topic())
                                         .with("partition", record.partition())
                                         .with("offset", record.offset())
-                                        .with("dlqTopic", endpoint.getDlqTopic()), dlqEx);
+                                        .with("dlqTopic", endpoint.getDlqTopic())
+                                        .with("consequence", "offset not committed, record will be retried"), dlqEx);
+                                dlqFailed = true;
                             }
                         }
                         Exchange errorExchange = callback.createExchange();
                         callback.handleException(
                                 "JSON Schema validation failed at offset " + record.offset(),
                                 errorExchange, new RuntimeException(validationError));
-                        if (commitAfterSuccess) {
-                            commitSingleOffset(kafkaConsumer, record);
+                        if (dlqFailed) {
+                            progress.blocked(tp, record.offset());
+                            break;
                         }
+                        progress.resolved(tp, record.offset());
                         continue;
                     }
                 }
@@ -333,6 +370,8 @@ final class RecordProcessor {
                                 int schemaValidationFailures, int dlqCount,
                                 IdentityHashMap<byte[], String> cache,
                                 PollProgress progress) throws Exception {
+        TopicPartition tp = partitionOf(batch.get(0));
+        progress.processing(tp, batch.get(0).offset());
         Exchange exchange = callback.createExchange();
 
         String body;
@@ -352,7 +391,15 @@ final class RecordProcessor {
                 LOG.info("[CPI-KAFKA-PLUS-DIAG] processOneBatch: formatBatch failed, retrying batch records individually for poison-pill isolation");
                 return processRecordsIndividually(kafkaConsumer, batch, commitAfterSuccess, progress);
             }
-            throw (t instanceof Exception) ? (Exception) t : new RuntimeException(t);
+            if (!(t instanceof Exception)) {
+                throw new RuntimeException(t); // an Error is not a data problem; the poll rewinds it
+            }
+            progress.failed();
+            callback.handleException(
+                    "Could not format batch of " + batch.size() + " Kafka records from partition "
+                            + batch.get(0).partition(), exchange, (Exception) t);
+            resolveBatchWithoutDlq(kafkaConsumer, batch, commitAfterSuccess, progress);
+            return 0;
         }
 
         tracingHelper.traceInbound(exchange, body);
@@ -365,13 +412,6 @@ final class RecordProcessor {
             LOG.debug("[CPI-KAFKA-PLUS-DIAG] processOneBatch: calling processor...");
             callback.processExchange(exchange);
             LOG.debug("[CPI-KAFKA-PLUS-DIAG] processOneBatch: process() returned OK");
-
-            if (commitAfterSuccess) {
-                commitOffsets(kafkaConsumer, batch);
-                LOG.debug("[CPI-KAFKA-PLUS-DIAG] processOneBatch: offsets committed for partition {}",
-                        batch.get(0).partition());
-            }
-            return batch.size();
         } catch (Exception e) {
             int partition = !batch.isEmpty() ? batch.get(0).partition() : -1;
             AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("batch.processing.failed")
@@ -382,10 +422,37 @@ final class RecordProcessor {
                 LOG.info("[CPI-KAFKA-PLUS-DIAG] processOneBatch: DLQ enabled, retrying batch records individually");
                 return processRecordsIndividually(kafkaConsumer, batch, commitAfterSuccess, progress);
             }
+            progress.failed();
             callback.handleException(
                     "Error processing batch of " + batch.size() + " Kafka records from partition "
                             + batch.get(0).partition(), exchange, e);
+            resolveBatchWithoutDlq(kafkaConsumer, batch, commitAfterSuccess, progress);
             return 0;
+        }
+
+        // Outside the route's try block: a failing commit must not send a processed batch through
+        // the individual DLQ fallback (#172).
+        for (ConsumerRecord<byte[], byte[]> record : batch) {
+            progress.resolved(tp, record.offset());
+        }
+        progress.succeeded();
+        if (commitAfterSuccess) {
+            commitProgress(kafkaConsumer, tp, progress);
+            LOG.debug("[CPI-KAFKA-PLUS-DIAG] processOneBatch: offsets committed for partition {}", tp);
+        }
+        return batch.size();
+    }
+
+    /** Batch counterpart of {@link #resolveWithoutDlq}. */
+    private void resolveBatchWithoutDlq(Consumer<byte[], byte[]> kafkaConsumer,
+                                        List<ConsumerRecord<byte[], byte[]>> batch,
+                                        boolean commitAfterSuccess, PollProgress progress) {
+        TopicPartition tp = partitionOf(batch.get(0));
+        for (ConsumerRecord<byte[], byte[]> record : batch) {
+            progress.resolved(tp, record.offset());
+        }
+        if (commitAfterSuccess) {
+            commitProgress(kafkaConsumer, tp, progress);
         }
     }
 
@@ -831,18 +898,6 @@ final class RecordProcessor {
 
     // --- Offset management ---
 
-    private void commitOffsets(Consumer<byte[], byte[]> kafkaConsumer,
-                               List<ConsumerRecord<byte[], byte[]>> batch) {
-        for (ConsumerRecord<byte[], byte[]> record : batch) {
-            offsetTracker.markProcessed(
-                    new TopicPartition(record.topic(), record.partition()), record.offset());
-        }
-        boolean committed = commitTracked(offsets -> kafkaConsumer.commitSync(offsets),
-                "batch commit, records=" + batch.size());
-        LOG.debug("Batch commit attempt after successful processing: committed={} pendingRemaining={}",
-                committed, !offsetTracker.isEmpty());
-    }
-
     /**
      * Commits {@code tp} up to its first unresolved record of this poll.
      *
@@ -872,14 +927,12 @@ final class RecordProcessor {
         }
     }
 
-    private void commitSingleOffset(Consumer<byte[], byte[]> kafkaConsumer,
-                                    ConsumerRecord<byte[], byte[]> record) {
-        offsetTracker.markProcessed(
-                new TopicPartition(record.topic(), record.partition()), record.offset());
-        commitTracked(offsets -> kafkaConsumer.commitSync(offsets),
-                "single offset commit, topic=" + record.topic()
-                        + " partition=" + record.partition()
-                        + " offset=" + record.offset());
+    /** Marks {@code tp}'s resolved prefix as pending without committing it (consumer stopping). */
+    private void markProgress(TopicPartition tp, PollProgress progress) {
+        long next = progress.commitOffset(tp);
+        if (next >= 0) {
+            offsetTracker.markProcessed(tp, next - 1);
+        }
     }
 
     /**
