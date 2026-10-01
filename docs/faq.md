@@ -69,9 +69,10 @@ A consistently low `CpiKafkaPlusRecordCount` combined with high lag is a signal 
 With the default **After Successful Processing (At-Least-Once)** (`BATCH_COMPLETE`)
 strategy, offsets are committed after each batch has been processed successfully. If the
 iFlow fails, the record or batch goes to the Dead Letter Queue after its retries, if one is
-configured; without a DLQ it is skipped. In both cases no offset is ever committed past a record
-that has not been processed, dead-lettered or skipped — a record whose DLQ write fails is
-retried, and so is a record during which the adapter itself failed. See
+configured. Without a DLQ, **Error Handling** decides: *Retry Failed Message* (default) retries
+the same offset until it succeeds, *Skip Failed Message* skips it. No offset is ever committed past
+a record that has not been processed, dead-lettered or deliberately skipped — a record whose DLQ
+write fails is retried, and so is a record during which the adapter itself failed. See
 [Error Handling Without DLQ](features/dead-letter-queue.md#error-handling-without-dlq).
 
 With **Auto Commit (Periodic)** (`AUTO`), Kafka commits offsets in the background on a

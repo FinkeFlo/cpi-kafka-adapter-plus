@@ -4,7 +4,7 @@ The adapter supports routing failed messages to a Dead Letter Queue topic, preve
 
 ## Overview
 
-When **Enable Dead Letter Queue** (`dlqEnabled`) is turned on, records that fail processing in the CPI IFlow are retried a configurable number of times. If all retries configured via **Max Retries before DLQ** (`dlqMaxRetries`) are exhausted, the record is forwarded to the configured **DLQ Topic** (`dlqTopic`) instead of blocking the consumer. The original record key, value, and headers are preserved, and error metadata is added as Kafka headers.
+When **Enable Dead Letter Queue** (`dlqEnabled`) is turned on, records that fail processing in the CPI IFlow are retried a configurable number of times. If all retries configured via **Max Retries before DLQ** (`dlqMaxRetries`) are exhausted, the record is forwarded to the configured **DLQ Topic** (`dlqTopic`) instead of blocking the consumer — unless the write to the DLQ itself fails, see [When the DLQ Write Fails](#when-the-dlq-write-fails). The original record key, value, and headers are preserved, and error metadata is added as Kafka headers.
 
 ## Configuration
 
@@ -150,21 +150,27 @@ deserialization and failed JSON Schema validation.
 
 ## Error Handling Without DLQ
 
-When DLQ is **not** enabled, a record whose processing fails is **skipped**:
+When DLQ is **not** enabled, **Error Handling** (`errorHandling`) decides what happens to a record
+whose processing fails. The two options match the *Error Handling* setting of SAP's Kafka sender
+adapter:
+
+| Option | Behavior |
+|--------|----------|
+| **Retry Failed Message** (`RETRY`, default) | The record is retried at the same offset until it succeeds. Its partition waits meanwhile: nothing after the record is processed or committed. The retries back off — **Retry Delay** (at least 1 second), doubling up to 5 minutes — and every attempt writes a failed message processing log. Other partitions keep flowing. Nothing is lost. |
+| **Skip Failed Message** (`SKIP`) | The failed message processing log is written, the record (or batch) is skipped and its offset is committed. The record is lost (at-most-once). |
+
+This applies to failed IFlow processing (batch and non-batch), to batches that cannot be formatted
+and to records that cannot be deserialized (Avro). It does not apply to:
 
 | Error Type | Behavior |
 |------------|----------|
-| JSON Schema validation failure | Record is **discarded**, offset committed. A WARN log is written but the record is lost. |
-| IFlow processing failure (batch) | The failed message processing log is written, the batch is **skipped** and its offsets are committed (at-most-once). |
-| IFlow processing failure (non-batch) | The failed message processing log is written, the record is **skipped** and its offset is committed (at-most-once). |
-| Deserialization failure (Avro) | Reported like a processing failure, then the record is **skipped**. |
+| JSON Schema validation failure | Record is **discarded**, offset committed — a record that violates the schema never becomes valid by retrying. A WARN log is written but the record is lost. |
+| A failure inside the adapter itself (not in the IFlow) | The record is always retried, whatever the setting. |
 
-Only the failing record or batch is skipped. Records after it are processed normally, and a
-failure inside the adapter itself (not in the IFlow) never skips anything: the record is rewound and
-retried.
-
-> **Important:** Without DLQ, failed records are lost once the next record of the partition is
-> committed. Enable DLQ for any flow that must not lose records.
+> **Retry Failed Message and poison pills:** a record that can never be processed blocks its
+> partition until you fix the IFlow, the backend or the data. Enable **Auto-Pause on Errors** to
+> stop hammering a backend that is down, and a Dead Letter Queue for any flow where a single bad
+> record must not hold up the others.
 
 ## DLQ Record Headers
 
