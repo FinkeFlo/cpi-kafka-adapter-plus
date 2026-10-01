@@ -66,7 +66,7 @@ public class AvroDeserializerHelper implements Closeable {
         this.avroOutputFormat = endpoint.getAvroOutputFormat();
 
         LOG.info("[CPI-KAFKA-PLUS-DIAG] Avro deserializer initialized with Schema Registry at '{}', output format: {}",
-                endpoint.getSchemaRegistryUrl(), avroOutputFormat);
+                SchemaRegistryHttpClient.withoutUserInfo(endpoint.getSchemaRegistryUrl()), avroOutputFormat);
     }
 
     /**

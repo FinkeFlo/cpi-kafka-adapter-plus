@@ -54,6 +54,77 @@ public class ProducerConfigFactoryTest {
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
+    // #175: sizes and timeouts must not overflow int
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    @Test
+    public void kilobyteSizesBeyondIntAreClampedNotWrapped() throws Exception {
+        CpiKafkaPlusEndpoint endpoint = createEndpoint();
+        endpoint.setMaxRequestSizeKb(4_194_304);       // 4 GiB: int arithmetic wraps to 0
+        endpoint.setProducerBatchSizeKb(5_242_880);    // 5 GiB: int arithmetic wraps to 1 GiB
+
+        Properties props = ProducerConfigFactory.buildProducerProperties(endpoint);
+
+        Assert.assertEquals(Integer.MAX_VALUE, ((Number) props.get(ProducerConfig.MAX_REQUEST_SIZE_CONFIG)).longValue());
+        Assert.assertEquals("never above buffer.memory, never wrapped",
+                endpoint.getBufferMemoryKb() * 1024L, ((Number) props.get(ProducerConfig.BATCH_SIZE_CONFIG)).longValue());
+    }
+
+    @Test
+    public void batchSizeNeverExceedsTheBufferMemory() throws Exception {
+        // A batch has to fit into buffer.memory; a larger batch.size made every send fail with
+        // "Attempt to allocate ... but there is a hard limit of <buffer.memory>".
+        CpiKafkaPlusEndpoint endpoint = createEndpoint();
+        endpoint.setBufferMemoryKb(32_768);         // 32 MiB
+        endpoint.setProducerBatchSizeKb(65_536);    // 64 MiB
+
+        Properties props = ProducerConfigFactory.buildProducerProperties(endpoint);
+
+        Assert.assertEquals(33_554_432L, ((Number) props.get(ProducerConfig.BATCH_SIZE_CONFIG)).longValue());
+    }
+
+    @Test
+    public void deliveryTimeoutBeyondIntIsClampedNotWrapped() throws Exception {
+        CpiKafkaPlusEndpoint endpoint = createEndpoint();
+        endpoint.setDeliveryTimeoutSeconds(3_000_000);  // * 1000 wraps to a negative int
+
+        Properties props = ProducerConfigFactory.buildProducerProperties(endpoint);
+
+        Assert.assertEquals(Integer.MAX_VALUE, ((Number) props.get(ProducerConfig.DELIVERY_TIMEOUT_MS_CONFIG)).longValue());
+        Assert.assertEquals(30_000L, ((Number) props.get(ProducerConfig.REQUEST_TIMEOUT_MS_CONFIG)).longValue());
+        Assert.assertEquals(30_000L, ((Number) props.get(ProducerConfig.MAX_BLOCK_MS_CONFIG)).longValue());
+    }
+
+    @Test
+    public void transactionTimeoutIsOnlySetWhereTransactionsApply() throws Exception {
+        CpiKafkaPlusEndpoint single = createEndpoint();
+        single.setEnableTransactions(true);
+        single.setProducerBatchMode("NONE");
+        CpiKafkaPlusEndpoint batch = createEndpoint();
+        batch.setEnableTransactions(true);
+        batch.setProducerBatchMode("JSON_ARRAY");
+
+        Assert.assertNull("single messages are sent by the non-transactional shared producer",
+                ProducerConfigFactory.buildProducerProperties(single).get(ProducerConfig.TRANSACTION_TIMEOUT_CONFIG));
+        Assert.assertNotNull(
+                ProducerConfigFactory.buildProducerProperties(batch).get(ProducerConfig.TRANSACTION_TIMEOUT_CONFIG));
+    }
+
+    @Test
+    public void ordinarySizesAreUnchanged() throws Exception {
+        CpiKafkaPlusEndpoint endpoint = createEndpoint();
+        endpoint.setMaxRequestSizeKb(1024);
+        endpoint.setProducerBatchSizeKb(16);
+        endpoint.setDeliveryTimeoutSeconds(120);
+
+        Properties props = ProducerConfigFactory.buildProducerProperties(endpoint);
+
+        Assert.assertEquals(1_048_576L, ((Number) props.get(ProducerConfig.MAX_REQUEST_SIZE_CONFIG)).longValue());
+        Assert.assertEquals(16_384L, ((Number) props.get(ProducerConfig.BATCH_SIZE_CONFIG)).longValue());
+        Assert.assertEquals(120_000L, ((Number) props.get(ProducerConfig.DELIVERY_TIMEOUT_MS_CONFIG)).longValue());
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
     // c3: Stable client.id
     // ─────────────────────────────────────────────────────────────────────────────
 
@@ -127,6 +198,7 @@ public class ProducerConfigFactoryTest {
     public void transactionTimeoutCoversTheDeliveryTimeout() throws Exception {
         CpiKafkaPlusEndpoint endpoint = createEndpoint();
         endpoint.setEnableTransactions(true);
+        endpoint.setProducerBatchMode("JSON_ARRAY");   // transactions apply to batches only
         endpoint.setDeliveryTimeoutSeconds(120);
 
         Properties props = ProducerConfigFactory.buildProducerProperties(endpoint);
@@ -141,6 +213,7 @@ public class ProducerConfigFactoryTest {
         // before this change, or an upgrade would tighten a bound nobody asked to tighten.
         CpiKafkaPlusEndpoint endpoint = createEndpoint();
         endpoint.setEnableTransactions(true);
+        endpoint.setProducerBatchMode("JSON_ARRAY");   // transactions apply to batches only
         endpoint.setDeliveryTimeoutSeconds(5);
 
         Properties props = ProducerConfigFactory.buildProducerProperties(endpoint);
@@ -153,6 +226,7 @@ public class ProducerConfigFactoryTest {
     public void transactionTimeoutIsCappedAtTheBrokerMaximum() throws Exception {
         CpiKafkaPlusEndpoint endpoint = createEndpoint();
         endpoint.setEnableTransactions(true);
+        endpoint.setProducerBatchMode("JSON_ARRAY");   // transactions apply to batches only
         endpoint.setDeliveryTimeoutSeconds(10_000);
 
         Properties props = ProducerConfigFactory.buildProducerProperties(endpoint);

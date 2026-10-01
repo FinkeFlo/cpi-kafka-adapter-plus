@@ -94,6 +94,7 @@ public class ProducerRetryConfigTest {
     @Test
     public void delayOutsideTheAllowedRangeIsRejected() throws Exception {
         Map<String, String> params = new HashMap<>();
+        params.put("producerRetryMaxAttempts", "2");   // the range only matters while retry is on
         // Zero was the tempting default: three immediate retries finish in under a second and hit
         // the same node that just went away, after the client already backed off exponentially.
         params.put("producerRetryDelaySeconds", "0");
@@ -107,6 +108,7 @@ public class ProducerRetryConfigTest {
     @Test
     public void budgetOutsideTheAllowedRangeIsRejected() throws Exception {
         Map<String, String> params = new HashMap<>();
+        params.put("producerRetryMaxAttempts", "2");   // the range only matters while retry is on
         params.put("producerRetryTotalBudgetSeconds", "901");
         Assert.assertTrue(startAndExpectRejection(params).contains("producerRetryTotalBudgetSeconds"));
     }
@@ -153,6 +155,7 @@ public class ProducerRetryConfigTest {
         // default) at initTransactions(), which would surface as a failed send rather than a named
         // parameter. The retry is deliberately off here: the bound belongs to transactions.
         Map<String, String> params = new HashMap<>();
+        params.put("producerBatchMode", "JSON_ARRAY");   // transactions only apply to batches
         params.put("enableTransactions", "true");
         params.put("transactionalIdPrefix", "test-txn");
         params.put("deliveryTimeoutSeconds", "871");
@@ -160,6 +163,61 @@ public class ProducerRetryConfigTest {
         Assert.assertTrue(message, message.contains("deliveryTimeoutSeconds"));
         Assert.assertTrue("the broker limit must be named: " + message,
                 message.contains("transaction.max.timeout.ms"));
+    }
+
+    // --- #174: no start check on a field that has no effect ---
+
+    @Test
+    public void retryRangesAreIgnoredWhileRetryIsOff() throws Exception {
+        Map<String, String> params = new HashMap<>();
+        params.put("producerRetryMaxAttempts", "1");
+        params.put("producerRetryDelaySeconds", "0");
+        params.put("producerRetryTotalBudgetSeconds", "901");
+
+        CpiKafkaPlusProducer producer = createProducer(params);
+        producer.doStart();
+        producer.doStop();
+    }
+
+    @Test
+    public void retryOnABatchChannelWithoutTransactionsDoesNotBlockTheDeployment() throws Exception {
+        // Retry never applies on that path (a partially sent batch cannot be repeated), so its
+        // worst case must not be held against the budget either.
+        Map<String, String> params = new HashMap<>();
+        params.put("producerBatchMode", "JSON_ARRAY");
+        params.put("producerRetryMaxAttempts", "2");
+
+        CpiKafkaPlusProducer producer = createProducer(params);
+        producer.doStart();
+        producer.doStop();
+    }
+
+    @Test
+    public void transactionsWithoutBatchModeSkipTheTransactionalChecks() throws Exception {
+        // Single messages always go through the shared, non-transactional producer.
+        Map<String, String> params = new HashMap<>();
+        params.put("enableTransactions", "true");
+        params.put("deliveryTimeoutSeconds", "871");
+
+        CpiKafkaPlusProducer producer = createProducer(params);
+        producer.doStart();
+        producer.doStop();
+    }
+
+    @Test
+    public void singleMessagesWithTransactionsOnUseTheNonTransactionalWorstCase() throws Exception {
+        // Non-transactional: 2 x (6 + 6) + 1 = 25 s, inside the 30 s default budget. The
+        // transactional model (2 x 29 + 1 = 59 s) does not describe the path these messages take.
+        Map<String, String> params = new HashMap<>();
+        params.put("enableTransactions", "true");
+        params.put("transactionalIdPrefix", "test-txn");
+        params.put("producerRetryMaxAttempts", "2");
+        params.put("producerRetryDelaySeconds", "1");
+        params.put("deliveryTimeoutSeconds", "6");
+
+        CpiKafkaPlusProducer producer = createProducer(params);
+        producer.doStart();
+        producer.doStop();
     }
 
     @Test

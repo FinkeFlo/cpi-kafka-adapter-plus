@@ -38,9 +38,6 @@ import org.apache.kafka.common.errors.UnsupportedVersionException;
  */
 final class KafkaErrorHelper {
 
-    /** After this many consecutive init failures, log level escalates from WARN to ERROR. */
-    static final int INIT_FAILURE_ESCALATION_THRESHOLD = 10;
-
     /** Maximum depth when walking the cause chain to avoid infinite loops. */
     private static final int MAX_CAUSE_DEPTH = 10;
 
