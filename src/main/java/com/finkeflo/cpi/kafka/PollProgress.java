@@ -53,6 +53,7 @@ final class PollProgress {
         private final List<Long> offsets = new ArrayList<>();
         private final Set<Long> resolved = new HashSet<>();
         private Long blockedAt;
+        private long committedUpTo = -1L;
 
         /** First polled offset that is unresolved or blocked, or {@code null} if there is none. */
         Long firstOpenOffset() {
@@ -149,6 +150,20 @@ final class PollProgress {
             return state.offsets.get(state.offsets.size() - 1) + 1;
         }
         return open.equals(state.offsets.get(0)) ? -1L : open;
+    }
+
+    /** @return the commit offset last confirmed for {@code tp} in this poll, or {@code -1} */
+    long committedUpTo(TopicPartition tp) {
+        PartitionState state = partitions.get(tp);
+        return state != null ? state.committedUpTo : -1L;
+    }
+
+    /** Records that {@code tp} was committed up to {@code offset}, so it is not committed again. */
+    void committed(TopicPartition tp, long offset) {
+        PartitionState state = partitions.get(tp);
+        if (state != null && offset > state.committedUpTo) {
+            state.committedUpTo = offset;
+        }
     }
 
     /** @return per partition with an unresolved polled record, the offset to seek back to */

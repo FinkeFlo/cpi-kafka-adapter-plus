@@ -115,10 +115,20 @@ final class ConsumerCircuitBreaker {
      * @return {@code true} if auto-pause was triggered (caller should break out of drain loop)
      */
     boolean recordFailure() {
-        if (!endpoint.isAutoPauseEnabled()) {
+        return recordFailures(1);
+    }
+
+    /**
+     * Records the failures of one poll. Route failures are handled inside the record processor and
+     * never reach the consumer as exceptions, so they are counted from the poll's outcome (#182).
+     *
+     * @return {@code true} if auto-pause was triggered (caller should break out of drain loop)
+     */
+    boolean recordFailures(int count) {
+        if (!endpoint.isAutoPauseEnabled() || count <= 0) {
             return false;
         }
-        consecutiveProcessingFailures++;
+        consecutiveProcessingFailures += count;
         if (consecutiveProcessingFailures >= endpoint.getAutoPauseErrorThreshold()) {
             triggerAutoPause();
             return true;

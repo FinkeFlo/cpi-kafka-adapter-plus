@@ -908,13 +908,15 @@ final class RecordProcessor {
     private void commitProgress(Consumer<byte[], byte[]> kafkaConsumer, TopicPartition tp,
                                 PollProgress progress) {
         long next = progress.commitOffset(tp);
-        if (next < 0) {
-            return;
+        if (next < 0 || next <= progress.committedUpTo(tp)) {
+            return; // nothing new since the last commit of this partition
         }
         offsetTracker.markProcessed(tp, next - 1);
         try {
-            commitTracked(offsets -> kafkaConsumer.commitSync(offsets),
-                    "commit, partition=" + tp + " nextOffset=" + next);
+            if (commitTracked(offsets -> kafkaConsumer.commitSync(offsets),
+                    "commit, partition=" + tp + " nextOffset=" + next)) {
+                progress.committed(tp, next);
+            }
         } catch (WakeupException e) {
             LOG.info("[CPI-KAFKA-PLUS-DIAG] commit interrupted by wakeup (consumer stopping): partition={} "
                     + "nextOffset={} stays pending", tp, next);

@@ -31,6 +31,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 import org.apache.camel.Exchange;
 import org.apache.camel.Processor;
@@ -82,7 +83,35 @@ public class AutoPauseIT {
     }
 
     @Test
-    public void testAutoPausePausesAfterProcessingErrorsThenResumes() throws Exception {
+    public void testAutoPausePausesAfterEscapingErrorsThenRetriesTheFailedRecords() throws Exception {
+        // An Error escapes the record processor. The record is rewound and retried after the
+        // cooldown instead of being skipped together with the rest of its poll (#187).
+        List<Long> offsets = runAutoPauseScenario(attempt -> {
+            throw new DownstreamProcessingError("intentional auto-pause failure " + attempt);
+        }, MESSAGE_COUNT);
+
+        Assert.assertEquals(Arrays.asList(0L, 1L, 2L, 3L, 4L, 5L), offsets);
+    }
+
+    @Test
+    public void testAutoPausePausesOnRouteExceptions() throws Exception {
+        // A route exception is handled inside the record processor and never reaches the consumer
+        // as an exception, so auto-pause never fired for the failure it is recommended for (#182).
+        // Without a DLQ the failed records are skipped.
+        List<Long> offsets = runAutoPauseScenario(attempt -> {
+            throw new IllegalStateException("backend unavailable " + attempt);
+        }, MESSAGE_COUNT - ERROR_THRESHOLD);
+
+        Assert.assertEquals(Arrays.asList(2L, 3L, 4L, 5L), offsets);
+    }
+
+    /**
+     * Fails the first {@link #ERROR_THRESHOLD} route invocations with {@code failure}, asserts that
+     * the consumer then pauses, and waits for {@code expectedSuccesses} records after the cooldown.
+     *
+     * @return the offsets that were processed successfully, in order
+     */
+    private List<Long> runAutoPauseScenario(Failure failure, int expectedSuccesses) throws Exception {
         String topic = "it-auto-pause-" + System.nanoTime();
         String group = "grp-auto-pause-" + System.nanoTime();
         KafkaTestInfrastructure.createTopic(topic, 1);
@@ -103,13 +132,17 @@ public class AutoPauseIT {
         final AtomicInteger attempts = new AtomicInteger();
         final List<String> successfulBodies = new ArrayList<String>();
         final List<Long> successfulOffsets = new ArrayList<Long>();
+        final AtomicLong lastFailureMs = new AtomicLong();
+        final AtomicLong firstSuccessMs = new AtomicLong();
         TrackingProcessor processor = new TrackingProcessor() {
             @Override
             public void process(Exchange exchange) throws Exception {
                 int attempt = attempts.incrementAndGet();
                 if (attempt <= ERROR_THRESHOLD) {
-                    throw new DownstreamProcessingError("intentional auto-pause failure " + attempt);
+                    lastFailureMs.set(System.currentTimeMillis());
+                    failure.fail(attempt);
                 }
+                firstSuccessMs.compareAndSet(0L, System.currentTimeMillis());
                 successfulBodies.add(exchange.getIn().getBody(String.class));
                 successfulOffsets.add(exchange.getIn().getHeader("CpiKafkaPlusOffset", Long.class));
             }
@@ -140,15 +173,17 @@ public class AutoPauseIT {
 
             // The cooldown still has to expire before anything is processed, so the budget has to
             // cover it on top of the time the remaining messages need.
-            waitUntilSuccessCount(pollMethod, consumer, MESSAGE_COUNT - ERROR_THRESHOLD,
+            waitUntilSuccessCount(pollMethod, consumer, expectedSuccesses,
                     20000L + COOLDOWN_SECONDS * 1000L);
         } finally {
             consumer.doStop();
         }
 
-        Assert.assertEquals(Arrays.asList("v2", "v3", "v4", "v5"), successfulBodies);
-        Assert.assertEquals(Arrays.asList(Long.valueOf(2L), Long.valueOf(3L),
-                Long.valueOf(4L), Long.valueOf(5L)), successfulOffsets);
+        // Without a pause the next record is processed on the next emit cycle, about a second later.
+        long resumedAfterMs = firstSuccessMs.get() - lastFailureMs.get();
+        Assert.assertTrue("the consumer must pause for the cooldown after " + ERROR_THRESHOLD
+                        + " failures, but processed again after " + resumedAfterMs + " ms",
+                resumedAfterMs >= (COOLDOWN_SECONDS - 1) * 1000L);
 
         List<ConsumerRecord<String, String>> duplicates =
                 KafkaTestInfrastructure.consumeAllMessages(topic, 1, 3000);
@@ -156,6 +191,11 @@ public class AutoPauseIT {
                 duplicates.size() > 0);
         Assert.assertTrue("Same consumer group should not re-read records after successful commits",
                 consumeWithSameGroup(topic, group).isEmpty());
+        return successfulOffsets;
+    }
+
+    private interface Failure {
+        void fail(int attempt) throws Exception;
     }
 
     private static Method startConsumerAndGetPollMethod(CpiKafkaPlusConsumer consumer) throws Exception {

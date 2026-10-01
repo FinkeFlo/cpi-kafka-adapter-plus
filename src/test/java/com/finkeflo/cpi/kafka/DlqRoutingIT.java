@@ -30,11 +30,17 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.apache.camel.Exchange;
 import org.apache.camel.Processor;
 import org.apache.camel.impl.DefaultCamelContext;
+import org.apache.kafka.clients.admin.Admin;
+import org.apache.kafka.clients.admin.AdminClientConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.apache.kafka.clients.consumer.OffsetAndMetadata;
+import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.header.Header;
 import org.awaitility.core.ConditionTimeoutException;
 import org.junit.AfterClass;
@@ -565,6 +571,84 @@ public class DlqRoutingIT {
     }
 
     // --- Helpers ---
+
+    @Test
+    public void testFailedDlqWriteRetriesTheRecordInsteadOfSkippingIt() throws Exception {
+        String topic = "it-dlq-unwritable-" + System.nanoTime();
+        String group = "grp-dlq-unwritable-" + System.nanoTime();
+        KafkaTestInfrastructure.createTopic(topic, 1);
+        KafkaTestInfrastructure.produceStringMessages(topic,
+                Arrays.asList("k0", "k1", "k2"),
+                Arrays.asList("ok-0", "FAIL-1", "ok-2"));
+
+        Map<String, String> params = new HashMap<>();
+        params.put("batchMode", "false");
+        params.put("commitStrategy", "BATCH_COMPLETE");
+        params.put("dlqEnabled", "true");
+        params.put("dlqTopic", "placeholder");
+        params.put("dlqMaxRetries", "0");
+        params.put("pollingIntervalSeconds", "1");
+        params.put("batchTimeout", "250");
+
+        AtomicBoolean backendDown = new AtomicBoolean(true);
+        AtomicInteger failedAttempts = new AtomicInteger();
+        List<String> processed = java.util.Collections.synchronizedList(new ArrayList<>());
+        Processor processor = exchange -> {
+            String body = exchange.getIn().getBody(String.class);
+            if (body.startsWith("FAIL") && backendDown.get()) {
+                failedAttempts.incrementAndGet();
+                throw new RuntimeException("Simulated backend outage");
+            }
+            processed.add(body);
+        };
+
+        CpiKafkaPlusEndpoint endpoint = (CpiKafkaPlusEndpoint) ctx.getEndpoint(
+                KafkaTestInfrastructure.buildEndpointUri(topic, group, params));
+        // A name Kafka rejects: every DLQ write fails, like a missing topic or a missing ACL.
+        endpoint.setDlqTopic("not a valid topic");
+        CpiKafkaPlusConsumer consumer = new CpiKafkaPlusConsumer(endpoint, processor);
+
+        try {
+            consumer.doStart();
+            Method pollMethod = CpiKafkaPlusConsumer.class.getDeclaredMethod("poll");
+            pollMethod.setAccessible(true);
+
+            // Blocked, backed off and retried at least once.
+            await().atMost(Duration.ofSeconds(60))
+                    .pollInterval(Duration.ofMillis(200))
+                    .until(() -> {
+                        pollMethod.invoke(consumer);
+                        return failedAttempts.get() >= 2;
+                    });
+            Assert.assertEquals("nothing after the record whose DLQ write failed may be processed",
+                    java.util.Collections.singletonList("ok-0"), processed);
+            Assert.assertEquals(1L, committedOffset(group, topic));
+
+            backendDown.set(false);
+            await().atMost(Duration.ofSeconds(30))
+                    .pollInterval(Duration.ofMillis(200))
+                    .until(() -> {
+                        pollMethod.invoke(consumer);
+                        return processed.size() == 3;
+                    });
+        } finally {
+            consumer.doStop();
+        }
+
+        Assert.assertEquals(Arrays.asList("ok-0", "FAIL-1", "ok-2"), processed);
+        Assert.assertEquals(3L, committedOffset(group, topic));
+    }
+
+    private static long committedOffset(String group, String topic) throws Exception {
+        java.util.Properties props = new java.util.Properties();
+        props.put(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, KafkaTestInfrastructure.getBootstrapServers());
+        try (Admin admin = Admin.create(props)) {
+            OffsetAndMetadata committed = admin.listConsumerGroupOffsets(group)
+                    .partitionsToOffsetAndMetadata().get()
+                    .get(new TopicPartition(topic, 0));
+            return committed != null ? committed.offset() : -1L;
+        }
+    }
 
     private void startAndPoll(CpiKafkaPlusConsumer consumer) throws Exception {
         consumer.doStart();

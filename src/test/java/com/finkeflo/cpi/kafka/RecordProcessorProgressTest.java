@@ -353,6 +353,25 @@ public class RecordProcessorProgressTest {
     }
 
     @Test
+    public void successfulBatchIsCommittedOnce() throws Exception {
+        AtomicInteger commits = new AtomicInteger();
+        MockConsumer<byte[], byte[]> consumer = new MockConsumer<byte[], byte[]>("earliest") {
+            @Override
+            public synchronized void commitSync(Map<TopicPartition, OffsetAndMetadata> offsets) {
+                commits.incrementAndGet();
+                super.commitSync(offsets);
+            }
+        };
+        fill(consumer, Collections.singletonMap(P0, Arrays.asList("a", "b")));
+        RecordProcessor processor = processor(batchEndpoint(false, null), null, null);
+
+        processBatch(processor, consumer);
+
+        Assert.assertEquals("one broker round trip per batch", 1, commits.get());
+        Assert.assertEquals(2L, committed(consumer, P0));
+    }
+
+    @Test
     public void individualFallbackStopsAtTheFirstBlockedRecord() throws Exception {
         failing.addAll(Arrays.asList("0:0-2", "0:1-1"));
         MockConsumer<byte[], byte[]> consumer = consumerWith(P0, "a", "b", "c");
