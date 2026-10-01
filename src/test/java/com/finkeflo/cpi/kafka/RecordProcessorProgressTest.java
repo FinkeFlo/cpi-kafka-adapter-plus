@@ -130,10 +130,24 @@ public class RecordProcessorProgressTest {
     }
 
     @Test
-    public void withoutDlqTheFailedRecordIsSkipped() throws Exception {
+    public void withoutDlqTheFailedRecordIsRetriedByDefault() throws Exception {
         failing.add("0:1");
         MockConsumer<byte[], byte[]> consumer = consumerWith(P0, "a", "b", "c");
         RecordProcessor processor = processor(endpoint(false, null), null, null);
+
+        PollProgress progress = processSingle(processor, consumer);
+
+        Assert.assertEquals(Arrays.asList("0:0", "0:1"), invoked);
+        Assert.assertEquals(1L, committed(consumer, P0));
+        Assert.assertEquals(1L, consumer.position(P0));
+        Assert.assertTrue(progress.isBlocked(P0));
+    }
+
+    @Test
+    public void withoutDlqSkipFailedMessagesSkipsTheFailedRecord() throws Exception {
+        failing.add("0:1");
+        MockConsumer<byte[], byte[]> consumer = consumerWith(P0, "a", "b", "c");
+        RecordProcessor processor = processor(skip(endpoint(false, null)), null, null);
 
         processSingle(processor, consumer);
 
@@ -198,6 +212,19 @@ public class RecordProcessorProgressTest {
     }
 
     @Test
+    public void errorHandlingIsCaseInsensitive() throws Exception {
+        failing.add("0:0");
+        MockConsumer<byte[], byte[]> consumer = consumerWith(P0, "a", "b");
+        CpiKafkaPlusEndpoint endpoint = endpoint(false, null);
+        endpoint.setErrorHandling("skip");
+        RecordProcessor processor = processor(endpoint, null, null);
+
+        processSingle(processor, consumer);
+
+        Assert.assertEquals(2L, committed(consumer, P0));
+    }
+
+    @Test
     public void stopRequestRewindsTheRemainingRecords() throws Exception {
         stopAfterFirstRecord.set(true);
         MockConsumer<byte[], byte[]> consumer = consumerWith(P0, "a", "b", "c");
@@ -213,9 +240,22 @@ public class RecordProcessorProgressTest {
     // --- deserialization failures no longer escape the poll ---
 
     @Test
-    public void deserializationFailureWithoutDlqSkipsOnlyThatRecord() throws Exception {
+    public void deserializationFailureWithoutDlqIsRetriedByDefault() throws Exception {
         MockConsumer<byte[], byte[]> consumer = consumerWith(P0, "BAD", "b");
         CpiKafkaPlusEndpoint endpoint = avroEndpoint(false);
+        RecordProcessor processor = processor(endpoint, null, failingAvro(endpoint));
+
+        processSingle(processor, consumer);
+
+        Assert.assertTrue(invoked.isEmpty());
+        Assert.assertEquals(-1L, committed(consumer, P0));
+        Assert.assertEquals(0L, consumer.position(P0));
+    }
+
+    @Test
+    public void deserializationFailureWithoutDlqSkipsOnlyThatRecordWhenSkipping() throws Exception {
+        MockConsumer<byte[], byte[]> consumer = consumerWith(P0, "BAD", "b");
+        CpiKafkaPlusEndpoint endpoint = skip(avroEndpoint(false));
         RecordProcessor processor = processor(endpoint, null, failingAvro(endpoint));
 
         processSingle(processor, consumer);
@@ -252,7 +292,7 @@ public class RecordProcessorProgressTest {
     }
 
     @Test
-    public void schemaInvalidRecordWithoutDlqIsDroppedAsDocumented() throws Exception {
+    public void schemaInvalidRecordWithoutDlqIsDroppedEvenWhenRetrying() throws Exception {
         MockConsumer<byte[], byte[]> consumer = consumerWith(P0, "{}", "{\"id\":\"1\"}");
         RecordProcessor processor = processor(endpoint(false, SCHEMA), null, null);
 
@@ -324,10 +364,22 @@ public class RecordProcessorProgressTest {
     }
 
     @Test
-    public void failedBatchWithoutDlqIsSkipped() throws Exception {
+    public void failedBatchWithoutDlqIsRetriedByDefault() throws Exception {
         failing.add("0:0-1");
         MockConsumer<byte[], byte[]> consumer = consumerWith(P0, "a", "b");
         RecordProcessor processor = processor(batchEndpoint(false, null), null, null);
+
+        processBatch(processor, consumer);
+
+        Assert.assertEquals(-1L, committed(consumer, P0));
+        Assert.assertEquals(0L, consumer.position(P0));
+    }
+
+    @Test
+    public void failedBatchWithoutDlqIsSkippedWhenSkipping() throws Exception {
+        failing.add("0:0-1");
+        MockConsumer<byte[], byte[]> consumer = consumerWith(P0, "a", "b");
+        RecordProcessor processor = processor(skip(batchEndpoint(false, null)), null, null);
 
         processBatch(processor, consumer);
 
@@ -337,7 +389,7 @@ public class RecordProcessorProgressTest {
 
     @Test
     public void batchFormatFailureWithoutDlqDoesNotEscapeThePoll() throws Exception {
-        CpiKafkaPlusEndpoint endpoint = batchEndpoint(false, null);
+        CpiKafkaPlusEndpoint endpoint = skip(batchEndpoint(false, null));
         endpoint.setSchemaRegistryEnabled(true);
         endpoint.setSchemaRegistryUrl("http://localhost:1");
         endpoint.setAvroValueDeserialization(true);
@@ -442,6 +494,11 @@ public class RecordProcessorProgressTest {
             endpoint.setJsonSchemaValidation(true);
             endpoint.setJsonSchema(jsonSchema);
         }
+        return endpoint;
+    }
+
+    private static CpiKafkaPlusEndpoint skip(CpiKafkaPlusEndpoint endpoint) {
+        endpoint.setErrorHandling("SKIP");
         return endpoint;
     }
 

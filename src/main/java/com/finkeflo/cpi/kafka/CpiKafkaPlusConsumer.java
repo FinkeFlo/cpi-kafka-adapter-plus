@@ -255,6 +255,13 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
         boolean streaming = endpoint.isStreamingMode();
 
         // Consumer-specific validations
+        String errorHandling = endpoint.getErrorHandling();
+        if (errorHandling == null
+                || !("RETRY".equalsIgnoreCase(errorHandling) || "SKIP".equalsIgnoreCase(errorHandling))) {
+            throw new IllegalArgumentException(
+                    "errorHandling must be RETRY (Retry Failed Message) or SKIP (Skip Failed Message), got: "
+                    + errorHandling);
+        }
         if (endpoint.isDlqEnabled()) {
             String dlqTopic = endpoint.getDlqTopic();
             if (dlqTopic == null || dlqTopic.trim().isEmpty()) {
@@ -265,8 +272,9 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
         // Drain- and interval-related validations only apply to SCHEDULED. In STREAMING these
         // fields are documented as ignored, so a stale value (e.g. drainEnabled=true left over
         // from a SCHEDULED configuration) must not prevent the iFlow from starting.
-        if (!streaming) {
-            if (endpoint.isDrainEnabled() && "AUTO".equalsIgnoreCase(endpoint.getCommitStrategy())) {
+        // The drain fields are hidden and ignored while drain is off (#174).
+        if (!streaming && endpoint.isDrainEnabled()) {
+            if ("AUTO".equalsIgnoreCase(endpoint.getCommitStrategy())) {
                 throw new IllegalArgumentException(
                         "Drain mode requires commitStrategy=BATCH_COMPLETE. "
                         + "AUTO commit cannot guarantee at-least-once delivery during drain loops.");
@@ -286,7 +294,9 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
             throw new IllegalArgumentException(
                     "maxPartitionFetchSizeKb must be between 1 and 51200 (50 MB).");
         }
-        if (endpoint.getRetryDelaySeconds() < 0 || endpoint.getRetryDelaySeconds() > 300) {
+        // Used by the DLQ retries and by Retry Failed Message; without either it has no effect (#174).
+        boolean retryDelayUsed = endpoint.isDlqEnabled() || !endpoint.isSkipFailedMessages();
+        if (retryDelayUsed && (endpoint.getRetryDelaySeconds() < 0 || endpoint.getRetryDelaySeconds() > 300)) {
             throw new IllegalArgumentException(
                     "retryDelaySeconds must be between 0 and 300, got: "
                     + endpoint.getRetryDelaySeconds());

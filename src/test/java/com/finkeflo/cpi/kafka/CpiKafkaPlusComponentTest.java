@@ -382,6 +382,13 @@ public class CpiKafkaPlusComponentTest {
     }
 
     @Test
+    public void testErrorHandlingDefaultsToRetry() throws Exception {
+        CpiKafkaPlusEndpoint endpoint = new CpiKafkaPlusEndpoint();
+        Assert.assertEquals("errorHandling should default to RETRY", "RETRY", endpoint.getErrorHandling());
+        Assert.assertFalse(endpoint.isSkipFailedMessages());
+    }
+
+    @Test
     public void testSmartRetryEndpointProperties() throws Exception {
         CpiKafkaPlusEndpoint endpoint = new CpiKafkaPlusEndpoint();
         endpoint.setRetryOnlyTransientErrors(false);
