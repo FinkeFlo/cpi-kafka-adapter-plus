@@ -132,6 +132,21 @@ public class PollProgressTest {
     }
 
     @Test
+    public void blockCurrentLeavesAnAlreadyResolvedRecordAlone() {
+        // A Throwable escaping after the record was processed (e.g. from the error reporting) must
+        // not send that record through the route a second time.
+        PollProgress progress = new PollProgress(records(P0, 1, 2, 3));
+
+        progress.processing(P0, 2);
+        progress.resolved(P0, 1);
+        progress.resolved(P0, 2);
+        progress.blockCurrent();
+
+        Assert.assertFalse(progress.isBlocked(P0));
+        Assert.assertEquals(3L, progress.commitOffset(P0));
+    }
+
+    @Test
     public void blockCurrentWithoutCurrentRecordIsANoOp() {
         PollProgress progress = new PollProgress(records(P0, 1));
 

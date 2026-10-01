@@ -128,11 +128,19 @@ final class PollProgress {
         currentOffset = offset;
     }
 
-    /** Blocks the record being processed. No-op if no record is being processed. */
+    /**
+     * Blocks the record being processed. No-op if no record is being processed, or if it was already
+     * resolved: a Throwable escaping after that point must not run the record a second time.
+     */
     void blockCurrent() {
-        if (currentPartition != null) {
-            blocked(currentPartition, currentOffset);
+        if (currentPartition == null) {
+            return;
         }
+        PartitionState state = partitions.get(currentPartition);
+        if (state != null && state.resolved.contains(currentOffset)) {
+            return;
+        }
+        blocked(currentPartition, currentOffset);
     }
 
     /**

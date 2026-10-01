@@ -833,11 +833,17 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
             LOG.warn("[CPI-KAFKA-PLUS-DIAG] rewind failed: exClass={} exMsg='{}'",
                     e.getClass().getName(), e.getMessage());
         }
+        // doStop() clears the backoff once its bounded wait for this thread is over; a poll that
+        // outlives it has nothing left to pause.
+        PartitionBackoff backoff = retryBackoff;
+        if (backoff == null) {
+            return;
+        }
         long now = System.currentTimeMillis();
         for (TopicPartition tp : progress.partitions()) {
             Long blockedAt = progress.blockedOffset(tp);
             if (blockedAt != null) {
-                long delayMs = retryBackoff.blocked(tp, blockedAt, now);
+                long delayMs = backoff.blocked(tp, blockedAt, now);
                 pauseForBackoff(tp);
                 AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("consumer.partition.retry")
                         .with("topic", tp.topic())
@@ -846,7 +852,7 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
                         .with("retryInMs", delayMs)
                         .with("consequence", "nothing at or after this offset is committed until it succeeds"));
             } else if (progress.commitOffset(tp) >= 0) {
-                retryBackoff.progressed(tp);
+                backoff.progressed(tp);
             }
         }
     }
