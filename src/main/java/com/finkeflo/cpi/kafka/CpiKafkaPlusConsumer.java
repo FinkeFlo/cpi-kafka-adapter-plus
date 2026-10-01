@@ -197,6 +197,11 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
         public Exchange createExchange() {
             return endpoint.createExchange();
         }
+
+        @Override
+        public boolean isStopRequested() {
+            return shutdownRequested;
+        }
     };
 
     public CpiKafkaPlusConsumer(CpiKafkaPlusEndpoint endpoint, Processor processor) {

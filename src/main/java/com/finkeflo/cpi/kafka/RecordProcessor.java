@@ -157,11 +157,13 @@ final class RecordProcessor {
             }
 
             for (int i = 0; i < partitionRecords.size(); i += batchSize) {
-                if (stopRequested(progress) || progress.isBlocked(tp)) {
-                    break;
-                }
                 List<ConsumerRecord<byte[], byte[]>> batch = partitionRecords.subList(
                         i, Math.min(i + batchSize, partitionRecords.size()));
+                // A block set by the schema filter still lets the valid records before it run.
+                Long blockedAt = progress.blockedOffset(tp);
+                if (stopRequested(progress) || (blockedAt != null && batch.get(0).offset() >= blockedAt)) {
+                    break;
+                }
 
                 totalProcessed += processOneBatch(kafkaConsumer, batch, commitAfterSuccess,
                         schemaValidationFailures, dlqCount, cache, progress);

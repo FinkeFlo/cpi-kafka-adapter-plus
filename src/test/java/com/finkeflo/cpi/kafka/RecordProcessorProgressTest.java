@@ -294,6 +294,19 @@ public class RecordProcessorProgressTest {
     }
 
     @Test
+    public void validRecordsBeforeAFilterBlockedRecordAreProcessed() throws Exception {
+        // The DLQ write for the invalid record at offset 1 fails: offset 0 must still run.
+        MockConsumer<byte[], byte[]> consumer = consumerWith(P0, "{\"id\":\"a\"}", "{}", "{\"id\":\"c\"}");
+        RecordProcessor processor = processor(batchEndpoint(true, SCHEMA), failingDlq(), null);
+
+        processBatch(processor, consumer);
+
+        Assert.assertEquals(Collections.singletonList("0:0-0"), invoked);
+        Assert.assertEquals(1L, committed(consumer, P0));
+        Assert.assertEquals(1L, consumer.position(P0));
+    }
+
+    @Test
     public void deserializationFailureInTheSchemaFilterReachesTheDlq() throws Exception {
         CpiKafkaPlusEndpoint endpoint = batchEndpoint(true, SCHEMA);
         endpoint.setSchemaRegistryEnabled(true);
