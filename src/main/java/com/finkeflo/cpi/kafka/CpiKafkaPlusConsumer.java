@@ -712,9 +712,11 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
                 //   condition can be simplified: batchMode + batchOutputFormat != SPLIT_EXCHANGES
                 //   becomes just batchMode (and SPLIT_EXCHANGES becomes unreachable dead code).
                 if (endpoint.isBatchMode() && !"SPLIT_EXCHANGES".equalsIgnoreCase(endpoint.getBatchOutputFormat())) {
-                    totalProcessed += recordProcessor.processBatchRecords(kafkaConsumer, records, isBatchComplete);
+                    totalProcessed += recordProcessor.processBatchRecords(kafkaConsumer, records, isBatchComplete,
+                            new PollProgress(records));
                 } else {
-                    totalProcessed += recordProcessor.processSingleRecords(kafkaConsumer, records, isBatchComplete);
+                    totalProcessed += recordProcessor.processSingleRecords(kafkaConsumer, records, isBatchComplete,
+                            new PollProgress(records));
                 }
                 if (circuitBreaker != null) {
                     circuitBreaker.recordSuccess();

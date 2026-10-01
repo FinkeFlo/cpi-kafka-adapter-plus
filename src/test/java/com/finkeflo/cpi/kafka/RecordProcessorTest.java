@@ -495,7 +495,10 @@ public class RecordProcessorTest {
                 "test-topic", 0, 42L, "key".getBytes(StandardCharsets.UTF_8),
                 "{\"msg\":\"hello\"}".getBytes(StandardCharsets.UTF_8));
 
-        processor.processRecordsIndividually(null, Arrays.asList(record), false);
+        processor.processRecordsIndividually(null, Arrays.asList(record), false,
+                new PollProgress(new org.apache.kafka.clients.consumer.ConsumerRecords<>(
+                        java.util.Collections.singletonMap(new TopicPartition("test-topic", 0),
+                                Arrays.asList(record)))));
 
         Assert.assertEquals(1, captured.size());
         Message msg = captured.get(0).getIn();
@@ -529,7 +532,7 @@ public class RecordProcessorTest {
                                         "test-topic", 0, 7L, null,
                                         "hello".getBytes(StandardCharsets.UTF_8)))));
 
-        processor.processSingleRecords(null, records, false);
+        processor.processSingleRecords(null, records, false, new PollProgress(records));
 
         Assert.assertEquals(1, captured.size());
         Message msg = captured.get(0).getIn();
