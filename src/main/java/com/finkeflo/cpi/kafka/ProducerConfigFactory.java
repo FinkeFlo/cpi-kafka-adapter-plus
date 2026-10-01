@@ -158,9 +158,10 @@ public final class ProducerConfigFactory {
         // InitProducerId v6; no released broker advertises that version, so this is defence in depth.
         props.put(ProducerConfig.TRANSACTION_TWO_PHASE_COMMIT_ENABLE_CONFIG, false);
 
-        // transaction.timeout.ms is only meaningful on a transactional producer, and the option is
-        // rejected outright by a non-transactional one, so it is set exactly where it applies.
-        if (endpoint.isEnableTransactions()) {
+        // transaction.timeout.ms only means something on a transactional producer. kafka-clients 4.3.1
+        // accepts it on a non-transactional one and ignores it; it is still set only where it applies,
+        // and transactions apply to batches only.
+        if (endpoint.isTransactionalBatching()) {
             int transactionTimeoutMs = transactionTimeoutMs(deliveryMs);
             props.put(ProducerConfig.TRANSACTION_TIMEOUT_CONFIG, transactionTimeoutMs);
             LOG.info("[CPI-KAFKA-PLUS-DIAG] buildProducerProperties: transaction.timeout.ms={} derived from "

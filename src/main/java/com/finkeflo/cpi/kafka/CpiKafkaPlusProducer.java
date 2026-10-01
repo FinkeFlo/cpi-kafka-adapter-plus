@@ -266,7 +266,15 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
 
         tracingHelper = new AdapterTracingHelper(endpoint);
 
-        if (endpoint.isEnableTransactions()) {
+        if (endpoint.isEnableTransactions() && !endpoint.isTransactionalBatching()) {
+            // ERROR because nothing below WARN reaches the tenant trace; once per deployment.
+            AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("producer.config.ineffective")
+                    .with("parameter", "enableTransactions")
+                    .with("producerBatchMode", endpoint.getProducerBatchMode())
+                    .with("reason", "transactions apply to batches only; single messages are sent "
+                            + "by the shared, non-transactional producer"));
+        }
+        if (endpoint.isTransactionalBatching()) {
             if (endpoint.getTransactionalIdPrefix() == null || endpoint.getTransactionalIdPrefix().trim().isEmpty()) {
                 throw new IllegalArgumentException(
                         "Please configure transactionalIdPrefix — it is required whenever "
@@ -362,6 +370,9 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
                     + maxAttempts + "). This is the total number of attempts, not the number of "
                     + "additional ones; 1 switches the retry off.");
         }
+        if (maxAttempts == 1) {
+            return;  // feature off: the other retry fields have no effect and must not block (#174)
+        }
         int delaySeconds = endpoint.getProducerRetryDelaySeconds();
         if (delaySeconds < 1 || delaySeconds > 30) {
             throw new IllegalArgumentException(
@@ -378,11 +389,8 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
                     + budgetSeconds + ").");
         }
 
-        if (maxAttempts == 1) {
-            return;  // feature off: nothing below can apply
-        }
-
-        boolean transactional = endpoint.isEnableTransactions();
+        // The worst case of the path the messages actually take: transactions apply to batches only.
+        boolean transactional = endpoint.isTransactionalBatching();
         boolean batchMode = !"NONE".equalsIgnoreCase(endpoint.getProducerBatchMode());
 
         // A silently ineffective parameter is worse than no parameter: without transactions a
@@ -394,6 +402,7 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
                     + "sent batch cannot be retried without duplicating records. Enable "
                     + "transactions to use producer retry for batches.",
                     maxAttempts, endpoint.getProducerBatchMode());
+            return;  // no retry on this path, so its worst case must not block the deployment
         }
 
         if (transactional && endpoint.getMaxConcurrentTransactions() == 1) {
@@ -605,7 +614,7 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
         // When every exchange goes through the transactional path (enableTransactions with a batch
         // mode), the shared non-transactional KafkaProducer is never used and must not gate
         // processing — only the serialization/validation helpers are needed here.
-        boolean transactionalOnlyPath = endpoint.isEnableTransactions() && !"NONE".equalsIgnoreCase(batchMode);
+        boolean transactionalOnlyPath = endpoint.isTransactionalBatching();
 
         if (transactionalOnlyPath) {
             ensureHelpersInitialized();

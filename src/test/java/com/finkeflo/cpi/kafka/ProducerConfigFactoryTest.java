@@ -82,6 +82,21 @@ public class ProducerConfigFactoryTest {
     }
 
     @Test
+    public void transactionTimeoutIsOnlySetWhereTransactionsApply() throws Exception {
+        CpiKafkaPlusEndpoint single = createEndpoint();
+        single.setEnableTransactions(true);
+        single.setProducerBatchMode("NONE");
+        CpiKafkaPlusEndpoint batch = createEndpoint();
+        batch.setEnableTransactions(true);
+        batch.setProducerBatchMode("JSON_ARRAY");
+
+        Assert.assertNull("single messages are sent by the non-transactional shared producer",
+                ProducerConfigFactory.buildProducerProperties(single).get(ProducerConfig.TRANSACTION_TIMEOUT_CONFIG));
+        Assert.assertNotNull(
+                ProducerConfigFactory.buildProducerProperties(batch).get(ProducerConfig.TRANSACTION_TIMEOUT_CONFIG));
+    }
+
+    @Test
     public void ordinarySizesAreUnchanged() throws Exception {
         CpiKafkaPlusEndpoint endpoint = createEndpoint();
         endpoint.setMaxRequestSizeKb(1024);
@@ -169,6 +184,7 @@ public class ProducerConfigFactoryTest {
     public void transactionTimeoutCoversTheDeliveryTimeout() throws Exception {
         CpiKafkaPlusEndpoint endpoint = createEndpoint();
         endpoint.setEnableTransactions(true);
+        endpoint.setProducerBatchMode("JSON_ARRAY");   // transactions apply to batches only
         endpoint.setDeliveryTimeoutSeconds(120);
 
         Properties props = ProducerConfigFactory.buildProducerProperties(endpoint);
@@ -183,6 +199,7 @@ public class ProducerConfigFactoryTest {
         // before this change, or an upgrade would tighten a bound nobody asked to tighten.
         CpiKafkaPlusEndpoint endpoint = createEndpoint();
         endpoint.setEnableTransactions(true);
+        endpoint.setProducerBatchMode("JSON_ARRAY");   // transactions apply to batches only
         endpoint.setDeliveryTimeoutSeconds(5);
 
         Properties props = ProducerConfigFactory.buildProducerProperties(endpoint);
@@ -195,6 +212,7 @@ public class ProducerConfigFactoryTest {
     public void transactionTimeoutIsCappedAtTheBrokerMaximum() throws Exception {
         CpiKafkaPlusEndpoint endpoint = createEndpoint();
         endpoint.setEnableTransactions(true);
+        endpoint.setProducerBatchMode("JSON_ARRAY");   // transactions apply to batches only
         endpoint.setDeliveryTimeoutSeconds(10_000);
 
         Properties props = ProducerConfigFactory.buildProducerProperties(endpoint);

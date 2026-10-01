@@ -556,6 +556,14 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
     public void setConsumptionMode(String consumptionMode) { this.consumptionMode = consumptionMode; }
 
     /** True when the consumer runs in greedy STREAMING mode instead of scheduled polling. */
+    /**
+     * Transactions apply to batches only. With {@code producerBatchMode=NONE} every message goes
+     * through the shared, non-transactional producer, whatever {@code enableTransactions} says.
+     */
+    public boolean isTransactionalBatching() {
+        return enableTransactions && !"NONE".equalsIgnoreCase(producerBatchMode);
+    }
+
     public boolean isStreamingMode() { return "STREAMING".equalsIgnoreCase(consumptionMode); }
 
     public boolean isDrainEnabled() { return drainEnabled; }
