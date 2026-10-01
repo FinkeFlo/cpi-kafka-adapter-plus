@@ -156,7 +156,7 @@ adapter:
 
 | Option | Behavior |
 |--------|----------|
-| **Retry Failed Message** (`RETRY`, default) | The record is retried at the same offset until it succeeds. Its partition waits meanwhile: nothing after the record is processed or committed. The retries back off — **Retry Delay** (at least 1 second), doubling up to 5 minutes — and every attempt writes a failed message processing log. Other partitions keep flowing. Nothing is lost. |
+| **Retry Failed Message** (`RETRY`, default) | The record is retried at the same offset until it succeeds. Its partition waits meanwhile: nothing after the record is processed or committed. The retries back off — **Retry Delay** (at least 1 second), doubling up to 5 minutes — and every attempt writes a failed message processing log. Other partitions keep flowing, unless Auto-Pause is enabled (see below). Nothing is lost. |
 | **Skip Failed Message** (`SKIP`) | The failed message processing log is written, the record (or batch) is skipped and its offset is committed. The record is lost (at-most-once). |
 
 This applies to failed IFlow processing (batch and non-batch), to batches that cannot be formatted
@@ -168,9 +168,14 @@ and to records that cannot be deserialized (Avro). It does not apply to:
 | A failure inside the adapter itself (not in the IFlow) | The record is always retried, whatever the setting. |
 
 > **Retry Failed Message and poison pills:** a record that can never be processed blocks its
-> partition until you fix the IFlow, the backend or the data. Enable **Auto-Pause on Errors** to
-> stop hammering a backend that is down, and a Dead Letter Queue for any flow where a single bad
-> record must not hold up the others.
+> partition until you fix the IFlow, the backend or the data. Use a Dead Letter Queue for any flow
+> where a single bad record must not hold up the others.
+>
+> **Retry Failed Message and Auto-Pause:** every retry counts as a failure for **Auto-Pause on
+> Errors**. That is what you want during a backend outage: the consumer stops hammering the backend.
+> But a single record that can never succeed then pauses the **whole** consumer, all partitions,
+> again and again with a growing cooldown. Auto-Pause is the tool for backend outages, a DLQ the
+> tool for poison pills.
 
 ## DLQ Record Headers
 

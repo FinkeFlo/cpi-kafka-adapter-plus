@@ -335,7 +335,7 @@
                 </GuiLabels>
                 <AttributeReference>
                     <ReferenceName>errorHandling</ReferenceName>
-                    <description>What happens to a message whose processing fails when no Dead Letter Queue is enabled. Retry Failed Message (default) retries the same offset until it succeeds: the partition waits, every attempt writes a failed message processing log, and nothing is lost. Skip Failed Message continues with the next offset; the failed message is lost (at-most-once). With a Dead Letter Queue, failed messages go there instead and this setting has no effect.</description>
+                    <description>What happens to a message whose processing fails when no Dead Letter Queue is enabled. Retry Failed Message (default) retries the same offset until it succeeds: the partition waits, every attempt writes a failed message processing log, and nothing is lost. Skip Failed Message continues with the next offset; the failed message is lost (at-most-once). With Auto-Pause enabled every retry counts as a failure, so a message that can never succeed pauses the whole consumer: use a Dead Letter Queue for such messages. With a Dead Letter Queue, failed messages go there instead and this setting has no effect.</description>
                     <EditCondition>
                         <AttributeName>dlqEnabled</AttributeName>
                         <AttributeValue>false</AttributeValue>

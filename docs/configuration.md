@@ -107,7 +107,7 @@ For details on Avro integration, see [Avro / Schema Registry](features/avro-sche
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `errorHandling` | `RETRY` | **Sender (consumer) direction only.** What happens to a message whose processing fails when no DLQ is enabled. `RETRY` (*Retry Failed Message*) retries the same offset until it succeeds; the partition waits meanwhile. `SKIP` (*Skip Failed Message*) continues with the next offset; the failed message is lost (at-most-once). Has no effect while the DLQ is enabled. Available from metadata version 1.4; iFlows on an older version run with `RETRY`. |
+| `errorHandling` | `RETRY` | **Sender (consumer) direction only.** What happens to a message whose processing fails when no DLQ is enabled. `RETRY` (*Retry Failed Message*) retries the same offset until it succeeds; the partition waits meanwhile. `SKIP` (*Skip Failed Message*) continues with the next offset; the failed message is lost (at-most-once). Has no effect while the DLQ is enabled. Available from metadata version 1.4; iFlows on an older version (1.0 to 1.3) have no such field and run with `RETRY` — move them to 1.4 with *Update Version* to select `SKIP`. With **Auto-Pause** enabled every retry counts as a failure, so a message that can never succeed pauses the whole consumer; use a DLQ for such messages. |
 | `retryDelaySeconds` | `0` | **Sender (consumer) direction only.** Initial retry delay in seconds with exponential backoff, capped at 300 seconds. Applies to the retries before a message is dead-lettered and to *Retry Failed Message*, where the first wait is at least 1 second. The receiver direction uses `producerRetryDelaySeconds`, which is constant rather than exponential. |
 
 **Dead Letter Queue**
