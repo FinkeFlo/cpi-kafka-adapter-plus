@@ -23,9 +23,12 @@ package com.finkeflo.cpi.kafka;
 import static org.awaitility.Awaitility.await;
 
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 
@@ -37,6 +40,7 @@ import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
+import org.apache.kafka.common.errors.AuthenticationException;
 import org.apache.kafka.common.serialization.ByteArrayDeserializer;
 import org.junit.AfterClass;
 import org.junit.Assert;
@@ -108,6 +112,37 @@ public class AvroSerializationIT {
         Assert.assertEquals("ada@example.com", record.get("email").toString());
     }
 
+    @Test
+    public void testProducerKeepsAvroAfterRebuild() throws Exception {
+        String topic = "it-avro-rebuild-" + System.nanoTime();
+        KafkaTestInfrastructure.createTopic(topic, 1);
+
+        CpiKafkaPlusProducer producer = createAvroProducer(topic);
+        try {
+            producer.doStart();
+            send(producer, "{\"name\":\"before\",\"age\":1,\"email\":\"a@example.com\"}");
+
+            // Credential rotation is one of the errors that rebuild the shared producer.
+            producer.handleSendFailure(new AuthenticationException("SASL secret rotated"),
+                    "producer.single.send", new LinkedHashMap<String, String>());
+
+            send(producer, "{\"name\":\"after\",\"age\":2,\"email\":\"b@example.com\"}");
+        } finally {
+            producer.doStop();
+        }
+
+        List<byte[]> values = consumeRawValues(topic, 2);
+        Assert.assertEquals("precondition: the first record is Avro", 0x00, values.get(0)[0]);
+        Assert.assertEquals("the record sent after the rebuild must still be Avro (Confluent magic "
+                + "byte), not raw JSON", 0x00, values.get(1)[0]);
+    }
+
+    private void send(CpiKafkaPlusProducer producer, String json) throws Exception {
+        Exchange exchange = new DefaultExchange(ctx);
+        exchange.getIn().setBody(json);
+        producer.process(exchange);
+    }
+
     private CpiKafkaPlusProducer createAvroProducer(String topic) throws Exception {
         Map<String, String> params = new HashMap<String, String>();
         params.put("schemaRegistryEnabled", "true");
@@ -118,6 +153,29 @@ public class AvroSerializationIT {
         String uri = KafkaTestInfrastructure.buildEndpointUri(topic, "unused-avro-group", params);
         CpiKafkaPlusEndpoint endpoint = (CpiKafkaPlusEndpoint) ctx.getEndpoint(uri);
         return new CpiKafkaPlusProducer(endpoint);
+    }
+
+    private List<byte[]> consumeRawValues(String topic, int count) {
+        Properties props = new Properties();
+        props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, KafkaTestInfrastructure.getBootstrapServers());
+        props.put(ConsumerConfig.GROUP_ID_CONFIG, "test-avro-raw-consumer-" + System.nanoTime());
+        props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+        props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, ByteArrayDeserializer.class.getName());
+        props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, ByteArrayDeserializer.class.getName());
+
+        List<byte[]> values = new ArrayList<byte[]>();
+        try (KafkaConsumer<byte[], byte[]> consumer = new KafkaConsumer<byte[], byte[]>(props)) {
+            consumer.subscribe(Collections.singletonList(topic));
+            await().atMost(Duration.ofSeconds(10))
+                    .pollInterval(Duration.ofMillis(500))
+                    .until(() -> {
+                        for (ConsumerRecord<byte[], byte[]> record : consumer.poll(Duration.ofMillis(500))) {
+                            values.add(record.value());
+                        }
+                        return values.size() >= count;
+                    });
+        }
+        return values;
     }
 
     private GenericRecord consumeOneAvroRecord(String topic) {
