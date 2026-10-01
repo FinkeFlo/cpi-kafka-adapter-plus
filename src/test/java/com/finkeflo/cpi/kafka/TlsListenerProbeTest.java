@@ -229,12 +229,36 @@ public class TlsListenerProbeTest {
     }
 
     @Test
-    public void anUnreachableBrokerStaysInconclusiveSoKafkaReportsItInstead() {
+    public void anUnreachableBrokerIsReportedAsUnreachableAndDoesNotBlockTheStart() {
         // Port 1 is reserved and closed: connection refused, which says nothing about TLS.
-        Assert.assertEquals(TlsListenerProbe.Verdict.INCONCLUSIVE,
+        Assert.assertEquals(TlsListenerProbe.Verdict.UNREACHABLE,
                 TlsListenerProbe.probe("localhost", 1));
 
         TlsListenerProbe.assertNoTlsListener("localhost:1", "PLAINTEXT");
+    }
+
+    @Test
+    public void anUnreachableBrokerIsProbedAgainOnTheNextStart() {
+        // A first probe while the broker is down must not switch the protection off for the life
+        // of the JVM (the cache is static and survives redeploys) (#176).
+        final AtomicInteger calls = new AtomicInteger();
+        TlsListenerProbe.setProbeRunnerForTests(new TlsListenerProbe.ProbeRunner() {
+            @Override
+            public TlsListenerProbe.Verdict probe(String address) {
+                return calls.incrementAndGet() == 1
+                        ? TlsListenerProbe.Verdict.UNREACHABLE
+                        : TlsListenerProbe.Verdict.TLS;
+            }
+        });
+
+        TlsListenerProbe.assertNoTlsListener("broker1:9092", "PLAINTEXT");
+        try {
+            TlsListenerProbe.assertNoTlsListener("broker1:9092", "PLAINTEXT");
+            Assert.fail("the broker is reachable now and requires TLS");
+        } catch (IllegalStateException expected) {
+            Assert.assertTrue(expected.getMessage(), expected.getMessage().contains("requires TLS"));
+        }
+        Assert.assertEquals(2, calls.get());
     }
 
     @Test
