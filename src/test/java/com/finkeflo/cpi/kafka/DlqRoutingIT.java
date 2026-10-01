@@ -639,6 +639,67 @@ public class DlqRoutingIT {
         Assert.assertEquals(3L, committedOffset(group, topic));
     }
 
+    @Test
+    public void testWithoutDlqAFailedRecordIsRetriedByDefault() throws Exception {
+        String topic = "it-no-dlq-retry-" + System.nanoTime();
+        String group = "grp-no-dlq-retry-" + System.nanoTime();
+        KafkaTestInfrastructure.createTopic(topic, 1);
+        KafkaTestInfrastructure.produceStringMessages(topic,
+                Arrays.asList("k0", "k1", "k2"),
+                Arrays.asList("ok-0", "FAIL-1", "ok-2"));
+
+        Map<String, String> params = new HashMap<>();
+        params.put("batchMode", "false");
+        params.put("commitStrategy", "BATCH_COMPLETE");
+        params.put("pollingIntervalSeconds", "1");
+        params.put("batchTimeout", "250");
+
+        AtomicBoolean backendDown = new AtomicBoolean(true);
+        AtomicInteger failedAttempts = new AtomicInteger();
+        List<String> processed = java.util.Collections.synchronizedList(new ArrayList<>());
+        Processor processor = exchange -> {
+            String body = exchange.getIn().getBody(String.class);
+            if (body.startsWith("FAIL") && backendDown.get()) {
+                failedAttempts.incrementAndGet();
+                throw new RuntimeException("Simulated backend outage");
+            }
+            processed.add(body);
+        };
+
+        CpiKafkaPlusEndpoint endpoint = (CpiKafkaPlusEndpoint) ctx.getEndpoint(
+                KafkaTestInfrastructure.buildEndpointUri(topic, group, params));
+        CpiKafkaPlusConsumer consumer = new CpiKafkaPlusConsumer(endpoint, processor);
+
+        try {
+            consumer.doStart();
+            Method pollMethod = CpiKafkaPlusConsumer.class.getDeclaredMethod("poll");
+            pollMethod.setAccessible(true);
+
+            await().atMost(Duration.ofSeconds(60))
+                    .pollInterval(Duration.ofMillis(200))
+                    .until(() -> {
+                        pollMethod.invoke(consumer);
+                        return failedAttempts.get() >= 2;
+                    });
+            Assert.assertEquals("nothing after the failed record may be processed while it is retried",
+                    java.util.Collections.singletonList("ok-0"), processed);
+            Assert.assertEquals(1L, committedOffset(group, topic));
+
+            backendDown.set(false);
+            await().atMost(Duration.ofSeconds(30))
+                    .pollInterval(Duration.ofMillis(200))
+                    .until(() -> {
+                        pollMethod.invoke(consumer);
+                        return processed.size() == 3;
+                    });
+        } finally {
+            consumer.doStop();
+        }
+
+        Assert.assertEquals(Arrays.asList("ok-0", "FAIL-1", "ok-2"), processed);
+        Assert.assertEquals(3L, committedOffset(group, topic));
+    }
+
     private static long committedOffset(String group, String topic) throws Exception {
         java.util.Properties props = new java.util.Properties();
         props.put(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, KafkaTestInfrastructure.getBootstrapServers());

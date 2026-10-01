@@ -88,7 +88,7 @@ public class AutoPauseIT {
         // cooldown instead of being skipped together with the rest of its poll (#187).
         List<Long> offsets = runAutoPauseScenario(attempt -> {
             throw new DownstreamProcessingError("intentional auto-pause failure " + attempt);
-        }, MESSAGE_COUNT);
+        }, MESSAGE_COUNT, "RETRY");
 
         Assert.assertEquals(Arrays.asList(0L, 1L, 2L, 3L, 4L, 5L), offsets);
     }
@@ -97,10 +97,19 @@ public class AutoPauseIT {
     public void testAutoPausePausesOnRouteExceptions() throws Exception {
         // A route exception is handled inside the record processor and never reaches the consumer
         // as an exception, so auto-pause never fired for the failure it is recommended for (#182).
-        // Without a DLQ the failed records are skipped.
+        // With the default Retry Failed Message the failed record is retried after the cooldown.
         List<Long> offsets = runAutoPauseScenario(attempt -> {
             throw new IllegalStateException("backend unavailable " + attempt);
-        }, MESSAGE_COUNT - ERROR_THRESHOLD);
+        }, MESSAGE_COUNT, "RETRY");
+
+        Assert.assertEquals(Arrays.asList(0L, 1L, 2L, 3L, 4L, 5L), offsets);
+    }
+
+    @Test
+    public void testAutoPauseWithSkipFailedMessagesSkipsTheFailedRecords() throws Exception {
+        List<Long> offsets = runAutoPauseScenario(attempt -> {
+            throw new IllegalStateException("backend unavailable " + attempt);
+        }, MESSAGE_COUNT - ERROR_THRESHOLD, "SKIP");
 
         Assert.assertEquals(Arrays.asList(2L, 3L, 4L, 5L), offsets);
     }
@@ -111,7 +120,8 @@ public class AutoPauseIT {
      *
      * @return the offsets that were processed successfully, in order
      */
-    private List<Long> runAutoPauseScenario(Failure failure, int expectedSuccesses) throws Exception {
+    private List<Long> runAutoPauseScenario(Failure failure, int expectedSuccesses, String errorHandling)
+            throws Exception {
         String topic = "it-auto-pause-" + System.nanoTime();
         String group = "grp-auto-pause-" + System.nanoTime();
         KafkaTestInfrastructure.createTopic(topic, 1);
@@ -128,6 +138,7 @@ public class AutoPauseIT {
         params.put("autoPauseEnabled", "true");
         params.put("autoPauseErrorThreshold", String.valueOf(ERROR_THRESHOLD));
         params.put("autoPauseCooldownSeconds", String.valueOf(COOLDOWN_SECONDS));
+        params.put("errorHandling", errorHandling);
 
         final AtomicInteger attempts = new AtomicInteger();
         final List<String> successfulBodies = new ArrayList<String>();
