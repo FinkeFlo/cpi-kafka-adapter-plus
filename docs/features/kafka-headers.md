@@ -30,7 +30,7 @@ When `batchOutputFormat` is configured the adapter accumulates multiple records 
 | Header | Type | Description |
 |---|---|---|
 | `SAP_Sender` | `String` | Topic name |
-| `CpiKafkaPlusTopic` | `String` | Topic name |
+| `CpiKafkaPlusTopic` | `String` | Topic the batch was read from — a batch never spans topics, also on a channel subscribed to several |
 | `CpiKafkaPlusRecordCount` | `Integer` | Number of records in the batch |
 | `CpiKafkaPlusPayloadSize` | `Integer` | Total payload size in bytes |
 | `CpiKafkaPlusBatchOutputFormat` | `String` | Batch output format (`JSON_ARRAY`, `XML`, …) |

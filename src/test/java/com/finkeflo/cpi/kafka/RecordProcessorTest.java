@@ -106,6 +106,26 @@ public class RecordProcessorTest {
     }
 
     @Test
+    public void batchHeadersNameTheBatchTopicOnAMultiTopicChannel() throws Exception {
+        // A batch is formed per partition, so it never spans topics. The headers used to carry the
+        // whole comma-separated subscription instead of the topic the records came from (#176).
+        CpiKafkaPlusComponent component = new CpiKafkaPlusComponent();
+        try (DefaultCamelContext ctx = new DefaultCamelContext()) {
+            ctx.addComponent("cpi-kafka-plus", component);
+            ctx.start();
+            CpiKafkaPlusEndpoint endpoint = (CpiKafkaPlusEndpoint) ctx.getEndpoint(
+                    "cpi-kafka-plus:orders,payments?bootstrapServers=localhost:9092&groupId=my-group");
+            RecordProcessor rp = createProcessor(endpoint);
+            Message message = endpoint.createExchange().getIn();
+
+            rp.setBatchHeaders(message, Arrays.asList(rec("payments", 1, 7), rec("payments", 1, 8)), 0, 0, 10);
+
+            Assert.assertEquals("payments", message.getHeader("CpiKafkaPlusTopic"));
+            Assert.assertEquals("payments", message.getHeader("SAP_Sender"));
+        }
+    }
+
+    @Test
     public void testSetBatchHeadersIncludesDlqCountWhenDlqEnabled() throws Exception {
         CpiKafkaPlusComponent component = new CpiKafkaPlusComponent();
         try (DefaultCamelContext ctx = new DefaultCamelContext()) {
