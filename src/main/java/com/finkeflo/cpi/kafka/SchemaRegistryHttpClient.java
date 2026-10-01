@@ -321,6 +321,17 @@ final class SchemaRegistryHttpClient {
     // Utilities
     // -----------------------------------------------------------------------
 
+    /**
+     * The URL with any {@code user:password@} replaced by {@code ***@}, for log lines. A Schema
+     * Registry URL may carry credentials, and nothing that reaches the trace may show them (#177).
+     */
+    static String withoutUserInfo(String url) {
+        return url == null ? null : USER_INFO.matcher(url).replaceFirst("$1***@");
+    }
+
+    private static final java.util.regex.Pattern USER_INFO =
+            java.util.regex.Pattern.compile("^([A-Za-z][A-Za-z0-9+.-]*://)[^/@]*@");
+
     private static String normalizeUrl(String url) {
         if (url == null) return "";
         url = url.trim();

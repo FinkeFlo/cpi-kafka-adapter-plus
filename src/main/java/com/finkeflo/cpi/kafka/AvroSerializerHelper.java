@@ -80,7 +80,7 @@ public class AvroSerializerHelper implements Closeable {
 
         LOG.info("[CPI-KAFKA-PLUS-DIAG] Avro serializer initialized with Schema Registry at '{}', "
                 + "autoRegister={}, strategy={}",
-                endpoint.getSchemaRegistryUrl(), autoRegisterSchemas, strategyName);
+                SchemaRegistryHttpClient.withoutUserInfo(endpoint.getSchemaRegistryUrl()), autoRegisterSchemas, strategyName);
     }
 
     /**

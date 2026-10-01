@@ -67,7 +67,6 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
     /** Rate limit for {@code send.bundle-wiring-invalid}: every failing exchange hits it until the iFlow is redeployed. */
     private static final long CLASS_SPACE_GONE_LOG_INTERVAL_MS = 60_000L;
     private volatile long lastClassSpaceGoneLogMs;
-    private static final int MAX_CONSECUTIVE_SEND_FAILURES = 3;
     private static final Duration TXN_PRODUCER_CLOSE_TIMEOUT = Duration.ofSeconds(5);
     /**
      * Upper bound for {@code deliveryTimeoutSeconds} on a transactional channel. The adapter derives
@@ -1420,14 +1419,15 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
      * Records a failure of the shared, non-transactional producer.
      *
      * <p>The failure is <b>always</b> logged at ERROR. It previously was not: logging happened only
-     * when the cause matched a three-entry "fatal" allow-list or after
-     * {@code MAX_CONSECUTIVE_SEND_FAILURES} <i>consecutive</i> failures. A failure that was neither
-     * on the allow-list nor consecutive — because successful sends in between reset the counter via
-     * {@link #recordSendSuccess()} — produced no log line at all, which is how a production incident
-     * could occur repeatedly while this adapter stayed completely silent about it.
+     * when the cause matched a three-entry "fatal" allow-list or after a number of <i>consecutive</i>
+     * failures. A failure that was neither on the allow-list nor consecutive — because successful
+     * sends in between reset the counter via {@link #recordSendSuccess()} — produced no log line at
+     * all, which is how a production incident could occur repeatedly while this adapter stayed
+     * completely silent about it.
      *
-     * <p>The threshold now governs {@link #triggerReconnect()} only, which is what it was actually
-     * for. Both decisions are reported as fields so the log states why it did or did not reconnect.
+     * <p>Whether {@link #triggerReconnect()} rebuilds the producer is decided by the classification of
+     * the failure and a backoff between rebuilds, not by a failure count. Both decisions are reported
+     * as fields so the log states why it did or did not rebuild.
      *
      * @param operation stable, greppable name of the failing activity
      * @param context   the same key/value context handed to the Message Processing Log, so trace and
@@ -2026,10 +2026,13 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
     private void warnIfTopicMissing(String topic) {
         TopicCheckResult result = checkTopicExists(topic);
         if (result.state == TopicCheck.MISSING) {
-            LOG.warn("[CPI-KAFKA-PLUS-DIAG] Kafka topic '{}' does not exist on the broker. Sending to "
-                    + "this endpoint will fail until the topic is created (auto-create may be disabled "
-                    + "on this cluster). The route is started anyway so the topic can still be created "
-                    + "without a redeployment.", topic);
+            // ERROR, not WARN: nothing below ERROR reaches the tenant trace, so this deployment-time
+            // finding was invisible exactly where it is needed. Runs once per start (#177).
+            AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("producer.start.topic.missing")
+                    .with("topic", topic)
+                    .with("consequence", "sending to this endpoint fails until the topic is created; "
+                            + "the route is started anyway so the topic can be created without a "
+                            + "redeployment"));
             return;
         }
         if (result.state == TopicCheck.EXISTS) {
@@ -2045,11 +2048,14 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
         // first message is ever sent, rather than as a metadata timeout hours later.
         if (result.cause != null) {
             String hint = KafkaErrorHelper.tlsMismatchHint(endpoint.getSecurityProtocol());
-            LOG.warn("[CPI-KAFKA-PLUS-DIAG] Could not reach Kafka broker '{}' at startup to verify topic "
-                    + "'{}': {}.{} The route is started anyway; sending will report the same cause.",
-                    endpoint.getBootstrapServers(), topic,
-                    KafkaErrorHelper.describeChain(result.cause),
-                    hint == null ? "" : " " + hint);
+            AdapterDiagnostics.Event event = AdapterDiagnostics.event("producer.start.broker.unreachable")
+                    .with("bootstrapServers", endpoint.getBootstrapServers())
+                    .with("topic", topic)
+                    .with("consequence", "the route is started anyway; sending will report the same cause");
+            if (hint != null) {
+                event.with("hint", hint);
+            }
+            AdapterDiagnostics.error(LOG, event, result.cause);
         }
     }
 

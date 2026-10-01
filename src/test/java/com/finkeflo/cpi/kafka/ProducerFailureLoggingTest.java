@@ -34,7 +34,7 @@ import org.junit.Test;
  * Regression guard for the defect that made this adapter silent in production.
  *
  * <p>Send failures used to be logged only when the cause matched a three-entry "fatal" allow-list,
- * or after {@code MAX_CONSECUTIVE_SEND_FAILURES} <b>consecutive</b> failures. A failure that matched
+ * or after a number of <b>consecutive</b> failures. A failure that matched
  * neither — an unclassified runtime exception, with successful sends in between resetting the
  * counter — produced no log line whatsoever. These tests assert the property that fixes it: every
  * send failure yields exactly one ERROR line carrying its stack trace, from the very first

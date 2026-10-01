@@ -418,8 +418,9 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
 
     /**
      * Lazily initialize all Kafka resources (consumer, Avro helper, JSON Schema validator, DLQ helper)
-     * on the first poll. This ensures only the CPI node that holds the cluster lock and actually polls
-     * creates a KafkaConsumer, preventing partition starvation from idle consumers in the same group.
+     * on the first poll rather than at route start. The adapter does not request a CPI cluster lock,
+     * so every worker node that runs the route creates its own consumer and the group protocol
+     * spreads the partitions across them.
      */
     private void ensureInitialized() {
         if (initialized) {
