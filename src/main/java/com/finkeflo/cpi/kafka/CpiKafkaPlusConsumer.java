@@ -517,7 +517,10 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
                 jsonSchemaValidator = new JsonSchemaValidator(endpoint.getJsonSchema());
                 LOG.info("JSON Schema validation enabled for incoming messages");
             }
-            if (endpoint.isDlqEnabled()) {
+            // A reconnect runs this again. The DLQ helper survives it — it rebuilds its own producer
+            // when that breaks — because replacing it leaked the old producer's network thread,
+            // metadata connection and JMX registration on every reconnect (#171).
+            if (endpoint.isDlqEnabled() && dlqHelper == null) {
                 dlqHelper = new DlqProducerHelper(endpoint);
                 LOG.info("DLQ enabled: failed records will be routed to topic '{}' after {} retries",
                         endpoint.getDlqTopic(), endpoint.getDlqMaxRetries());
