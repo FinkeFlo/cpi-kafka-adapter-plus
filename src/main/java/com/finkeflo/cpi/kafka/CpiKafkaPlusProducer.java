@@ -67,7 +67,6 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
     /** Rate limit for {@code send.bundle-wiring-invalid}: every failing exchange hits it until the iFlow is redeployed. */
     private static final long CLASS_SPACE_GONE_LOG_INTERVAL_MS = 60_000L;
     private volatile long lastClassSpaceGoneLogMs;
-    private static final int MAX_CONSECUTIVE_SEND_FAILURES = 3;
     private static final Duration TXN_PRODUCER_CLOSE_TIMEOUT = Duration.ofSeconds(5);
     /**
      * Upper bound for {@code deliveryTimeoutSeconds} on a transactional channel. The adapter derives
@@ -143,7 +142,11 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
      */
     private final java.util.Set<String> prewarmingTopics =
             java.util.Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap<String, Boolean>());
-    private KafkaProducer<byte[], byte[]> kafkaProducer;
+    /**
+     * The shared producer. Volatile, and replaced or cleared only while holding the {@code this}
+     * monitor, so a reconnect cannot clear a producer that another thread has just built.
+     */
+    private volatile KafkaProducer<byte[], byte[]> kafkaProducer;
     /**
      * Creates the throw-away producer of a transactional attempt. A field rather than a direct
      * {@code new}, because it is the only seam through which a test can fail a specific phase
@@ -266,7 +269,15 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
 
         tracingHelper = new AdapterTracingHelper(endpoint);
 
-        if (endpoint.isEnableTransactions()) {
+        if (endpoint.isEnableTransactions() && !endpoint.isTransactionalBatching()) {
+            // ERROR because nothing below WARN reaches the tenant trace; once per deployment.
+            AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("producer.config.ineffective")
+                    .with("parameter", "enableTransactions")
+                    .with("producerBatchMode", endpoint.getProducerBatchMode())
+                    .with("reason", "transactions apply to batches only; single messages are sent "
+                            + "by the shared, non-transactional producer"));
+        }
+        if (endpoint.isTransactionalBatching()) {
             if (endpoint.getTransactionalIdPrefix() == null || endpoint.getTransactionalIdPrefix().trim().isEmpty()) {
                 throw new IllegalArgumentException(
                         "Please configure transactionalIdPrefix — it is required whenever "
@@ -362,6 +373,9 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
                     + maxAttempts + "). This is the total number of attempts, not the number of "
                     + "additional ones; 1 switches the retry off.");
         }
+        if (maxAttempts == 1) {
+            return;  // feature off: the other retry fields have no effect and must not block (#174)
+        }
         int delaySeconds = endpoint.getProducerRetryDelaySeconds();
         if (delaySeconds < 1 || delaySeconds > 30) {
             throw new IllegalArgumentException(
@@ -378,11 +392,8 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
                     + budgetSeconds + ").");
         }
 
-        if (maxAttempts == 1) {
-            return;  // feature off: nothing below can apply
-        }
-
-        boolean transactional = endpoint.isEnableTransactions();
+        // The worst case of the path the messages actually take: transactions apply to batches only.
+        boolean transactional = endpoint.isTransactionalBatching();
         boolean batchMode = !"NONE".equalsIgnoreCase(endpoint.getProducerBatchMode());
 
         // A silently ineffective parameter is worse than no parameter: without transactions a
@@ -394,6 +405,7 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
                     + "sent batch cannot be retried without duplicating records. Enable "
                     + "transactions to use producer retry for batches.",
                     maxAttempts, endpoint.getProducerBatchMode());
+            return;  // no retry on this path, so its worst case must not block the deployment
         }
 
         if (transactional && endpoint.getMaxConcurrentTransactions() == 1) {
@@ -432,6 +444,7 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
         consecutiveTxnSendFailures = 0;
         consecutiveInitFailures = 0;
         closeProducerQuietly();
+        closeAvroHelperQuietly();
         jsonSchemaValidator = null;
         if (tracingHelper != null) {
             tracingHelper.publishConnectionStatus(false, null);
@@ -472,13 +485,15 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
      * shared (non-transactional) KafkaProducer. This lets a purely transactional producer
      * (enableTransactions=true with a batch mode) become usable without ever creating the unused
      * shared producer connection.
+     *
+     * @return true if helpers are ready
      */
-    private void ensureHelpersInitialized() {
+    private boolean ensureHelpersInitialized() {
         if (helpersInitialized) {
-            return;
+            return true;
         }
         synchronized (this) {
-            ensureHelpersInitializedLocked();
+            return ensureHelpersInitializedLocked();
         }
     }
 
@@ -549,6 +564,18 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
         }
     }
 
+    private IllegalStateException initFailure(String component) {
+        String msg = component + " not initialized — init failed, will retry on next exchange";
+        if (lastInitException != null) {
+            msg += ". Root cause: " + KafkaErrorHelper.describeChain(lastInitException);
+        }
+        // Do not pass lastInitException as the cause: CPI's HTTP adapter surfaces
+        // getCause().getMessage() rather than this exception's own message, which would
+        // swallow the descriptive chain we just built. The full stack trace is already
+        // logged by logInitFailure(); we only need a readable message here.
+        return new IllegalStateException(msg);
+    }
+
     private void logInitFailure(String component, Throwable e) {
         consecutiveInitFailures++;
         // Always ERROR. The first nine attempts used to be WARN, which does not reach the CPI
@@ -605,22 +632,17 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
         // When every exchange goes through the transactional path (enableTransactions with a batch
         // mode), the shared non-transactional KafkaProducer is never used and must not gate
         // processing — only the serialization/validation helpers are needed here.
-        boolean transactionalOnlyPath = endpoint.isEnableTransactions() && !"NONE".equalsIgnoreCase(batchMode);
+        boolean transactionalOnlyPath = endpoint.isTransactionalBatching();
 
         if (transactionalOnlyPath) {
-            ensureHelpersInitialized();
+            // Without the Avro helper the batch would be committed as raw JSON.
+            if (!ensureHelpersInitialized()) {
+                throw initFailure("Serialization helpers");
+            }
         } else {
             ensureInitialized();
             if (kafkaProducer == null) {
-                String msg = "Kafka producer not initialized — init failed, will retry on next exchange";
-                if (lastInitException != null) {
-                    msg += ". Root cause: " + KafkaErrorHelper.describeChain(lastInitException);
-                }
-                // Do not pass lastInitException as the cause: CPI's HTTP adapter surfaces
-                // getCause().getMessage() rather than this exception's own message, which would
-                // swallow the descriptive chain we just built. The full stack trace is already
-                // logged by logInitFailure(); we only need a readable message here.
-                throw new IllegalStateException(msg);
+                throw initFailure("Kafka producer");
             }
         }
 
@@ -673,7 +695,7 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
 
         ProducerBatchHelper.ByteSerializer valueSerializer = buildBatchValueSerializer();
 
-        if (endpoint.isEnableTransactions()) {
+        if (endpoint.isTransactionalBatching()) {
             sendTransactionalBatch(in, topic, batchMode, records, fallbackKey, partition, timestamp, valueSerializer);
         } else {
             try {
@@ -1003,8 +1025,8 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
     }
 
     private ProducerBatchHelper.ByteSerializer buildBatchValueSerializer() {
-        if (avroHelper != null && endpoint.isAvroValueSerialization()) {
-            final AvroSerializerHelper helper = avroHelper;
+        final AvroSerializerHelper helper = avroHelperIfConfigured();
+        if (helper != null) {
             return new ProducerBatchHelper.ByteSerializer() {
                 @Override
                 public byte[] serialize(String t, String data) {
@@ -1212,12 +1234,32 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
             return null;
         }
 
-        if (endpoint.isSchemaRegistryEnabled() && endpoint.isAvroValueSerialization() && avroHelper != null) {
+        AvroSerializerHelper helper = avroHelperIfConfigured();
+        if (helper != null) {
             String jsonData = new String(bodyBytes, StandardCharsets.UTF_8);
-            return avroHelper.serialize(topic, jsonData);
+            return helper.serialize(topic, jsonData);
         }
 
         return bodyBytes;
+    }
+
+    /**
+     * The Avro helper when Avro value serialization is configured, otherwise {@code null}.
+     *
+     * <p>Throws instead of returning {@code null} when Avro is configured but the helper is missing:
+     * falling back to the raw body would send plain JSON to consumers that expect Confluent Avro,
+     * and report status OK.
+     */
+    private AvroSerializerHelper avroHelperIfConfigured() {
+        if (!endpoint.isSchemaRegistryEnabled() || !endpoint.isAvroValueSerialization()) {
+            return null;
+        }
+        AvroSerializerHelper helper = avroHelper;
+        if (helper == null) {
+            throw new IllegalStateException("Avro value serialization is configured, but the Avro "
+                    + "serializer is not initialized; refusing to send the unserialized body.");
+        }
+        return helper;
     }
 
     private byte[] serializeKey(String topic, String keyStr) {
@@ -1411,14 +1453,15 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
      * Records a failure of the shared, non-transactional producer.
      *
      * <p>The failure is <b>always</b> logged at ERROR. It previously was not: logging happened only
-     * when the cause matched a three-entry "fatal" allow-list or after
-     * {@code MAX_CONSECUTIVE_SEND_FAILURES} <i>consecutive</i> failures. A failure that was neither
-     * on the allow-list nor consecutive — because successful sends in between reset the counter via
-     * {@link #recordSendSuccess()} — produced no log line at all, which is how a production incident
-     * could occur repeatedly while this adapter stayed completely silent about it.
+     * when the cause matched a three-entry "fatal" allow-list or after a number of <i>consecutive</i>
+     * failures. A failure that was neither on the allow-list nor consecutive — because successful
+     * sends in between reset the counter via {@link #recordSendSuccess()} — produced no log line at
+     * all, which is how a production incident could occur repeatedly while this adapter stayed
+     * completely silent about it.
      *
-     * <p>The threshold now governs {@link #triggerReconnect()} only, which is what it was actually
-     * for. Both decisions are reported as fields so the log states why it did or did not reconnect.
+     * <p>Whether {@link #triggerReconnect()} rebuilds the producer is decided by the classification of
+     * the failure and a backoff between rebuilds, not by a failure count. Both decisions are reported
+     * as fields so the log states why it did or did not rebuild.
      *
      * @param operation stable, greppable name of the failing activity
      * @param context   the same key/value context handed to the Message Processing Log, so trace and
@@ -2017,10 +2060,13 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
     private void warnIfTopicMissing(String topic) {
         TopicCheckResult result = checkTopicExists(topic);
         if (result.state == TopicCheck.MISSING) {
-            LOG.warn("[CPI-KAFKA-PLUS-DIAG] Kafka topic '{}' does not exist on the broker. Sending to "
-                    + "this endpoint will fail until the topic is created (auto-create may be disabled "
-                    + "on this cluster). The route is started anyway so the topic can still be created "
-                    + "without a redeployment.", topic);
+            // ERROR, not WARN: nothing below ERROR reaches the tenant trace, so this deployment-time
+            // finding was invisible exactly where it is needed. Runs once per start (#177).
+            AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("producer.start.topic.missing")
+                    .with("topic", topic)
+                    .with("consequence", "sending to this endpoint fails until the topic is created; "
+                            + "the route is started anyway so the topic can be created without a "
+                            + "redeployment"));
             return;
         }
         if (result.state == TopicCheck.EXISTS) {
@@ -2036,11 +2082,14 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
         // first message is ever sent, rather than as a metadata timeout hours later.
         if (result.cause != null) {
             String hint = KafkaErrorHelper.tlsMismatchHint(endpoint.getSecurityProtocol());
-            LOG.warn("[CPI-KAFKA-PLUS-DIAG] Could not reach Kafka broker '{}' at startup to verify topic "
-                    + "'{}': {}.{} The route is started anyway; sending will report the same cause.",
-                    endpoint.getBootstrapServers(), topic,
-                    KafkaErrorHelper.describeChain(result.cause),
-                    hint == null ? "" : " " + hint);
+            AdapterDiagnostics.Event event = AdapterDiagnostics.event("producer.start.broker.unreachable")
+                    .with("bootstrapServers", endpoint.getBootstrapServers())
+                    .with("topic", topic)
+                    .with("consequence", "the route is started anyway; sending will report the same cause");
+            if (hint != null) {
+                event.with("hint", hint);
+            }
+            AdapterDiagnostics.error(LOG, event, result.cause);
         }
     }
 
@@ -2127,13 +2176,18 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
     }
 
     /** Bootstrap and security settings for the topic probe, derived from the producer config. */
-    private Properties buildTopicCheckProperties() {
+    // Package-private for ProducerTopicProbeConfigTest.
+    Properties buildTopicCheckProperties() {
         Properties producerProps = ProducerConfigFactory.buildProducerProperties(endpoint);
         Properties adminProps = new Properties();
         adminProps.put(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG,
                 producerProps.get(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG));
         for (String key : producerProps.stringPropertyNames()) {
-            if (key.startsWith("ssl.") || key.startsWith("sasl.") || key.equals("security.protocol")) {
+            // The keystore alias is not an ssl.* key, but ssl.engine.factory.class is. Without the
+            // alias the engine factory's configure() throws, the AdminClient cannot be created and
+            // every probe on an mTLS channel ends INCONCLUSIVE.
+            if (key.startsWith("ssl.") || key.startsWith("sasl.") || key.equals("security.protocol")
+                    || key.equals(CpiKafkaPlusSslEngineFactory.SSL_KEYSTORE_ALIAS_CONFIG)) {
                 adminProps.put(key, producerProps.getProperty(key));
             }
         }
@@ -2143,24 +2197,44 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
         return adminProps;
     }
 
+    /**
+     * Replaces only the producer. The serialization helpers do not depend on the connection and stay
+     * as they are: clearing the Avro helper here, while {@code helpersInitialized} stayed true, made
+     * every later message go out as raw JSON.
+     */
     private void triggerReconnect() {
-        initialized = false;
         closeProducerQuietly();
     }
 
+    /**
+     * Detaches the producer under the monitor that {@link #ensureInitialized()} builds under, then
+     * closes it outside. Clearing the field only after the close used to wipe out a producer another
+     * thread had built in the meantime, leaving {@code initialized=true} without a producer. Closing
+     * outside the monitor keeps the 5 s close from blocking every other sender.
+     */
     private void closeProducerQuietly() {
-        if (kafkaProducer != null) {
+        KafkaProducer<byte[], byte[]> detached;
+        synchronized (this) {
+            initialized = false;
+            detached = kafkaProducer;
+            kafkaProducer = null;
+            if (detached != null) {
+                // A replacement client starts with an empty metadata cache, so the pre-warm has to
+                // happen again for every topic.
+                prewarmedTopics.clear();
+                prewarmingTopics.clear();
+            }
+        }
+        if (detached != null) {
             try {
-                kafkaProducer.close(Duration.ofSeconds(5));
+                detached.close(Duration.ofSeconds(5));
             } catch (Exception e) {
                 LOG.warn("[CPI-KAFKA-PLUS-DIAG] Error closing Kafka producer: {}", e.getMessage());
             }
-            kafkaProducer = null;
-            // A replacement client starts with an empty metadata cache, so the pre-warm has to
-            // happen again for every topic.
-            prewarmedTopics.clear();
-            prewarmingTopics.clear();
         }
+    }
+
+    private void closeAvroHelperQuietly() {
         if (avroHelper != null) {
             try {
                 avroHelper.close();

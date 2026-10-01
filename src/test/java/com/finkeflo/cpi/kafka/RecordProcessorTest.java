@@ -483,6 +483,56 @@ public class RecordProcessorTest {
         return new ConsumerRecord<>(topic, partition, offset, null, "value".getBytes());
     }
 
+    // --- #177 (V29): reporting a schema failure to the MPL is not itself a failure ---
+
+    @Test
+    public void reportingASchemaFailureToTheMplLogsNoFalseError() throws Exception {
+        CpiKafkaPlusEndpoint endpoint = endpoint("BATCH_COMPLETE");
+        endpoint.setJsonSchemaValidation(true);
+        endpoint.setJsonSchema("{\"type\":\"object\",\"required\":[\"id\"]}");
+        endpoint.setJsonSchemaReportError(true);
+        RecordProcessor processor = new RecordProcessor(endpoint, new AdapterTracingHelper(endpoint),
+                new JsonSchemaValidator(endpoint.getJsonSchema()), null, null,
+                new RecordProcessor.ConsumerCallback() {
+                    @Override
+                    public void processExchange(Exchange exchange) throws Exception {
+                        // Like the consumer's callback: an exchange that carries an exception fails.
+                        if (exchange.getException() != null) {
+                            throw exchange.getException();
+                        }
+                    }
+
+                    @Override
+                    public void handleException(String message, Exchange exchange, Exception e) {
+                    }
+
+                    @Override
+                    public Exchange createExchange() {
+                        return endpoint.createExchange();
+                    }
+                }, new OffsetCommitTracker());
+        org.apache.kafka.clients.consumer.ConsumerRecords<byte[], byte[]> records =
+                new org.apache.kafka.clients.consumer.ConsumerRecords<>(java.util.Collections.singletonMap(
+                        new TopicPartition("test-topic", 0),
+                        Arrays.asList(new ConsumerRecord<>("test-topic", 0, 3L, null,
+                                "{}".getBytes(StandardCharsets.UTF_8)))));
+
+        java.io.PrintStream original = System.err;
+        java.io.ByteArrayOutputStream captured = new java.io.ByteArrayOutputStream();
+        try {
+            System.setErr(new java.io.PrintStream(captured, true, "UTF-8"));
+            processor.processSingleRecords(null, records, false, new PollProgress(records));
+        } finally {
+            System.setErr(original);
+        }
+
+        String logged = captured.toString("UTF-8");
+        Assert.assertTrue("precondition: the schema failure was reported\n" + logged,
+                logged.contains("JSON Schema validation failed"));
+        Assert.assertFalse("the expected failure of the reporting exchange is not an error:\n" + logged,
+                logged.contains("consumer.mpl.report.failed"));
+    }
+
     // --- DLQ-Fallback payload format tests ---
 
     @Test

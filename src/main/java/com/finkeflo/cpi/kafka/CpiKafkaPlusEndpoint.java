@@ -44,7 +44,7 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
 
     /**
      * Delay (ms) before the very first scheduled poll, giving the CPI node time to finish route
-     * startup and acquire the cluster lock. Identical for both consumption modes.
+     * startup. Identical for both consumption modes.
      */
     private static final long INITIAL_DELAY_MS = 5000L;
 
@@ -148,7 +148,8 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
     private int batchSize = 100;
 
     @UriParam(label = "batch", defaultValue = "5000",
-            description = "Maximum wait time in ms to fill a batch")
+            description = "Poll timeout in ms: how long one poll waits for records when the topic is "
+                    + "empty. It does not wait to fill a batch; a poll returns as soon as records arrive.")
     private long batchTimeout = 5000;
 
     @UriParam(label = "batch", defaultValue = "JSON_ARRAY",
@@ -206,7 +207,8 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
      *     which the client derives from the broker's finalized {@code transaction.version} feature.
      *     It mapped to {@code transaction.two.phase.commit.enable} (KIP-939), which
      *     {@link ProducerConfigFactory} now pins to {@code false} for every producer. Removed from
-     *     the channel UI in 1.2.6; drop the field at the next major version.
+     *     the channel UI in 1.2.6. Kept for good: CPI has no major-version migration, so saved iFlows
+     *     can carry the parameter indefinitely, and an unknown parameter would fail their deployment.
      */
     @Deprecated
     @UriParam(label = "producer", defaultValue = "true",
@@ -219,12 +221,8 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
             description = "Pipe-separated list of headers to send to Kafka (e.g. SAP_*|MyHeader|*). Use * for all.")
     private String allowedHeaders = "*";
 
-    // retries: commented out — deliveryTimeoutSeconds is the effective limit.
-    // Kafka uses Integer.MAX_VALUE retries internally when idempotence is enabled.
-    // Re-enable if a use case requires explicit retry control.
-    // @UriParam(label = "producer", defaultValue = "3",
-    //         description = "Number of retries for failed sends")
-    // private int retries = 3;
+    // No "retries" option: deliveryTimeoutSeconds is the effective limit, and with idempotence the
+    // Kafka client retries internally until it expires.
 
     @UriParam(label = "producer", defaultValue = "120",
             description = "Maximum time for message delivery in seconds, including retries. "
@@ -242,8 +240,10 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
     private String jsonSchema;
 
     @UriParam(label = "processing", defaultValue = "false",
-            description = "Report JSON Schema validation failures as ERROR in CPI Monitoring (MPL). "
-                    + "When disabled, invalid messages are silently dropped.")
+            description = "Sender: report a record that fails JSON Schema validation as a failed message "
+                    + "in CPI Monitoring (MPL); when disabled it is dropped with a WARN log only. "
+                    + "Receiver: an invalid message always fails the exchange; this option only adds "
+                    + "the payload to the trace.")
     private boolean jsonSchemaReportError = false;
 
     // --- Error Handling / DLQ ---
@@ -260,7 +260,9 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
     private int dlqMaxRetries = 3;
 
     @UriParam(label = "errorHandling",
-            description = "SASL credential alias for DLQ Kafka cluster (if different from main connection)")
+            description = "SASL credential alias for writing to the DLQ topic, if it needs other "
+                    + "credentials than the main connection. The DLQ topic is on the same cluster "
+                    + "(bootstrapServers).")
     private String dlqCredentialAlias;
 
     // --- Smart Retry (Sender/consumer direction only — see producerRetry* below) ---
@@ -513,10 +515,20 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
     public void setGroupId(String groupId) { this.groupId = groupId; }
 
     public String getSecurityProtocol() { return securityProtocol; }
-    public void setSecurityProtocol(String securityProtocol) { this.securityProtocol = securityProtocol; }
+    /**
+     * Normalised to upper case: Kafka accepts {@code sasl_ssl}, but every check in the adapter compares
+     * against the upper-case names, so a lower-case value from an externalized parameter configured
+     * neither SASL nor the keystore alias (#175).
+     */
+    public void setSecurityProtocol(String securityProtocol) { this.securityProtocol = normaliseName(securityProtocol); }
 
     public String getSaslMechanism() { return saslMechanism; }
-    public void setSaslMechanism(String saslMechanism) { this.saslMechanism = saslMechanism; }
+    /** Normalised to upper case, like {@link #setSecurityProtocol(String)}. */
+    public void setSaslMechanism(String saslMechanism) { this.saslMechanism = normaliseName(saslMechanism); }
+
+    private static String normaliseName(String value) {
+        return value == null ? null : value.trim().toUpperCase(java.util.Locale.ROOT);
+    }
 
     public String getCredentialAlias() { return credentialAlias; }
     public void setCredentialAlias(String credentialAlias) { this.credentialAlias = credentialAlias; }
@@ -547,6 +559,14 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
 
     /** True when the consumer runs in greedy STREAMING mode instead of scheduled polling. */
     public boolean isStreamingMode() { return "STREAMING".equalsIgnoreCase(consumptionMode); }
+
+    /**
+     * Transactions apply to batches only. With {@code producerBatchMode=NONE} every message goes
+     * through the shared, non-transactional producer, whatever {@code enableTransactions} says.
+     */
+    public boolean isTransactionalBatching() {
+        return enableTransactions && !"NONE".equalsIgnoreCase(producerBatchMode);
+    }
 
     public boolean isDrainEnabled() { return drainEnabled; }
     public void setDrainEnabled(boolean drainEnabled) { this.drainEnabled = drainEnabled; }

@@ -433,8 +433,9 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
 
     /**
      * Lazily initialize all Kafka resources (consumer, Avro helper, JSON Schema validator, DLQ helper)
-     * on the first poll. This ensures only the CPI node that holds the cluster lock and actually polls
-     * creates a KafkaConsumer, preventing partition starvation from idle consumers in the same group.
+     * on the first poll rather than at route start. The adapter does not request a CPI cluster lock,
+     * so every worker node that runs the route creates its own consumer and the group protocol
+     * spreads the partitions across them.
      */
     private void ensureInitialized() {
         if (initialized) {
@@ -538,7 +539,10 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
                 jsonSchemaValidator = new JsonSchemaValidator(endpoint.getJsonSchema());
                 LOG.info("JSON Schema validation enabled for incoming messages");
             }
-            if (endpoint.isDlqEnabled()) {
+            // A reconnect runs this again. The DLQ helper survives it — it rebuilds its own producer
+            // when that breaks — because replacing it leaked the old producer's network thread,
+            // metadata connection and JMX registration on every reconnect (#171).
+            if (endpoint.isDlqEnabled() && dlqHelper == null) {
                 dlqHelper = new DlqProducerHelper(endpoint);
                 LOG.info("DLQ enabled: failed records will be routed to topic '{}' after {} retries",
                         endpoint.getDlqTopic(), endpoint.getDlqMaxRetries());

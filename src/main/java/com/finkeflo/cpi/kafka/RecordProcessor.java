@@ -1114,6 +1114,7 @@ final class RecordProcessor {
         String errorMsg = "JSON Schema validation failed for record at topic=" + record.topic()
                 + " partition=" + record.partition() + " offset=" + record.offset()
                 + ": " + validationError;
+        RuntimeException validationException = new RuntimeException(errorMsg);
         try {
             Exchange mplExchange = callback.createExchange();
             mplExchange.getIn().setBody(value);
@@ -1123,7 +1124,6 @@ final class RecordProcessor {
             mplExchange.getIn().setHeader("SAP_Sender", record.topic());
             tracingHelper.traceInbound(mplExchange, value);
             mplExchange.setProperty(Exchange.ROUTE_STOP, Boolean.TRUE);
-            RuntimeException validationException = new RuntimeException(errorMsg);
             mplExchange.setException(validationException);
 
             // f2: Call traceError for the consumer/sender direction (SENDER_OUTBOUND_FAULT)
@@ -1142,6 +1142,11 @@ final class RecordProcessor {
 
             callback.processExchange(mplExchange);
         } catch (Exception e) {
+            if (e == validationException) {
+                // Expected: the exchange carries the validation failure precisely so that it ends
+                // as a failed message. Logging it as a reporting failure was a false ERROR (#177).
+                return;
+            }
             // b4: Swallowed error now logged at ERROR, not DEBUG — only ERROR reaches tenant trace
             AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("consumer.mpl.report.failed")
                     .with("topic", record.topic())
