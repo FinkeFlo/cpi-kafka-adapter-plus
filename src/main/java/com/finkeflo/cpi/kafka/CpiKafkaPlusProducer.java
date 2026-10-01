@@ -2127,13 +2127,18 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
     }
 
     /** Bootstrap and security settings for the topic probe, derived from the producer config. */
-    private Properties buildTopicCheckProperties() {
+    // Package-private for ProducerTopicProbeConfigTest.
+    Properties buildTopicCheckProperties() {
         Properties producerProps = ProducerConfigFactory.buildProducerProperties(endpoint);
         Properties adminProps = new Properties();
         adminProps.put(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG,
                 producerProps.get(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG));
         for (String key : producerProps.stringPropertyNames()) {
-            if (key.startsWith("ssl.") || key.startsWith("sasl.") || key.equals("security.protocol")) {
+            // The keystore alias is not an ssl.* key, but ssl.engine.factory.class is. Without the
+            // alias the engine factory's configure() throws, the AdminClient cannot be created and
+            // every probe on an mTLS channel ends INCONCLUSIVE.
+            if (key.startsWith("ssl.") || key.startsWith("sasl.") || key.equals("security.protocol")
+                    || key.equals(CpiKafkaPlusSslEngineFactory.SSL_KEYSTORE_ALIAS_CONFIG)) {
                 adminProps.put(key, producerProps.getProperty(key));
             }
         }
