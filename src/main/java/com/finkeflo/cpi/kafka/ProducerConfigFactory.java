@@ -102,8 +102,12 @@ public final class ProducerConfigFactory {
         props.put(ProducerConfig.COMPRESSION_TYPE_CONFIG, endpoint.getCompressionType());
         props.put(ProducerConfig.MAX_REQUEST_SIZE_CONFIG, kilobytesToBytes(endpoint.getMaxRequestSizeKb()));
         props.put(ProducerConfig.LINGER_MS_CONFIG, 0L);
-        props.put(ProducerConfig.BATCH_SIZE_CONFIG, kilobytesToBytes(endpoint.getProducerBatchSizeKb()));
-        props.put(ProducerConfig.BUFFER_MEMORY_CONFIG, endpoint.getBufferMemoryKb() * 1024L);
+        long bufferMemoryBytes = endpoint.getBufferMemoryKb() * 1024L;
+        // A batch has to fit into buffer.memory: a larger batch.size made every send fail with
+        // "Attempt to allocate ... but there is a hard limit of <buffer.memory>".
+        props.put(ProducerConfig.BATCH_SIZE_CONFIG,
+                Math.min(kilobytesToBytes(endpoint.getProducerBatchSizeKb()), clampToInt(bufferMemoryBytes)));
+        props.put(ProducerConfig.BUFFER_MEMORY_CONFIG, bufferMemoryBytes);
         props.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, endpoint.isEnableIdempotence());
         
         // retries: not configurable — Kafka uses Integer.MAX_VALUE with idempotence,

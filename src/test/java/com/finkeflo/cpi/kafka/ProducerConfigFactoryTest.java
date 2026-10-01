@@ -66,7 +66,21 @@ public class ProducerConfigFactoryTest {
         Properties props = ProducerConfigFactory.buildProducerProperties(endpoint);
 
         Assert.assertEquals(Integer.MAX_VALUE, ((Number) props.get(ProducerConfig.MAX_REQUEST_SIZE_CONFIG)).longValue());
-        Assert.assertEquals(Integer.MAX_VALUE, ((Number) props.get(ProducerConfig.BATCH_SIZE_CONFIG)).longValue());
+        Assert.assertEquals("never above buffer.memory, never wrapped",
+                endpoint.getBufferMemoryKb() * 1024L, ((Number) props.get(ProducerConfig.BATCH_SIZE_CONFIG)).longValue());
+    }
+
+    @Test
+    public void batchSizeNeverExceedsTheBufferMemory() throws Exception {
+        // A batch has to fit into buffer.memory; a larger batch.size made every send fail with
+        // "Attempt to allocate ... but there is a hard limit of <buffer.memory>".
+        CpiKafkaPlusEndpoint endpoint = createEndpoint();
+        endpoint.setBufferMemoryKb(32_768);         // 32 MiB
+        endpoint.setProducerBatchSizeKb(65_536);    // 64 MiB
+
+        Properties props = ProducerConfigFactory.buildProducerProperties(endpoint);
+
+        Assert.assertEquals(33_554_432L, ((Number) props.get(ProducerConfig.BATCH_SIZE_CONFIG)).longValue());
     }
 
     @Test

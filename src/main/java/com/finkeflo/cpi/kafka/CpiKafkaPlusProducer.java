@@ -681,7 +681,7 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
 
         ProducerBatchHelper.ByteSerializer valueSerializer = buildBatchValueSerializer();
 
-        if (endpoint.isEnableTransactions()) {
+        if (endpoint.isTransactionalBatching()) {
             sendTransactionalBatch(in, topic, batchMode, records, fallbackKey, partition, timestamp, valueSerializer);
         } else {
             try {
