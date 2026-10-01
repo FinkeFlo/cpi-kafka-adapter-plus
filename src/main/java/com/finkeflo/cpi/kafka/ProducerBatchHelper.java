@@ -31,6 +31,7 @@ import org.apache.camel.Message;
 import org.apache.kafka.clients.producer.Producer;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.clients.producer.RecordMetadata;
+import org.apache.kafka.common.errors.SerializationException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -197,49 +198,32 @@ public final class ProducerBatchHelper {
             ProducerPath producerPath,
             String clientId) {
 
+        // Build and serialize every record before the first send(). A record handed to the producer
+        // cannot be taken back: with a serializer failure at index i, records 0..i-1 would already
+        // be buffered, the close() of the producer rebuild would flush them, and the retried batch
+        // would write them a second time.
+        List<ProducerRecord<byte[], byte[]>> producerRecords = new ArrayList<>(records.size());
+        for (int i = 0; i < records.size(); i++) {
+            try {
+                producerRecords.add(buildRecord(records.get(i), topic, fallbackKey, partition,
+                        timestamp, message, headerAdder, valueSerializer, keySerializer));
+            } catch (RuntimeException e) {
+                // SerializationException classifies as FATAL_DATA_ERROR: a payload problem must not
+                // rebuild the shared producer.
+                throw new SerializationException(
+                        "Batch send failed at record index " + i + " (phase=SERIALIZE): "
+                                + e.getMessage(), e);
+            }
+        }
+
         List<Future<RecordMetadata>> futures = new ArrayList<>(records.size());
         // One allowance for the whole batch, so the per-record limit cannot be multiplied by the
         // record count.
         MonitorFaultRetry.Budget batchBudget = new MonitorFaultRetry.Budget();
 
-        for (int i = 0; i < records.size(); i++) {
+        for (int i = 0; i < producerRecords.size(); i++) {
             final int recordIndex = i;
-            BatchRecord record = records.get(i);
-
-            String keyStr = record.getKey();
-            if (keyStr == null) {
-                keyStr = fallbackKey;
-            }
-
-            byte[] key = null;
-            if (keyStr != null) {
-                key = keySerializer != null
-                        ? keySerializer.serialize(topic, keyStr)
-                        : keyStr.getBytes(StandardCharsets.UTF_8);
-            }
-            byte[] value = null;
-            if (record.getValue() != null) {
-                value = valueSerializer != null
-                        ? valueSerializer.serialize(topic, record.getValue())
-                        : record.getValue().getBytes(StandardCharsets.UTF_8);
-            }
-
-            ProducerRecord<byte[], byte[]> pr = new ProducerRecord<>(
-                    topic, partition, timestamp, key, value);
-
-            if (headerAdder != null) {
-                headerAdder.addHeaders(pr, message);
-            }
-
-            if (record.getHeaders() != null) {
-                for (java.util.Map.Entry<String, String> entry : record.getHeaders().entrySet()) {
-                    if (entry.getValue() != null) {
-                        pr.headers().remove(entry.getKey()); // overwrite if added by headerAdder
-                        pr.headers().add(entry.getKey(), entry.getValue().getBytes(StandardCharsets.UTF_8));
-                    }
-                }
-            }
-
+            final ProducerRecord<byte[], byte[]> pr = producerRecords.get(i);
             try {
                 futures.add(MonitorFaultRetry.execute(
                         () -> producer.send(pr), batchBudget, deadlineMs, topic, recordIndex));
@@ -264,6 +248,53 @@ public final class ProducerBatchHelper {
         }
 
         return futures;
+    }
+
+    private static ProducerRecord<byte[], byte[]> buildRecord(
+            BatchRecord record,
+            String topic,
+            String fallbackKey,
+            Integer partition,
+            Long timestamp,
+            Message message,
+            RecordHeaderAdder headerAdder,
+            ByteSerializer valueSerializer,
+            ByteSerializer keySerializer) {
+
+        String keyStr = record.getKey();
+        if (keyStr == null) {
+            keyStr = fallbackKey;
+        }
+
+        byte[] key = null;
+        if (keyStr != null) {
+            key = keySerializer != null
+                    ? keySerializer.serialize(topic, keyStr)
+                    : keyStr.getBytes(StandardCharsets.UTF_8);
+        }
+        byte[] value = null;
+        if (record.getValue() != null) {
+            value = valueSerializer != null
+                    ? valueSerializer.serialize(topic, record.getValue())
+                    : record.getValue().getBytes(StandardCharsets.UTF_8);
+        }
+
+        ProducerRecord<byte[], byte[]> pr = new ProducerRecord<>(
+                topic, partition, timestamp, key, value);
+
+        if (headerAdder != null) {
+            headerAdder.addHeaders(pr, message);
+        }
+
+        if (record.getHeaders() != null) {
+            for (java.util.Map.Entry<String, String> entry : record.getHeaders().entrySet()) {
+                if (entry.getValue() != null) {
+                    pr.headers().remove(entry.getKey()); // overwrite if added by headerAdder
+                    pr.headers().add(entry.getKey(), entry.getValue().getBytes(StandardCharsets.UTF_8));
+                }
+            }
+        }
+        return pr;
     }
 
     /**
