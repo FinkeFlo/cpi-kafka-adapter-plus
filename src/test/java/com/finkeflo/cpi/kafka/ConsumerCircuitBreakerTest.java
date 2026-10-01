@@ -92,6 +92,20 @@ public class ConsumerCircuitBreakerTest {
     }
 
     @Test
+    public void failuresOfOnePollAddUpTowardsTheThreshold() throws Exception {
+        ConsumerCircuitBreaker cb = createCircuitBreaker(5, 10);
+        Assert.assertFalse(cb.recordFailures(3));
+        Assert.assertTrue("3 + 2 failures reach the threshold of 5", cb.recordFailures(2));
+    }
+
+    @Test
+    public void zeroFailuresChangeNothing() throws Exception {
+        ConsumerCircuitBreaker cb = createCircuitBreaker(1, 10);
+        Assert.assertFalse(cb.recordFailures(0));
+        Assert.assertTrue(cb.recordFailures(1));
+    }
+
+    @Test
     public void testHandlePausedStateReturnsFalseWhenNotPaused() throws Exception {
         ConsumerCircuitBreaker cb = createCircuitBreaker(3, 10);
         Assert.assertFalse("Should not be paused when no failures",

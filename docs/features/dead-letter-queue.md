@@ -132,17 +132,39 @@ Records that fail **JSON Schema Validation** (`jsonSchemaValidation`) are sent t
 
 **Without DLQ:** Records that fail **JSON Schema Validation** (`jsonSchemaValidation`) are **silently discarded** — the offset is committed so the record is not reprocessed, but the record is not forwarded to the IFlow. A WARN-level log entry is written for each discarded record.
 
+## When the DLQ Write Fails
+
+A record is only committed once it has been processed or written to the DLQ. If the DLQ write
+itself fails — the DLQ topic does not exist, the credentials lack `WRITE` on it, the broker is
+unreachable — the record is **not** committed and nothing after it in the same partition is
+processed. The partition is rewound to the record and retried after a delay: 1 second, doubling
+with every further failure at the same offset up to 5 minutes (or **Retry Delay** if that is
+longer than 1 second). Other partitions keep flowing.
+
+The trace shows `dlq.send.failed … consequence='offset not committed, record will be retried'`
+followed by `consumer.partition.retry` with the `offset` and `retryInMs`. Fix the cause and the
+partition continues on its own with the next retry.
+
+This applies to every way a record reaches the DLQ: failed IFlow processing, failed
+deserialization and failed JSON Schema validation.
+
 ## Error Handling Without DLQ
 
-When DLQ is **not** enabled, the adapter handles failures differently depending on the error type:
+When DLQ is **not** enabled, a record whose processing fails is **skipped**:
 
 | Error Type | Behavior |
 |------------|----------|
 | JSON Schema validation failure | Record is **discarded**, offset committed. A WARN log is written but the record is lost. |
-| IFlow processing failure (batch) | Offsets are **not** committed. The records will be re-delivered on the next poll cycle (at-least-once). |
-| IFlow processing failure (non-batch) | Offsets are **not** committed. The record will be re-delivered on the next poll cycle (at-least-once). |
+| IFlow processing failure (batch) | The failed message processing log is written, the batch is **skipped** and its offsets are committed (at-most-once). |
+| IFlow processing failure (non-batch) | The failed message processing log is written, the record is **skipped** and its offset is committed (at-most-once). |
+| Deserialization failure (Avro) | Reported like a processing failure, then the record is **skipped**. |
 
-> **Important:** Without DLQ, a persistently failing record (poison pill) will block the consumer indefinitely in non-batch mode, as it will be retried on every poll cycle. Enabling DLQ is strongly recommended for production use to prevent this scenario.
+Only the failing record or batch is skipped. Records after it are processed normally, and a
+failure inside the adapter itself (not in the IFlow) never skips anything: the record is rewound and
+retried.
+
+> **Important:** Without DLQ, failed records are lost once the next record of the partition is
+> committed. Enable DLQ for any flow that must not lose records.
 
 ## DLQ Record Headers
 

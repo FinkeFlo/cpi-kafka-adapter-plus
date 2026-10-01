@@ -32,12 +32,15 @@ import java.util.Map;
 import org.apache.camel.Exchange;
 import org.apache.camel.Message;
 import org.apache.kafka.clients.consumer.CommitFailedException;
+import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
-import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.consumer.OffsetAndMetadata;
+import org.apache.kafka.common.KafkaException;
 import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.errors.InterruptException;
 import org.apache.kafka.common.errors.RebalanceInProgressException;
+import org.apache.kafka.common.errors.WakeupException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -83,6 +86,11 @@ final class RecordProcessor {
         void processExchange(Exchange exchange) throws Exception;
         void handleException(String message, Exchange exchange, Exception e);
         Exchange createExchange();
+
+        /** @return true once the consumer is stopping; no further record is started then */
+        default boolean isStopRequested() {
+            return false;
+        }
     }
 
     /**
@@ -121,16 +129,16 @@ final class RecordProcessor {
 
     // --- Public API ---
 
-    int processBatchRecords(KafkaConsumer<byte[], byte[]> kafkaConsumer,
+    int processBatchRecords(Consumer<byte[], byte[]> kafkaConsumer,
                             ConsumerRecords<byte[], byte[]> records,
-                            boolean commitAfterSuccess) throws Exception {
+                            boolean commitAfterSuccess, PollProgress progress) throws Exception {
         Map<TopicPartition, List<ConsumerRecord<byte[], byte[]>>> byPartition = groupByPartition(records);
 
         LOG.debug("[CPI-KAFKA-PLUS-DIAG] processBatch: {} records across {} partition(s)",
                 records.count(), byPartition.size());
 
         IdentityHashMap<byte[], String> cache = new IdentityHashMap<>();
-        int[] filterCounts = filterInvalidRecords(kafkaConsumer, byPartition, commitAfterSuccess, cache);
+        int[] filterCounts = filterInvalidRecords(kafkaConsumer, byPartition, cache, progress);
         int schemaValidationFailures = filterCounts[0];
         int dlqCount = filterCounts[1];
 
@@ -151,12 +159,28 @@ final class RecordProcessor {
             for (int i = 0; i < partitionRecords.size(); i += batchSize) {
                 List<ConsumerRecord<byte[], byte[]>> batch = partitionRecords.subList(
                         i, Math.min(i + batchSize, partitionRecords.size()));
+                // A block set by the schema filter still lets the valid records before it run.
+                Long blockedAt = progress.blockedOffset(tp);
+                if (stopRequested(progress) || (blockedAt != null && batch.get(0).offset() >= blockedAt)) {
+                    break;
+                }
 
                 totalProcessed += processOneBatch(kafkaConsumer, batch, commitAfterSuccess,
-                        schemaValidationFailures, dlqCount, cache);
+                        schemaValidationFailures, dlqCount, cache, progress);
             }
         }
 
+        // Records the schema filter resolved after the last batch of a partition are only
+        // committable now, once everything before them is resolved as well.
+        if (commitAfterSuccess) {
+            for (TopicPartition tp : byPartition.keySet()) {
+                if (progress.isStopped()) {
+                    markProgress(tp, progress);
+                } else {
+                    commitProgress(kafkaConsumer, tp, progress);
+                }
+            }
+        }
         return totalProcessed;
     }
 
@@ -164,13 +188,19 @@ final class RecordProcessor {
      * Pre-filters records that fail JSON Schema validation. Invalid records are routed
      * to DLQ (if enabled), reported to MPL, and removed from the partition lists.
      *
+     * <p>Nothing is committed here: the filter runs before any batch of the poll, and committing an
+     * invalid record's offset would commit past the earlier records of its partition before they
+     * were processed (#173). The filtered records are resolved in {@code progress} and committed
+     * together with the batches around them. A record whose DLQ write fails blocks its partition:
+     * only the valid records before it stay in the list.
+     *
      * @return int[2] with {schemaValidationFailures, dlqCount}
      */
     private int[] filterInvalidRecords(
-            KafkaConsumer<byte[], byte[]> kafkaConsumer,
+            Consumer<byte[], byte[]> kafkaConsumer,
             Map<TopicPartition, List<ConsumerRecord<byte[], byte[]>>> byPartition,
-            boolean commitAfterSuccess,
-            IdentityHashMap<byte[], String> cache) {
+            IdentityHashMap<byte[], String> cache,
+            PollProgress progress) {
         if (jsonSchemaValidator == null) {
             return new int[]{0, 0};
         }
@@ -179,11 +209,23 @@ final class RecordProcessor {
         int dlqCount = 0;
 
         for (Map.Entry<TopicPartition, List<ConsumerRecord<byte[], byte[]>>> entry : byPartition.entrySet()) {
+            TopicPartition tp = entry.getKey();
             List<ConsumerRecord<byte[], byte[]>> partitionRecords = entry.getValue();
             List<ConsumerRecord<byte[], byte[]>> validRecords = new ArrayList<>();
 
             for (ConsumerRecord<byte[], byte[]> record : partitionRecords) {
-                String value = deserializeValue(record.topic(), record.value(), cache);
+                progress.processing(tp, record.offset());
+                String value;
+                try {
+                    value = deserializeValue(record.topic(), record.value(), cache);
+                } catch (Exception deserErr) {
+                    // Committed with the batches around it, never from here.
+                    handleDeserializationFailure(kafkaConsumer, record, deserErr, false, progress);
+                    if (progress.isBlocked(tp)) {
+                        break;
+                    }
+                    continue;
+                }
                 if (value != null) {
                     String validationError = jsonSchemaValidator.validate(value);
                     if (validationError != null) {
@@ -193,6 +235,7 @@ final class RecordProcessor {
                         if (endpoint.isJsonSchemaReportError()) {
                             reportValidationErrorToMpl(value, validationError, record);
                         }
+                        boolean dlqFailed = false;
                         if (dlqHelper != null) {
                             try {
                                 dlqHelper.sendToDlq(record, new RuntimeException(validationError), 0);
@@ -204,16 +247,20 @@ final class RecordProcessor {
                                         .with("topic", record.topic())
                                         .with("partition", record.partition())
                                         .with("offset", record.offset())
-                                        .with("dlqTopic", endpoint.getDlqTopic()), dlqEx);
+                                        .with("dlqTopic", endpoint.getDlqTopic())
+                                        .with("consequence", "offset not committed, record will be retried"), dlqEx);
+                                dlqFailed = true;
                             }
                         }
                         Exchange errorExchange = callback.createExchange();
                         callback.handleException(
                                 "JSON Schema validation failed at offset " + record.offset(),
                                 errorExchange, new RuntimeException(validationError));
-                        if (commitAfterSuccess) {
-                            commitSingleOffset(kafkaConsumer, record);
+                        if (dlqFailed) {
+                            progress.blocked(tp, record.offset());
+                            break;
                         }
+                        progress.resolved(tp, record.offset());
                         continue;
                     }
                 }
@@ -225,14 +272,50 @@ final class RecordProcessor {
         return new int[]{schemaValidationFailures, dlqCount};
     }
 
-    int processSingleRecords(KafkaConsumer<byte[], byte[]> kafkaConsumer,
+    int processSingleRecords(Consumer<byte[], byte[]> kafkaConsumer,
                              ConsumerRecords<byte[], byte[]> records,
-                             boolean commitAfterSuccess) throws Exception {
+                             boolean commitAfterSuccess, PollProgress progress) throws Exception {
         int processedCount = 0;
         for (ConsumerRecord<byte[], byte[]> record : records) {
-            processedCount += processRecordWithRetry(kafkaConsumer, record, commitAfterSuccess, false);
+            if (stopRequested(progress)) {
+                break;
+            }
+            if (progress.isBlocked(partitionOf(record))) {
+                continue; // nothing after a record that has to be retried
+            }
+            processedCount += processRecordWithRetry(kafkaConsumer, record, commitAfterSuccess, false, progress);
         }
         return processedCount;
+    }
+
+    /**
+     * Seeks every partition of the poll back to its first unresolved record. {@code poll()} has
+     * already moved the position past all of them; without the seek they would be skipped — and
+     * with {@code commitStrategy=AUTO} even committed by the next auto-commit.
+     */
+    void rewind(Consumer<byte[], byte[]> kafkaConsumer, PollProgress progress) {
+        for (Map.Entry<TopicPartition, Long> e : progress.rewindPositions().entrySet()) {
+            try {
+                kafkaConsumer.seek(e.getKey(), e.getValue());
+                LOG.debug("[CPI-KAFKA-PLUS-DIAG] rewind: partition {} back to offset {}", e.getKey(), e.getValue());
+            } catch (RuntimeException seekError) {
+                // Typically a partition revoked during this poll; its new owner starts from the
+                // committed offset, which never passes an unresolved record.
+                LOG.warn("[CPI-KAFKA-PLUS-DIAG] rewind: could not seek partition {} back to offset {}: {}",
+                        e.getKey(), e.getValue(), seekError.getMessage());
+            }
+        }
+    }
+
+    private boolean stopRequested(PollProgress progress) {
+        if (!progress.isStopped() && callback.isStopRequested()) {
+            progress.stop();
+        }
+        return progress.isStopped();
+    }
+
+    private static TopicPartition partitionOf(ConsumerRecord<byte[], byte[]> record) {
+        return new TopicPartition(record.topic(), record.partition());
     }
 
     // --- Error classification (package-private for testability) ---
@@ -283,11 +366,14 @@ final class RecordProcessor {
 
     // --- Private processing methods ---
 
-    private int processOneBatch(KafkaConsumer<byte[], byte[]> kafkaConsumer,
+    private int processOneBatch(Consumer<byte[], byte[]> kafkaConsumer,
                                 List<ConsumerRecord<byte[], byte[]>> batch,
                                 boolean commitAfterSuccess,
                                 int schemaValidationFailures, int dlqCount,
-                                IdentityHashMap<byte[], String> cache) throws Exception {
+                                IdentityHashMap<byte[], String> cache,
+                                PollProgress progress) throws Exception {
+        TopicPartition tp = partitionOf(batch.get(0));
+        progress.processing(tp, batch.get(0).offset());
         Exchange exchange = callback.createExchange();
 
         String body;
@@ -305,9 +391,17 @@ final class RecordProcessor {
                     .with("batchSize", batch.size()), t);
             if (dlqHelper != null) {
                 LOG.info("[CPI-KAFKA-PLUS-DIAG] processOneBatch: formatBatch failed, retrying batch records individually for poison-pill isolation");
-                return processRecordsIndividually(kafkaConsumer, batch, commitAfterSuccess);
+                return processRecordsIndividually(kafkaConsumer, batch, commitAfterSuccess, progress);
             }
-            throw (t instanceof Exception) ? (Exception) t : new RuntimeException(t);
+            if (!(t instanceof Exception)) {
+                throw new RuntimeException(t); // an Error is not a data problem; the poll rewinds it
+            }
+            progress.failed();
+            callback.handleException(
+                    "Could not format batch of " + batch.size() + " Kafka records from partition "
+                            + batch.get(0).partition(), exchange, (Exception) t);
+            resolveBatchWithoutDlq(kafkaConsumer, batch, commitAfterSuccess, progress);
+            return 0;
         }
 
         tracingHelper.traceInbound(exchange, body);
@@ -320,13 +414,6 @@ final class RecordProcessor {
             LOG.debug("[CPI-KAFKA-PLUS-DIAG] processOneBatch: calling processor...");
             callback.processExchange(exchange);
             LOG.debug("[CPI-KAFKA-PLUS-DIAG] processOneBatch: process() returned OK");
-
-            if (commitAfterSuccess) {
-                commitOffsets(kafkaConsumer, batch);
-                LOG.debug("[CPI-KAFKA-PLUS-DIAG] processOneBatch: offsets committed for partition {}",
-                        batch.get(0).partition());
-            }
-            return batch.size();
         } catch (Exception e) {
             int partition = !batch.isEmpty() ? batch.get(0).partition() : -1;
             AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("batch.processing.failed")
@@ -335,30 +422,60 @@ final class RecordProcessor {
                     .with("batchSize", batch.size()), e);
             if (dlqHelper != null) {
                 LOG.info("[CPI-KAFKA-PLUS-DIAG] processOneBatch: DLQ enabled, retrying batch records individually");
-                return processRecordsIndividually(kafkaConsumer, batch, commitAfterSuccess);
+                return processRecordsIndividually(kafkaConsumer, batch, commitAfterSuccess, progress);
             }
+            progress.failed();
             callback.handleException(
                     "Error processing batch of " + batch.size() + " Kafka records from partition "
                             + batch.get(0).partition(), exchange, e);
+            resolveBatchWithoutDlq(kafkaConsumer, batch, commitAfterSuccess, progress);
             return 0;
+        }
+
+        // Outside the route's try block: a failing commit must not send a processed batch through
+        // the individual DLQ fallback (#172).
+        for (ConsumerRecord<byte[], byte[]> record : batch) {
+            progress.resolved(tp, record.offset());
+        }
+        progress.succeeded();
+        if (commitAfterSuccess) {
+            commitProgress(kafkaConsumer, tp, progress);
+            LOG.debug("[CPI-KAFKA-PLUS-DIAG] processOneBatch: offsets committed for partition {}", tp);
+        }
+        return batch.size();
+    }
+
+    /** Batch counterpart of {@link #resolveWithoutDlq}. */
+    private void resolveBatchWithoutDlq(Consumer<byte[], byte[]> kafkaConsumer,
+                                        List<ConsumerRecord<byte[], byte[]>> batch,
+                                        boolean commitAfterSuccess, PollProgress progress) {
+        TopicPartition tp = partitionOf(batch.get(0));
+        for (ConsumerRecord<byte[], byte[]> record : batch) {
+            progress.resolved(tp, record.offset());
+        }
+        if (commitAfterSuccess) {
+            commitProgress(kafkaConsumer, tp, progress);
         }
     }
 
-    private int processRecordWithRetry(KafkaConsumer<byte[], byte[]> kafkaConsumer,
+    private int processRecordWithRetry(Consumer<byte[], byte[]> kafkaConsumer,
                                        ConsumerRecord<byte[], byte[]> record,
                                        boolean commitAfterSuccess,
-                                       boolean batchFallback) {
+                                       boolean batchFallback,
+                                       PollProgress progress) {
+        TopicPartition tp = partitionOf(record);
+        progress.processing(tp, record.offset());
         String value;
         String key;
         try {
             value = deserializeValue(record.topic(), record.value());
             key = deserializeKey(record.topic(), record.key());
         } catch (Exception deserErr) {
-            return handleDeserializationFailure(kafkaConsumer, record, deserErr, commitAfterSuccess);
+            return handleDeserializationFailure(kafkaConsumer, record, deserErr, commitAfterSuccess, progress);
         }
 
-        if (handleSchemaValidationFailure(kafkaConsumer, record, value, commitAfterSuccess)) {
-            return 1;
+        if (handleSchemaValidationFailure(kafkaConsumer, record, value, commitAfterSuccess, progress)) {
+            return progress.isBlocked(tp) ? 0 : 1;
         }
 
         int maxRetries = (dlqHelper != null) ? endpoint.getDlqMaxRetries() : 0;
@@ -399,11 +516,6 @@ final class RecordProcessor {
 
             try {
                 callback.processExchange(exchange);
-
-                if (commitAfterSuccess) {
-                    commitSingleOffset(kafkaConsumer, record);
-                }
-                return 1;
             } catch (Exception e) {
                 lastError = e;
 
@@ -417,14 +529,29 @@ final class RecordProcessor {
 
                 actualRetries = attempt;
 
-                if (attempt < maxRetries && !sleepWithBackoff(attempt, record)) {
-                    break; // interrupted
+                if (attempt < maxRetries
+                        && (stopRequested(progress) || !sleepWithBackoff(attempt, record))) {
+                    // A shutdown, not a poison record: leave it unresolved for the next run
+                    // instead of dead-lettering a record that may well succeed.
+                    progress.stop();
+                    return 0;
                 }
+                continue;
             }
+
+            // Deliberately outside the route's try block: a failing commit is not a failing
+            // record and must neither re-run the route nor reach the DLQ (#172).
+            progress.resolved(tp, record.offset());
+            progress.succeeded();
+            if (commitAfterSuccess) {
+                commitProgress(kafkaConsumer, tp, progress);
+            }
+            return 1;
         }
 
+        progress.failed();
         return handleRetryExhausted(kafkaConsumer, record, lastError,
-                actualRetries, permanentError, commitAfterSuccess);
+                actualRetries, permanentError, commitAfterSuccess, progress);
     }
 
     /**
@@ -433,9 +560,10 @@ final class RecordProcessor {
      *
      * @return true if validation failed (record should be skipped), false if OK
      */
-    private boolean handleSchemaValidationFailure(KafkaConsumer<byte[], byte[]> kafkaConsumer,
+    private boolean handleSchemaValidationFailure(Consumer<byte[], byte[]> kafkaConsumer,
                                                    ConsumerRecord<byte[], byte[]> record,
-                                                   String value, boolean commitAfterSuccess) {
+                                                   String value, boolean commitAfterSuccess,
+                                                   PollProgress progress) {
         if (jsonSchemaValidator == null || value == null) {
             return false;
         }
@@ -449,6 +577,7 @@ final class RecordProcessor {
         if (endpoint.isJsonSchemaReportError()) {
             reportValidationErrorToMpl(value, validationError, record);
         }
+        TopicPartition tp = partitionOf(record);
         if (dlqHelper != null) {
             try {
                 dlqHelper.sendToDlq(record, new RuntimeException(validationError), 0);
@@ -459,11 +588,16 @@ final class RecordProcessor {
                         .with("topic", record.topic())
                         .with("partition", record.partition())
                         .with("offset", record.offset())
-                        .with("dlqTopic", endpoint.getDlqTopic()), dlqEx);
+                        .with("dlqTopic", endpoint.getDlqTopic())
+                        .with("consequence", "offset not committed, record will be retried"), dlqEx);
+                progress.blocked(tp, record.offset());
+                return true;
             }
         }
+        // Without a DLQ an invalid record is dropped, as documented for JSON Schema validation.
+        progress.resolved(tp, record.offset());
         if (commitAfterSuccess) {
-            commitSingleOffset(kafkaConsumer, record);
+            commitProgress(kafkaConsumer, tp, progress);
         }
         return true;
     }
@@ -508,10 +642,12 @@ final class RecordProcessor {
      * Handles the outcome after all retries are exhausted or a permanent error is detected.
      * Routes to DLQ if available, otherwise delegates to the exception handler.
      */
-    private int handleRetryExhausted(KafkaConsumer<byte[], byte[]> kafkaConsumer,
+    private int handleRetryExhausted(Consumer<byte[], byte[]> kafkaConsumer,
                                       ConsumerRecord<byte[], byte[]> record,
                                       Exception lastError, int actualRetries,
-                                      boolean permanentError, boolean commitAfterSuccess) {
+                                      boolean permanentError, boolean commitAfterSuccess,
+                                      PollProgress progress) {
+        TopicPartition tp = partitionOf(record);
         String errorType = null;
         if (endpoint.isRetryOnlyTransientErrors()) {
             errorType = permanentError ? "PERMANENT" : "TRANSIENT";
@@ -534,13 +670,16 @@ final class RecordProcessor {
                 Exchange traceExchange = callback.createExchange();
                 tracingHelper.traceError(traceExchange, lastError, dlqContext, true);
                 tracingHelper.reportFailure(traceExchange, lastError, errorCode, dlqContext, true);
+                progress.resolved(tp, record.offset());
                 if (commitAfterSuccess) {
-                    commitSingleOffset(kafkaConsumer, record);
+                    commitProgress(kafkaConsumer, tp, progress);
                 }
                 return 1;
             } catch (Exception dlqEx) {
-                // Without a DLQ write there is no offset commit, so this record is polled again
-                // on the next cycle - the consumer stalls here until the cause is removed.
+                // Without a DLQ write the record is not resolved: no commit passes it, the
+                // partition is rewound and the record is retried after a backoff, until the
+                // cause (missing topic, missing ACL, broker down) is removed.
+                progress.blocked(tp, record.offset());
                 AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("dlq.send.failed")
                         .with("trigger", "retryExhausted")
                         .with("topic", record.topic())
@@ -550,7 +689,7 @@ final class RecordProcessor {
                         .with("retryAttempts", actualRetries)
                         .with("errorType", errorType != null ? errorType : "UNKNOWN")
                         .with("originalError", CpiKafkaPlusErrorCode.fromThrowable(lastError).code())
-                        .with("consequence", "offset not committed, record will be reprocessed"), dlqEx);
+                        .with("consequence", "offset not committed, record will be retried"), dlqEx);
 
                 java.util.Map<String, String> dlqContext = new java.util.LinkedHashMap<>(context);
                 dlqContext.put("dlqOutcome", "SEND_FAILED");
@@ -563,6 +702,7 @@ final class RecordProcessor {
             Exchange traceExchange = callback.createExchange();
             tracingHelper.traceError(traceExchange, lastError, context, true);
             tracingHelper.reportFailure(traceExchange, lastError, errorCode, context, true);
+            resolveWithoutDlq(kafkaConsumer, record, commitAfterSuccess, progress);
         }
 
         Exchange errorExchange = callback.createExchange();
@@ -571,12 +711,29 @@ final class RecordProcessor {
         return 0;
     }
 
-    int processRecordsIndividually(KafkaConsumer<byte[], byte[]> kafkaConsumer,
+    /**
+     * What happens to a failed record when there is no DLQ: it is skipped (at-most-once), so the
+     * next commit may pass it.
+     */
+    private void resolveWithoutDlq(Consumer<byte[], byte[]> kafkaConsumer,
+                                   ConsumerRecord<byte[], byte[]> record,
+                                   boolean commitAfterSuccess, PollProgress progress) {
+        TopicPartition tp = partitionOf(record);
+        progress.resolved(tp, record.offset());
+        if (commitAfterSuccess) {
+            commitProgress(kafkaConsumer, tp, progress);
+        }
+    }
+
+    int processRecordsIndividually(Consumer<byte[], byte[]> kafkaConsumer,
                                    List<ConsumerRecord<byte[], byte[]>> batch,
-                                   boolean commitAfterSuccess) {
+                                   boolean commitAfterSuccess, PollProgress progress) {
         int processed = 0;
         for (ConsumerRecord<byte[], byte[]> record : batch) {
-            processed += processRecordWithRetry(kafkaConsumer, record, commitAfterSuccess, true);
+            if (stopRequested(progress) || progress.isBlocked(partitionOf(record))) {
+                break;
+            }
+            processed += processRecordWithRetry(kafkaConsumer, record, commitAfterSuccess, true, progress);
         }
         return processed;
     }
@@ -588,13 +745,15 @@ final class RecordProcessor {
      * on the same bad offset (KAFKA-16507 win, applied at the adapter layer
      * because the Kafka client itself receives raw bytes via ByteArrayDeserializer).
      *
-     * <p>If {@code dlqHelper} is null, or DLQ send itself fails, the original
-     * deserialization error is propagated so the caller's reconnect logic kicks in.
+     * <p>Without a DLQ the record is handled like any other failed record without a DLQ. If the
+     * DLQ write fails, the partition is blocked at the record and it is retried later. The error no
+     * longer escapes the poll: that skipped every remaining record of the poll as well.
      */
-    private int handleDeserializationFailure(KafkaConsumer<byte[], byte[]> kafkaConsumer,
+    private int handleDeserializationFailure(Consumer<byte[], byte[]> kafkaConsumer,
                                               ConsumerRecord<byte[], byte[]> record,
                                               Exception cause,
-                                              boolean commitAfterSuccess) {
+                                              boolean commitAfterSuccess,
+                                              PollProgress progress) {
         // f2: Trace the deserialization failure for consumer/sender direction
         Exchange traceExchange = callback.createExchange();
         java.util.Map<String, String> context = new java.util.LinkedHashMap<>();
@@ -608,29 +767,38 @@ final class RecordProcessor {
         // Deserialization failures map to KP_PROD_004 (serialization_failed) via the central taxonomy
         String errorCode = CpiKafkaPlusErrorCode.fromThrowable(cause).code();
         tracingHelper.reportFailure(traceExchange, cause, errorCode, context, true);
+        progress.failed();
 
+        TopicPartition tp = partitionOf(record);
         if (dlqHelper == null) {
-            throw cause instanceof RuntimeException
-                    ? (RuntimeException) cause
-                    : new RuntimeException(cause);
+            resolveWithoutDlq(kafkaConsumer, record, commitAfterSuccess, progress);
+            callback.handleException("Could not deserialize Kafka record at offset " + record.offset(),
+                    callback.createExchange(), cause);
+            return 0;
         }
         LOG.warn("[CPI-KAFKA-PLUS-DIAG] poison-pill: deserialization failed at topic='{}' partition={} offset={}: {}",
                 record.topic(), record.partition(), record.offset(), cause.getMessage());
         try {
-            TopicPartition tp = new TopicPartition(record.topic(), record.partition());
             dlqHelper.sendDeserializationFailure(tp, record.offset(),
                     record.key(), record.value(),
                     record.headers(), record.timestamp(), cause);
+            progress.resolved(tp, record.offset());
             if (commitAfterSuccess) {
-                commitSingleOffset(kafkaConsumer, record);
+                commitProgress(kafkaConsumer, tp, progress);
             }
             return 1;
         } catch (Exception dlqEx) {
-            LOG.error("[CPI-KAFKA-PLUS-DIAG] poison-pill: DLQ routing FAILED, propagating original error: dlqExClass={} dlqExMsg='{}'",
-                    dlqEx.getClass().getName(), dlqEx.getMessage(), dlqEx);
-            throw cause instanceof RuntimeException
-                    ? (RuntimeException) cause
-                    : new RuntimeException(cause);
+            AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("dlq.send.failed")
+                    .with("trigger", "deserialization")
+                    .with("topic", record.topic())
+                    .with("partition", record.partition())
+                    .with("offset", record.offset())
+                    .with("dlqTopic", endpoint.getDlqTopic())
+                    .with("consequence", "offset not committed, record will be retried"), dlqEx);
+            progress.blocked(tp, record.offset());
+            callback.handleException("Could not deserialize Kafka record at offset " + record.offset(),
+                    callback.createExchange(), cause);
+            return 0;
         }
     }
 
@@ -732,26 +900,43 @@ final class RecordProcessor {
 
     // --- Offset management ---
 
-    private void commitOffsets(KafkaConsumer<byte[], byte[]> kafkaConsumer,
-                               List<ConsumerRecord<byte[], byte[]>> batch) {
-        for (ConsumerRecord<byte[], byte[]> record : batch) {
-            offsetTracker.markProcessed(
-                    new TopicPartition(record.topic(), record.partition()), record.offset());
+    /**
+     * Commits {@code tp} up to its first unresolved record of this poll.
+     *
+     * <p>A wakeup or interrupt during the commit means the consumer is stopping: processing stops,
+     * the offset stays pending and is committed on revoke or by the next run. It is never treated as
+     * a failure of the record that was just processed (#172).
+     */
+    private void commitProgress(Consumer<byte[], byte[]> kafkaConsumer, TopicPartition tp,
+                                PollProgress progress) {
+        long next = progress.commitOffset(tp);
+        if (next < 0 || next <= progress.committedUpTo(tp)) {
+            return; // nothing new since the last commit of this partition
         }
-        boolean committed = commitTracked(offsets -> kafkaConsumer.commitSync(offsets),
-                "batch commit, records=" + batch.size());
-        LOG.debug("Batch commit attempt after successful processing: committed={} pendingRemaining={}",
-                committed, !offsetTracker.isEmpty());
+        offsetTracker.markProcessed(tp, next - 1);
+        try {
+            if (commitTracked(offsets -> kafkaConsumer.commitSync(offsets),
+                    "commit, partition=" + tp + " nextOffset=" + next)) {
+                progress.committed(tp, next);
+            }
+        } catch (WakeupException e) {
+            LOG.info("[CPI-KAFKA-PLUS-DIAG] commit interrupted by wakeup (consumer stopping): partition={} "
+                    + "nextOffset={} stays pending", tp, next);
+            progress.stop();
+        } catch (InterruptException e) {
+            Thread.currentThread().interrupt();
+            LOG.info("[CPI-KAFKA-PLUS-DIAG] commit interrupted (consumer stopping): partition={} "
+                    + "nextOffset={} stays pending", tp, next);
+            progress.stop();
+        }
     }
 
-    private void commitSingleOffset(KafkaConsumer<byte[], byte[]> kafkaConsumer,
-                                    ConsumerRecord<byte[], byte[]> record) {
-        offsetTracker.markProcessed(
-                new TopicPartition(record.topic(), record.partition()), record.offset());
-        commitTracked(offsets -> kafkaConsumer.commitSync(offsets),
-                "single offset commit, topic=" + record.topic()
-                        + " partition=" + record.partition()
-                        + " offset=" + record.offset());
+    /** Marks {@code tp}'s resolved prefix as pending without committing it (consumer stopping). */
+    private void markProgress(TopicPartition tp, PollProgress progress) {
+        long next = progress.commitOffset(tp);
+        if (next >= 0) {
+            offsetTracker.markProcessed(tp, next - 1);
+        }
     }
 
     /**
@@ -775,7 +960,19 @@ final class RecordProcessor {
             return true;
         }
         Map<TopicPartition, OffsetAndMetadata> snapshot = offsetTracker.snapshot();
-        boolean committed = commitWithRebalanceHandling(() -> action.commit(snapshot), context);
+        boolean committed;
+        try {
+            committed = commitWithRebalanceHandling(() -> action.commit(snapshot), context);
+        } catch (WakeupException | InterruptException e) {
+            throw e; // the consumer is stopping; the caller decides
+        } catch (KafkaException | IllegalStateException e) {
+            // A commit that timed out or hit a closed consumer. The offsets stay pending and go out
+            // with the next commit; the records were processed and must not be processed again.
+            AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("consumer.commit.failed")
+                    .with("context", context)
+                    .with("consequence", "offsets stay pending and are committed with the next commit"), e);
+            return false;
+        }
         if (committed) {
             offsetTracker.confirm(snapshot);
         }
@@ -805,7 +1002,7 @@ final class RecordProcessor {
      * rebalance was in progress. Called at the start of each emit cycle, after
      * {@code poll()} has driven the rebalance to completion.
      */
-    void recommitPending(KafkaConsumer<byte[], byte[]> kafkaConsumer) {
+    void recommitPending(Consumer<byte[], byte[]> kafkaConsumer) {
         if (offsetTracker.isEmpty()) {
             return;
         }

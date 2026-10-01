@@ -263,17 +263,18 @@ Two fields on `dlq.send.failed` decide what to do next:
 
 This is the shape of a stalled consumer, and it is worth recognising because the symptom and the
 cause sit far apart. A dead-letter send is what allows the offset to be committed: if the send
-throws, nothing is committed, the same record is polled again on the next cycle, and every later
-message is stuck behind a record that can never succeed. What you observe is a partition whose
-committed offset does not move and a dead-letter topic that has stopped receiving anything — while
-the integration flow keeps producing one failed message per delivery, which looks like a *processing*
-problem rather than a *dead-letter* problem.
+throws, nothing is committed, the partition is rewound to the record and retried after a backoff
+(1 s, doubling up to 5 minutes), and every later message of that partition waits behind it. What you
+observe is a partition whose committed offset does not move and a dead-letter topic that has stopped
+receiving anything — while the integration flow keeps producing one failed message per retry, which
+looks like a *processing* problem rather than a *dead-letter* problem.
 
 Confirm it in this order:
 
 1. Grep the trace for `dlq.send.failed`. The line carries the original `topic`, `partition` and
    `offset`, the serialised cause, and `consequence='offset not committed, record will be
-   reprocessed'`. The repeated offset in successive lines is the stalled one.
+   retried'`. It is followed by `consumer.partition.retry` with the same `offset` and the delay
+   until the next attempt (`retryInMs`). The repeated offset in successive lines is the stalled one.
 2. Compare the group's committed offset with the partition's high watermark. A constant gap that
    equals the number of deliveries since the stall began confirms it.
 3. Check whether a rebuild was attempted and what it achieved, using the fields above.

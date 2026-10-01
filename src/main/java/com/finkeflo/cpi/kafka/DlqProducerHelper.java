@@ -323,7 +323,7 @@ public final class DlqProducerHelper implements Closeable {
                     .with("rebuildBackoffElapsed", backoffElapsed)
                     .with("rebuildTriggered", shouldRebuild)
                     .with("duplicateRisk", !"SYNC_SEND".equals(attempt.phase))
-                    .with("consequence", "offset not committed, record will be reprocessed")
+                    .with("consequence", "offset not committed, record will be retried")
                     .with("thread", Thread.currentThread().getName());
             context.forEach(event::with);
             AdapterDiagnostics.error(LOG, event, firstFailure);

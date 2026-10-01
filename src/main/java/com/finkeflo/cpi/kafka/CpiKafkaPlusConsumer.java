@@ -24,6 +24,7 @@ import java.nio.ByteBuffer;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
@@ -122,6 +123,13 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
     private boolean lastHeartbeatInitialized = false;
     private ConsumerCircuitBreaker circuitBreaker;
     private RecordProcessor recordProcessor;
+    /** Delays the retry of partitions blocked at a record that has to be retried (#187). */
+    private PartitionBackoff retryBackoff;
+    /** Partitions this consumer paused for {@link #retryBackoff}, so only those are resumed. */
+    private final Set<TopicPartition> backoffPaused = new HashSet<>();
+
+    /** Upper bound of the retry backoff, the same cap as the in-place DLQ retries. */
+    private static final long MAX_RETRY_BACKOFF_MS = 300_000L;
     private volatile boolean stoppedByErrorPolicy = false;
     private volatile Throwable stoppedByError;
     private volatile long lastStoppedByErrorReminderMs = 0L;
@@ -188,6 +196,11 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
         @Override
         public Exchange createExchange() {
             return endpoint.createExchange();
+        }
+
+        @Override
+        public boolean isStopRequested() {
+            return shutdownRequested;
         }
     };
 
@@ -383,6 +396,8 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
         }
         jsonSchemaValidator = null;
         recordProcessor = null;
+        retryBackoff = null;
+        backoffPaused.clear();
 
         // Step 6: Signal tracing after everything is cleaned up. Reset the transition guard so a
         // later restart re-reports OK on its first successful poll.
@@ -444,6 +459,10 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
         recordProcessor = new RecordProcessor(endpoint, tracingHelper,
                 jsonSchemaValidator, dlqHelper, avroHelper, consumerCallback,
                 new OffsetCommitTracker());
+        // A fresh consumer starts unpaused, so the backoff state starts over with it.
+        retryBackoff = new PartitionBackoff(
+                Math.max(1, endpoint.getRetryDelaySeconds()) * 1000L, MAX_RETRY_BACKOFF_MS);
+        backoffPaused.clear();
         initialized = true;
         // NOTE: do NOT publish OK here. subscribe() is local/lazy and proves nothing about broker
         // reachability or group/topic authorization. OK is reported only after the first poll()
@@ -478,6 +497,7 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
             RebalanceLogger.RebalanceCommitHook commitHook = new RebalanceLogger.RebalanceCommitHook() {
                 @Override
                 public void onRevoked(java.util.Collection<TopicPartition> partitions) {
+                    forgetBackoff(partitions);
                     if (recordProcessor != null && kafkaConsumer != null) {
                         recordProcessor.commitOnRevoke(
                                 offsets -> kafkaConsumer.commitSync(
@@ -488,6 +508,7 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
 
                 @Override
                 public void onLost(java.util.Collection<TopicPartition> partitions) {
+                    forgetBackoff(partitions);
                     if (recordProcessor != null) {
                         recordProcessor.dropLost(partitions);
                     }
@@ -666,6 +687,7 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
         if (isBatchComplete && recordProcessor != null) {
             recordProcessor.recommitPending(kafkaConsumer);
         }
+        applyRetryBackoff();
         // Drain is inert in STREAMING mode — see isDrainActive().
         boolean drainEnabled = isDrainActive(endpoint);
         int totalProcessed = 0;
@@ -708,6 +730,7 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
             LOG.debug("[CPI-KAFKA-PLUS-DIAG] poll: drainCycle={} records={} totalFetched={} from topic='{}' group='{}'",
                     drainCycle, recordCount, totalRecordsFetched, endpoint.getEffectiveTopic(), endpoint.getGroupId());
 
+            PollProgress progress = new PollProgress(records);
             try {
                 // TODO [tech-debt] SPLIT_EXCHANGES is kept here for backward compatibility with existing
                 //   iFlow channel configs that stored this value before the 1.2.0 metadata removed it
@@ -716,17 +739,19 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
                 //   condition can be simplified: batchMode + batchOutputFormat != SPLIT_EXCHANGES
                 //   becomes just batchMode (and SPLIT_EXCHANGES becomes unreachable dead code).
                 if (endpoint.isBatchMode() && !"SPLIT_EXCHANGES".equalsIgnoreCase(endpoint.getBatchOutputFormat())) {
-                    totalProcessed += recordProcessor.processBatchRecords(kafkaConsumer, records, isBatchComplete);
+                    totalProcessed += recordProcessor.processBatchRecords(kafkaConsumer, records, isBatchComplete,
+                            progress);
                 } else {
-                    totalProcessed += recordProcessor.processSingleRecords(kafkaConsumer, records, isBatchComplete);
-                }
-                if (circuitBreaker != null) {
-                    circuitBreaker.recordSuccess();
+                    totalProcessed += recordProcessor.processSingleRecords(kafkaConsumer, records, isBatchComplete,
+                            progress);
                 }
             } catch (Throwable t) {
                 LOG.error("[CPI-KAFKA-PLUS-DIAG] processRecords: FAILED topic='{}' group='{}' exClass={} exMsg='{}' topStack={}",
                         endpoint.getEffectiveTopic(), endpoint.getGroupId(),
                         t.getClass().getName(), t.getMessage(), describeTopStack(t, 6));
+                // The record it escaped from is retried, never skipped with the rest of the poll.
+                progress.blockCurrent();
+                settlePoll(progress);
                 if (circuitBreaker != null && circuitBreaker.recordFailure()) {
                     break; // auto-pause triggered
                 }
@@ -734,6 +759,21 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
                     throw (Exception) t;
                 }
                 throw new RuntimeException("Non-Exception Throwable from processRecords: " + t.getClass().getName(), t);
+            }
+            settlePoll(progress);
+
+            // Route failures are handled inside the record processor, so they are counted from the
+            // poll's outcome rather than from exceptions (#182).
+            if (circuitBreaker != null) {
+                if (progress.successes() > 0) {
+                    circuitBreaker.recordSuccess();
+                }
+                if (circuitBreaker.recordFailures(progress.failuresSinceLastSuccess())) {
+                    break; // auto-pause triggered
+                }
+            }
+            if (progress.isStopped() || !progress.rewindPositions().isEmpty()) {
+                break; // re-polling now would only fetch what was just rewound
             }
 
             if (!drainEnabled) {
@@ -782,6 +822,92 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
             LOG.warn("[CPI-KAFKA-PLUS-DIAG] drain: failed to seek back to first offsets, "
                     + "records may be re-polled on next cycle anyway: exClass={} exMsg='{}'",
                     e.getClass().getName(), e.getMessage());
+        }
+    }
+
+    /**
+     * Rewinds every partition of a poll to its first unresolved record and starts the retry backoff
+     * of partitions that are blocked at a record that has to be retried.
+     */
+    private void settlePoll(PollProgress progress) {
+        try {
+            BundleBackedClassLoader.runWithBundleClassLoader(getClass(),
+                    () -> recordProcessor.rewind(kafkaConsumer, progress));
+        } catch (Exception e) {
+            LOG.warn("[CPI-KAFKA-PLUS-DIAG] rewind failed: exClass={} exMsg='{}'",
+                    e.getClass().getName(), e.getMessage());
+        }
+        // doStop() clears the backoff once its bounded wait for this thread is over; a poll that
+        // outlives it has nothing left to pause.
+        PartitionBackoff backoff = retryBackoff;
+        if (backoff == null) {
+            return;
+        }
+        long now = System.currentTimeMillis();
+        for (TopicPartition tp : progress.partitions()) {
+            Long blockedAt = progress.blockedOffset(tp);
+            if (blockedAt != null) {
+                long delayMs = backoff.blocked(tp, blockedAt, now);
+                pauseForBackoff(tp);
+                AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("consumer.partition.retry")
+                        .with("topic", tp.topic())
+                        .with("partition", tp.partition())
+                        .with("offset", blockedAt)
+                        .with("retryInMs", delayMs)
+                        .with("consequence", "nothing at or after this offset is committed until it succeeds"));
+            } else if (progress.commitOffset(tp) >= 0) {
+                backoff.progressed(tp);
+            }
+        }
+    }
+
+    /**
+     * Pauses the partitions that are still backing off and resumes those whose delay is over. Runs
+     * before every emit poll, because the keep-alive poll and the end of an auto-pause resume the
+     * whole assignment.
+     */
+    private void applyRetryBackoff() {
+        if (retryBackoff == null) {
+            return;
+        }
+        try {
+            BundleBackedClassLoader.runWithBundleClassLoader(getClass(), () -> {
+                Set<TopicPartition> assignment = kafkaConsumer.assignment();
+                Set<TopicPartition> waiting = retryBackoff.waiting(System.currentTimeMillis());
+                waiting.retainAll(assignment);
+                Set<TopicPartition> resume = new HashSet<>(backoffPaused);
+                resume.removeAll(waiting);
+                resume.retainAll(assignment);
+                if (!resume.isEmpty()) {
+                    kafkaConsumer.resume(resume);
+                    LOG.info("[CPI-KAFKA-PLUS-DIAG] retry backoff over, resuming {}", resume);
+                }
+                if (!waiting.isEmpty()) {
+                    kafkaConsumer.pause(waiting);
+                }
+                backoffPaused.clear();
+                backoffPaused.addAll(waiting);
+            });
+        } catch (Exception e) {
+            LOG.warn("[CPI-KAFKA-PLUS-DIAG] applying the retry backoff failed: exClass={} exMsg='{}'",
+                    e.getClass().getName(), e.getMessage());
+        }
+    }
+
+    private void pauseForBackoff(TopicPartition tp) {
+        try {
+            BundleBackedClassLoader.runWithBundleClassLoader(getClass(),
+                    () -> kafkaConsumer.pause(java.util.Collections.singleton(tp)));
+            backoffPaused.add(tp);
+        } catch (Exception e) {
+            LOG.warn("[CPI-KAFKA-PLUS-DIAG] pausing {} for the retry backoff failed: {}", tp, e.getMessage());
+        }
+    }
+
+    private void forgetBackoff(java.util.Collection<TopicPartition> partitions) {
+        if (retryBackoff != null && partitions != null) {
+            retryBackoff.forget(partitions);
+            backoffPaused.removeAll(partitions);
         }
     }
 

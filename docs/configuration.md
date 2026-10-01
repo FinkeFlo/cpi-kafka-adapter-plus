@@ -120,7 +120,7 @@ For details on Avro integration, see [Avro / Schema Registry](features/avro-sche
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `autoPauseEnabled` | `false` | Automatically pause the consumer after consecutive processing errors. |
-| `autoPauseErrorThreshold` | `5` | Consecutive processing errors required to activate auto-pause. |
+| `autoPauseErrorThreshold` | `5` | Consecutive processing errors required to activate auto-pause. Every failed IFlow call counts, including records that end up in the DLQ. |
 | `autoPauseCooldownSeconds` | `60` | Initial auto-pause duration in seconds; doubles after subsequent failures, capped at 900 seconds. |
 
 For details on DLQ and retry behavior, see [Dead Letter Queue](features/dead-letter-queue.md).
