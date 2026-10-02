@@ -7,7 +7,7 @@ and the project follows [Semantic Versioning](https://semver.org/). See
 [VERSIONING.md](https://github.com/finkeflo/cpi-kafka-adapter-plus/blob/main/VERSIONING.md) for how the adapter version maps to SAP CPI
 iFlow compatibility.
 
-## [Unreleased]
+## [1.3.8] - 2026-10-02
 ### Fixed
 - A second Kafka receiver in the same iFlow wrote to the first receiver's topic. The batch receiver answers with a `CamelKafkaTopic` header, and the next receiver read that header as a topic override. The header is still set for iFlows that read it, but a receiver with its own topic now ignores it while it still holds the value the batch response left; a value the iFlow sets explicitly, before or after the batch receiver, still overrides the topic, and a receiver without a topic of its own still follows the header. See issue #185.
 - The plaintext-vs-TLS protection that stops a node crash could switch itself off for good. Its probe cached every result for the life of the JVM, redeploys included, so a first probe while the broker was down left the protection off until the node restarted. An unreachable broker is now probed again on the next start; a reached plaintext listener is still cached. A broker that accepts the connection but stays silent, such as a load balancer whose brokers are all down, counts as unreachable too. The probe also no longer holds a shared lock while it waits for a broker. See issue #176.
