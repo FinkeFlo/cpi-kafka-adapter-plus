@@ -60,6 +60,22 @@ public class SchemaRegistryUrlLoggingTest {
         Assert.assertNull(SchemaRegistryHttpClient.withoutUserInfo(null));
     }
 
+    @Test
+    public void credentialsInAUrlWithoutSchemeAreMaskedToo() throws Exception {
+        CpiKafkaPlusEndpoint endpoint = endpoint();
+        endpoint.setSchemaRegistryUrl("alice:s3cr3t-pw@sr.example.com:8081");
+
+        String logged = captureStdErr(() -> new AvroSerializerHelper(endpoint).close());
+
+        Assert.assertTrue("precondition: the registry is logged\n" + logged, logged.contains("sr.example.com:8081"));
+        Assert.assertFalse(logged, logged.contains("s3cr3t-pw"));
+        Assert.assertFalse(logged, logged.contains("alice"));
+        Assert.assertEquals("***@sr.example.com:8081/registry",
+                SchemaRegistryHttpClient.withoutUserInfo("alice:s3cr3t-pw@sr.example.com:8081/registry"));
+        Assert.assertEquals("an @ in the path is not user info", "sr.example.com:8081/a@b",
+                SchemaRegistryHttpClient.withoutUserInfo("sr.example.com:8081/a@b"));
+    }
+
     private static CpiKafkaPlusEndpoint endpoint() {
         CpiKafkaPlusEndpoint endpoint = new CpiKafkaPlusEndpoint();
         endpoint.setSchemaRegistryUrl(URL_WITH_CREDENTIALS);

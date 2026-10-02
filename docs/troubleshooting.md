@@ -54,8 +54,6 @@ tickets: it identifies the failure class precisely and survives copy-paste bette
 The symbol is not the operation token at the start of the log line; the two are separate
 namespaces. Grep for the code (`KP-META-002`), which appears on every line that carries it, rather
 than for the symbol.
-| `KP-SR-001` | `schema_registry.failed` | Schema Registry operation failed |
-| `KP-GEN-001` | `unclassified` | Unclassified error |
 
 `KP-GEN-001` means the adapter did not recognise the exception. It is not necessarily fatal — the
 full cause chain in `error=` is the evidence. If the same `KP-GEN-001` recurs, report it so the
@@ -73,8 +71,12 @@ automatic mitigation and tell you what to try next.
 | `FATAL_DATA_ERROR` | A problem with the record itself (too large, invalid topic, serialisation failure). No producer rebuild will help. | Fix the payload or configuration. |
 | `UNKNOWN_FATAL` | The adapter does not recognise this exception. | Read the full `error=` field. Report it so the classification can be improved. |
 
-`UNKNOWN_FATAL` is deliberately conservative: the adapter does not guess. If you see it, the cause
-chain is the evidence. A rebuild is not triggered automatically because it might be pointless.
+`UNKNOWN_FATAL` is deliberately conservative: the adapter does not guess what went wrong, and the
+cause chain is the evidence. On the receiver it is treated like `FATAL_PRODUCER_UNUSABLE` in two
+respects: the shared producer is rebuilt (at most once per rebuild backoff, `rebuildTriggered=true` on
+the failure line), because an unrecognised failure may have left it unusable, and it counts towards
+the node-fault escalation. It is never retried by
+the producer retry, apart from the KAFKA-10902 monitor fault below.
 
 ## Finding the adapter's lines
 
@@ -380,9 +382,18 @@ unreachable at that moment.
 
 ## Message Processing Log enrichment
 
-When a failure occurs during an exchange, the adapter enriches the Message Processing Log with
-structured information. This is available in the CPI monitor even when MPL *tracing* is disabled
-(which is the default). Two channels are used, both trace-independent:
+When a failure occurs during an exchange on a **sender** (consumer) channel, the adapter enriches
+the Message Processing Log with structured information. This is available in the CPI monitor even
+when MPL *tracing* is disabled (which is the default). Two channels are used, both
+trace-independent.
+
+A failing **receiver** (producer) channel writes none of these: the exchange fails with the
+exception, and CPI writes the failed MPL entry itself — without the custom header properties, the
+status event and the `KafkaAdapterError` attachment, whatever `writeMplErrorAttachment` says. Only
+while trace is active does it add an error trace block with the cause chain. For the receiver, the failure line in the tenant trace (`producer.single.send`, `producer.batch.send`,
+`producer.transactional.batch.send`, `producer.retry.*`) is the diagnostic. The only MPL entry
+the receiver adds is the `KafkaRetryAttempts` property on a message that got through thanks to a
+retry, see [Producer Retry](features/producer-retry.md#in-message-monitoring).
 
 ### Custom header properties
 
@@ -392,7 +403,7 @@ Four custom header properties are attached to the failed message's MPL entry:
 |----------|-------|
 | `KafkaAdapterErrorCode` | The stable error code, e.g. `KP-PROD-002` |
 | `KafkaAdapterTopic` | The target topic |
-| `KafkaAdapterProducerPath` | `SHARED` or `TRANSACTIONAL` |
+| `KafkaAdapterProducerPath` | `SHARED` or `TRANSACTIONAL`, only when the failure carries a producer path |
 | `KafkaAdapterRetryable` | `true` if the classification was `RETRIABLE`, otherwise `false` |
 
 These properties are visible in the monitor's message detail view and are searchable. They do **not**

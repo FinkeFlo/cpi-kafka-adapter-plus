@@ -130,7 +130,7 @@ This means a single bad record does not drag the entire batch into the DLQ.
 
 Records that fail **JSON Schema Validation** (`jsonSchemaValidation`) are sent to the DLQ **immediately without retries** (`retryCount=0`), since schema validation errors are deterministic and retrying would produce the same result.
 
-**Without DLQ:** Records that fail **JSON Schema Validation** (`jsonSchemaValidation`) are **silently discarded** — the offset is committed so the record is not reprocessed, but the record is not forwarded to the IFlow. A WARN-level log entry is written for each discarded record.
+**Without DLQ:** Records that fail **JSON Schema Validation** (`jsonSchemaValidation`) are **silently discarded** — the offset is committed so the record is not reprocessed, but the record is not forwarded to the IFlow. A WARN-level log entry is written for each discarded record; WARN does not reach the tenant trace in production, so enable **Report Validation Failures in CPI Monitoring** (`jsonSchemaReportError`) to see these records as failed messages.
 
 ## When the DLQ Write Fails
 
@@ -170,7 +170,7 @@ and to records that cannot be deserialized (Avro). It does not apply to:
 
 | Error Type | Behavior |
 |------------|----------|
-| JSON Schema validation failure | Record is **discarded**, offset committed — a record that violates the schema never becomes valid by retrying. A WARN log is written but the record is lost. |
+| JSON Schema validation failure | Record is **discarded**, offset committed — a record that violates the schema never becomes valid by retrying. A WARN log is written, which does not reach the tenant trace in production, and the record is lost; `jsonSchemaReportError` adds a failed MPL entry for it. |
 | A failure inside the adapter itself (not in the IFlow) | The record is always retried, whatever the setting. |
 
 > **Retry Failed Message and poison pills:** a record that can never be processed blocks its

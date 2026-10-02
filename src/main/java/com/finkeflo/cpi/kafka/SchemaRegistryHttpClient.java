@@ -330,7 +330,8 @@ final class SchemaRegistryHttpClient {
     }
 
     private static final java.util.regex.Pattern USER_INFO =
-            java.util.regex.Pattern.compile("^([A-Za-z][A-Za-z0-9+.-]*://)[^/@]*@");
+            // The scheme is optional: a saved "user:pw@host" has none and must be masked as well.
+            java.util.regex.Pattern.compile("^((?:[A-Za-z][A-Za-z0-9+.-]*://)?)[^/@]*@");
 
     private static String normalizeUrl(String url) {
         if (url == null) return "";

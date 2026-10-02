@@ -47,7 +47,12 @@ retry for batches.
 | `producerRetryMaxAttempts` | `1` | 1–5 | **Total** attempts, not additional ones. `1` switches the feature off. |
 | `producerRetryDelaySeconds` | `2` | 1–30 | Constant wait between attempts. |
 | `producerRetryOnlyTransientErrors` | `true` | — | `true`: only `RETRIABLE`. `false`: also an unusable transactional producer. |
-| `producerRetryTotalBudgetSeconds` | `30` | 5–300 | Hard bound for all attempts of one message together. |
+| `producerRetryTotalBudgetSeconds` | `30` | 5–900 | Hard bound for all attempts of one message together. |
+
+From metadata version 1.4 the UI flags a value outside these ranges; an externalized `{{parameter}}`
+is not flagged and is checked when the channel starts. *Delay Between Attempts* and *Total Retry
+Budget* are hidden while *Max Send Attempts* is `1`, because they have no effect then and the start
+check ignores them.
 
 These are **separate** from the sender-side `retryDelaySeconds` / `retryOnlyTransientErrors`, which
 belong to the consumer's dead-letter path and use exponential backoff. One option meaning two
@@ -101,14 +106,16 @@ rebuild path.
 The adapter runs inside the request thread of a synchronous HTTP call. The binding constraint is
 therefore not the transaction slot limit but the caller's patience.
 
-**One attempt costs roughly four times `deliveryTimeoutSeconds` on the transactional path**, not
-once. `delivery.timeout.ms` only bounds the wait for acknowledgements; `initTransactions()`, the
-metadata block inside `send()` and `commitTransaction()` are each bounded by `max.block.ms`, which
-the adapter sets to `min(30s, deliveryTimeoutSeconds)`.
+**One attempt costs more than `deliveryTimeoutSeconds`.** `delivery.timeout.ms` only bounds the
+wait for acknowledgements; the metadata block inside `send()` and, on the transactional path,
+`initTransactions()` and `commitTransaction()` are each bounded by `max.block.ms`, which the adapter
+sets to `min(30s, deliveryTimeoutSeconds)`. A transactional attempt therefore costs about four times
+`deliveryTimeoutSeconds` as long as that is at most 30 s, and `deliveryTimeoutSeconds + 95 s` above.
 
 ```
 blockSeconds = min(30, deliveryTimeoutSeconds)
-perAttempt   = 3 x blockSeconds + deliveryTimeoutSeconds + 5s (producer close)
+perAttempt   = deliveryTimeoutSeconds + blockSeconds                                  (single message)
+perAttempt   = deliveryTimeoutSeconds + 3 x blockSeconds + 5s (producer close)        (transactional batch)
 worstCase    = maxAttempts x perAttempt + (maxAttempts - 1) x producerRetryDelaySeconds
 ```
 
@@ -117,13 +124,15 @@ message naming both numbers. A retry configuration that could never reach its se
 promise to operations that the adapter cannot keep, and a warning would only be discovered during
 the outage it was configured for.
 
-| `deliveryTimeoutSeconds` | `producerRetryMaxAttempts` | Worst case | Fits in 30 s? |
-|---|---|---|---|
-| 120 (default) | 2 | ~970 s | no — start fails |
-| 8 | 2 | ~76 s | no — start fails |
-| 3 | 2 | ~36 s | no — just over |
-| **2** | **2** | **~28 s** | yes |
-| 2 | 3 | ~43 s | no |
+With `producerRetryDelaySeconds=2`:
+
+| `deliveryTimeoutSeconds` | `producerRetryMaxAttempts` | Worst case, transactional batch | Worst case, single message | Fits in 30 s? |
+|---|---|---|---|---|
+| 120 (default) | 2 | 432 s | 302 s | no — start fails |
+| 8 | 2 | 76 s | 34 s | no — start fails |
+| 3 | 2 | 36 s | 14 s | transactional: no, just over; single: yes |
+| **2** | **2** | **28 s** | **10 s** | yes |
+| 2 | 3 | 43 s | 16 s | transactional: no; single: yes |
 
 **Recommended starting point:**
 
@@ -209,9 +218,11 @@ fields, so "how often does the retry actually rescue a message" is a ratio of tw
 
 ### In Message Monitoring
 
-* **Failure:** the MPL status text carries `(after N retry attempts, stopReason=…)`, and
-  `retryAttempts`, `stopReason`, `txnPhase` and `totalElapsedMs` are added to the
-  `KafkaAdapterError` attachment (subject to `writeMplErrorAttachment`).
+* **Failure:** the exchange fails with the exception of the last attempt, and CPI writes the
+  failed MPL entry itself. The receiver adds no status text and no `KafkaAdapterError` attachment
+  (`writeMplErrorAttachment` currently has no effect on the receiver). The number of attempts,
+  `stopReason`, `txnPhase` and `totalElapsedMs` are in the `producer.retry.exhausted` or
+  `producer.retry.skipped` line in the trace.
 * **Success after a retry:** the message gets the property and custom header property
   `KafkaRetryAttempts`, so messages that only got through thanks to a retry are filterable.
 * **In the integration flow:** the header `CamelKafkaPlusRetryAttempts` is set when more than one

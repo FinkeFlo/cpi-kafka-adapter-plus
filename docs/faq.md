@@ -113,6 +113,17 @@ Yes. Set the following headers on the exchange before sending:
 
 Both are evaluated per message. See [Kafka Headers](features/kafka-headers.md) for the full list.
 
+### When does the receiver send a tombstone (a record with a `null` value)?
+
+In single-message mode (**Batch Send Mode** `NONE`), whenever the message has **no body**: the
+record is sent with a `null` value. With **Serialize Values as Avro** enabled, an empty body is sent
+as `null` too. Without Avro, an empty body is sent as an empty value, which is not a tombstone.
+
+On a compacted topic a tombstone with a key deletes all earlier records of that key, so make sure an
+integration flow cannot reach the Kafka receiver with an empty body by accident. In batch mode a
+tombstone is explicit: `value: null` (`JSON_ARRAY`) or an empty `<value/>` (`XML_LIST`), see
+[Producer Batch](features/producer-batch.md).
+
 ### What happens if the producer batch exceeds the Kafka message size limit?
 
 The producer will throw an exception and the iFlow execution fails. To avoid this,

@@ -11,7 +11,7 @@ TLS.
 | Protocol (UI label) | TLS | Authentication | When to use |
 |---|---|---|---|
 | `SASL_SSL (SASL over TLS)` | yes | Username/password via SASL | Default and the right choice for almost every broker, including all managed services |
-| `SSL (TLS, certificate authentication)` | yes | Client certificate (mTLS) | Brokers that authenticate clients by certificate instead of credentials |
+| `SSL (TLS, client certificate optional via Keystore Alias)` | yes | Client certificate (mTLS) if **SSL Keystore Alias** holds one, otherwise none | Brokers that authenticate clients by certificate instead of credentials, or TLS-only brokers without client authentication |
 | `SASL_PLAINTEXT (no TLS)` | **no** | Username/password via SASL | Local or test brokers on a trusted network only |
 | `PLAINTEXT (no TLS, no authentication)` | **no** | none | Local development only |
 

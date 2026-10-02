@@ -1,7 +1,7 @@
 # ADR 0003: Unpack kafka-clients as Extracted Classes Instead of a Nested JAR
 
 ## Status
-Proposed
+Accepted (implemented: `unpack-kafka-clients` in `pom.xml`)
 
 ## Context
 

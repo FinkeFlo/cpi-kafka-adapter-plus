@@ -10,11 +10,11 @@ It is **not** computed from git/commits, and the metadata is **not** stamped.
 |---|---|---|---|
 | **Bugfix / runtime code / label** | **MICRO** | 1.0.0 → 1.0.**1** | **Seamless** — every iFlow on the line picks it up automatically (no click, no recreate). |
 | **New optional feature / parameter** | **MINOR** | 1.**0**.0 → 1.**1**.0 | Old iFlows keep running; adopt via **"Update Version"** (one click) or leave them on the old minor. |
-| **Incompatible / breaking change** | **MAJOR** | **1**.x → **2**.0 | **No auto-update**: delete + recreate the channel. Last resort only. |
+| **Incompatible / breaking change** | **MAJOR** | **1**.x → **2**.0 | **Not supported by SAP** for custom adapters ("Incompatible Changes — This is not supported", SAP Help: *Versioning Rules for Custom Adapters*). There is no migration path: avoid it. |
 
-**Rule of thumb:** the **MAJOR version is the compatibility boundary.**
-Within the same major everything is compatible (micro automatic, minor one-click) —
-a **major jump breaks** auto-migration.
+**Rule of thumb:** stay **compatible within major version 1**: micro automatic, minor one-click.
+SAP offers no major-version mechanism for custom adapters, so an incompatible change has no
+supported way to reach existing iFlows — design every change so that it does not need one.
 
 ## Version format & preview builds
 
@@ -39,9 +39,16 @@ released version avoids that trap entirely.
 ## Iron rules
 
 1. **Bugfixes = MICRO.** Never put a fix into a new minor — existing iFlows would **not** receive it.
-2. **Never edit or delete a released metadata file of a *superseded* line.** A new **significant** version (`MAJOR.MINOR`) = a **new** file (one variant per file); old files stay frozen in the bundle → backward compatibility. A **micro** bump is the exception and *must* edit its file in place — see below.
-3. **Transport order:** per tenant deploy the **adapter first**, then the iFlows. Otherwise "Route has no inputs" / "Not supported yet".
-4. **Transporting the adapter via CTS+? Upload it through the Integration Suite UI (update-in-place), not the API.** UI path (keeps the workspace `reg_id` stable): package → adapter → *Actions* → *View metadata* → *Edit* → upload the new ESA → *Save* → *Deploy*. The API import path (delete + import) regenerates the `reg_id` on every deploy, which then makes CTS+ transports fail on the target with `UniquenessViolationException` (see SAP KBA 3003834). If the `reg_id`s are already out of sync, a one-time fix is to delete the adapter on the **target** design-time (runtime untouched) and let the transport re-import it.
+2. **A change in place must not invalidate a saved value.** A micro edits the variant file that
+   every iFlow on the line already uses, without an "Update Version" click. It may change labels,
+   tooltips and the visibility of fields (hide a field only if the runtime ignores it while hidden),
+   but nothing that turns a value an iFlow has already saved
+   into an invalid one: no new `Restriction` that rejects a value the runtime accepted, no removed
+   `FixedValue`, no new mandatory field. Such a change needs a new minor line — and until that line
+   is released, its new files are free to change.
+3. **Never edit or delete a released metadata file of a *superseded* line.** A new **significant** version (`MAJOR.MINOR`) = a **new** file (one variant per file); old files stay frozen in the bundle → backward compatibility. A **micro** bump is the exception and *must* edit its file in place — see below.
+4. **Transport order:** per tenant deploy the **adapter first**, then the iFlows. Otherwise "Route has no inputs" / "Not supported yet".
+5. **Transporting the adapter via CTS+? Upload it through the Integration Suite UI (update-in-place), not the API.** UI path (keeps the workspace `reg_id` stable): package → adapter → *Actions* → *View metadata* → *Edit* → upload the new ESA → *Save* → *Deploy*. The API import path (delete + import) regenerates the `reg_id` on every deploy, which then makes CTS+ transports fail on the target with `UniquenessViolationException` (see SAP KBA 3003834). If the `reg_id`s are already out of sync, a one-time fix is to delete the adapter on the **target** design-time (runtime untouched) and let the transport re-import it.
 
 ## How to version
 
