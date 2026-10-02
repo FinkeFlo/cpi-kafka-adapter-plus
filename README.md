@@ -92,17 +92,20 @@ You are free to use, deploy, and modify this adapter — including commercially.
 
 ### Third-Party Licenses
 
-When you build this project, Maven will download third-party dependencies with their
-own licenses. Notable license families include:
+The adapter bundle embeds these third-party libraries:
 
-- **Apache License 2.0** — Kafka, Avro, Jackson, and most other dependencies
-- **Confluent Community License v1.0** — Schema Registry Client, Kafka Avro Serializer
-- **MIT License** — minimal-json
-- **BSD 3-Clause** — re2j, ASM
+- **Apache License 2.0** — Apache Kafka clients, Apache Avro, Jackson, networknt
+  json-schema-validator, ITU, lz4-java, snappy-java
+- **BSD 2-Clause** — zstd-jni
 
-See the [NOTICE](NOTICE) file for details. A complete, machine-readable list of all
-dependencies and their licenses (`THIRD-PARTY.txt`) is generated locally when you build
-the project (`mvn generate-resources`).
+Libraries that are only used to build and test the project (for example the Confluent
+Schema Registry client, Testcontainers and JUnit) are not part of the adapter. Apache Camel
+and the SAP Adapter Development Kit APIs are provided by the CPI runtime.
+
+See the [NOTICE](NOTICE) file for details. A complete, machine-readable list of all build
+dependencies and their licenses (`THIRD-PARTY.txt`, including the test-only ones) is generated
+by every build (`mvn generate-resources`) and packaged with the adapter project; it is not kept
+in the source repository.
 
 ## Trademarks
 

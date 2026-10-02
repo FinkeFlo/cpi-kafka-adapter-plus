@@ -1,7 +1,7 @@
 # ADR 0002: Replace Confluent Schema Registry Client with a JDK-only Implementation
 
 ## Status
-Proposed
+Accepted (implemented: `SchemaRegistryHttpClient`; the Confluent libraries are test-scope only)
 
 ## Context
 

@@ -3,8 +3,9 @@
 ## Overview
 
 The producer can accept an exchange body containing multiple records (JSON or XML)
-and send each one as its own Kafka message. Internally it uses async send + flush
-for maximum throughput.
+and send each one as its own Kafka message. Internally it sends all records
+asynchronously and then waits, with one deadline for the whole batch, until every
+record is acknowledged (no `flush()`).
 
 **Core principle:** Mirrors the consumer batching. Whatever the consumer outputs as
 **JSON Array** (`JSON_ARRAY`) or **XML List** (`XML_LIST`) can be used directly as producer input.
@@ -146,13 +147,19 @@ When `producerBatchMode=NONE` (the default), each iFlow exchange sends a single 
 - **Parsing error:** Clear exception with error description and record index → MPL error
 - **Send error:** Fail-fast on the first error; records already sent remain in Kafka
 - **Fatal error (auth/authorization):** Reconnect is triggered automatically
+- **Transactional batch** (`enableTransactions`): a failed batch is aborted, so `read_committed`
+  consumers never see a part of it. If the abort cannot reach the transaction coordinator, the
+  transaction stays open on the broker, and `read_committed` consumers of the affected partitions
+  stop at it until the broker aborts it after `transaction.timeout.ms` — derived from
+  `deliveryTimeoutSeconds`, at most 900 s — or until the next batch on the same transaction slot
+  cleans it up. `read_uncommitted` consumers are not held up.
 
 ## Limitations (v1)
 
 - **JSON Schema Validation** (`jsonSchemaValidation`) is skipped in batch mode (logged as a warning)
 - `kafka.PARTITION_KEY` and `kafka.OVERRIDE_TIMESTAMP` apply to all records in the batch
 - Exchange headers are copied to all Kafka records (unless overridden by per-record `headers` inside the payload)
-- Avro serialization is not supported in batch mode (v1)
+- With **Serialize Values as Avro**, every record value is serialized individually, as in single mode
 
 ---
 
