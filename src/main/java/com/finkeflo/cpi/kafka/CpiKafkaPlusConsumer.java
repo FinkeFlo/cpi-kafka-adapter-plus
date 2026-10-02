@@ -541,8 +541,11 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
     /** @return true if all helpers (Avro, JSON Schema, DLQ) were created successfully */
     private boolean createConsumerHelpers() {
         try {
+            // A reconnect runs this again. Like the DLQ helper below, the Avro helper survives it:
+            // its schema-by-ID cache stays valid (IDs are immutable), and the replaced one was never
+            // closed.
             if (endpoint.isSchemaRegistryEnabled()
-                    && endpoint.isAvroValueDeserialization()) {
+                    && endpoint.isAvroValueDeserialization() && avroHelper == null) {
                 avroHelper = BundleBackedClassLoader.withBundleClassLoader(getClass(),
                         () -> new AvroDeserializerHelper(endpoint));
             }
