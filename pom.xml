@@ -21,7 +21,7 @@
         <adk.version>2.3.0</adk.version>
         <kafka.version>4.3.1</kafka.version>
         <avro.version>1.12.2</avro.version>
-        <jackson.version>2.22.2</jackson.version>
+        <jackson.version>2.22.3</jackson.version>
         <!-- CI toggle: when true, Surefire (unit tests) is skipped so the integration-test
              CI job can run *IT tests only, without re-running the unit tests. Default false. -->
         <skip.unit.tests>false</skip.unit.tests>
@@ -239,7 +239,7 @@
         <dependency>
             <groupId>org.apache.commons</groupId>
             <artifactId>commons-lang3</artifactId>
-            <version>3.20.0</version>
+            <version>3.21.0</version>
             <scope>test</scope>
         </dependency>
         <dependency>
