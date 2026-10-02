@@ -1154,9 +1154,10 @@ final class RecordProcessor {
 
             callback.processExchange(mplExchange);
         } catch (Exception e) {
-            if (e == validationException) {
+            if (causedBy(e, validationException)) {
                 // Expected: the exchange carries the validation failure precisely so that it ends
-                // as a failed message. Logging it as a reporting failure was a false ERROR (#177).
+                // as a failed message. Logging it as a reporting failure was a false ERROR (#177),
+                // also when the runtime rethrows it wrapped.
                 return;
             }
             // b4: Swallowed error now logged at ERROR, not DEBUG — only ERROR reaches tenant trace
@@ -1166,5 +1167,16 @@ final class RecordProcessor {
                     .with("offset", record.offset())
                     .with("validationError", validationError), e);
         }
+    }
+
+    /** True if {@code expected} is {@code thrown} or in its cause chain (bounded: chains can be cyclic). */
+    private static boolean causedBy(Throwable thrown, Throwable expected) {
+        Throwable t = thrown;
+        for (int depth = 0; t != null && depth < 32; depth++, t = t.getCause()) {
+            if (t == expected) {
+                return true;
+            }
+        }
+        return false;
     }
 }

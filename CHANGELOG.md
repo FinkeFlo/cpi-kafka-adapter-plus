@@ -19,6 +19,7 @@ iFlow compatibility.
 
 ### Fixed
 - Tooltips on the 1.4 metadata (and the matching documentation) that promised behaviour the adapter does not have: *Report Validation Failures* means a failed MPL entry on the sender but only a payload trace on the receiver, where an invalid message always fails; receiver JSON Schema validation is skipped in batch mode; only `TopicNameStrategy` works for Avro serialization; transactions apply to the batch send modes only; the idempotent producer forces `acks=all` and is not end-to-end exactly-once; the DLQ credential alias writes to the same cluster; the receiver topic accepts `${…}` expressions; the receiver's *Write MPL Error Attachment* currently has no effect; *Total Retry Budget* now states the real worst-case formula. The sender's *Batch Output Format* no longer mentions the removed *Individual Exchanges*. See issue #179.
+- A sender channel with *Report Validation Failures in CPI Monitoring* could still log a false `consumer.mpl.report.failed` ERROR for every invalid record when the runtime rethrows the expected validation failure wrapped in another exception. The check now follows the cause chain. Follow-up to issue #177.
 
 ## [1.3.8] - 2026-10-02
 ### Fixed
