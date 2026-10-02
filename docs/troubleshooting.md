@@ -72,9 +72,10 @@ automatic mitigation and tell you what to try next.
 | `UNKNOWN_FATAL` | The adapter does not recognise this exception. | Read the full `error=` field. Report it so the classification can be improved. |
 
 `UNKNOWN_FATAL` is deliberately conservative: the adapter does not guess what went wrong, and the
-cause chain is the evidence. On the receiver it is treated like `FATAL_PRODUCER_UNUSABLE` for one
-purpose: the shared producer is rebuilt (at most once per rebuild backoff, `rebuildTriggered=true` on
-the failure line), because an unrecognised failure may have left it unusable. It is never retried by
+cause chain is the evidence. On the receiver it is treated like `FATAL_PRODUCER_UNUSABLE` in two
+respects: the shared producer is rebuilt (at most once per rebuild backoff, `rebuildTriggered=true` on
+the failure line), because an unrecognised failure may have left it unusable, and it counts towards
+the node-fault escalation. It is never retried by
 the producer retry, apart from the KAFKA-10902 monitor fault below.
 
 ## Finding the adapter's lines
@@ -386,10 +387,10 @@ the Message Processing Log with structured information. This is available in the
 when MPL *tracing* is disabled (which is the default). Two channels are used, both
 trace-independent.
 
-A failing **receiver** (producer) channel does not write any of this: the exchange fails with the
+A failing **receiver** (producer) channel writes none of these: the exchange fails with the
 exception, and CPI writes the failed MPL entry itself — without the custom header properties, the
-status event and the `KafkaAdapterError` attachment, whatever `writeMplErrorAttachment` says. For
-the receiver, the failure line in the tenant trace (`producer.single.send`, `producer.batch.send`,
+status event and the `KafkaAdapterError` attachment, whatever `writeMplErrorAttachment` says. Only
+while trace is active does it add an error trace block with the cause chain. For the receiver, the failure line in the tenant trace (`producer.single.send`, `producer.batch.send`,
 `producer.transactional.batch.send`, `producer.retry.*`) is the diagnostic. The only MPL entry
 the receiver adds is the `KafkaRetryAttempts` property on a message that got through thanks to a
 retry, see [Producer Retry](features/producer-retry.md#in-message-monitoring).

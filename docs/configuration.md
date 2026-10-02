@@ -73,7 +73,7 @@ For detailed security setup, see [Authentication](security/authentication.md).
 |-----------|---------|-------------|
 | `jsonSchemaValidation` | `false` | Enable JSON Schema validation of incoming messages. A message that fails validation never reaches the IFlow: it goes to the DLQ if one is enabled, otherwise it is discarded and its offset committed. `errorHandling` does not apply to it. |
 | `jsonSchema` | — | Inline JSON Schema for message validation. |
-| `jsonSchemaReportError` | `false` | Also write a failed MPL entry, with the payload, for every message that fails validation. When `false`, a discarded message leaves only a WARN log line, which does not reach the tenant trace in production. |
+| `jsonSchemaReportError` | `false` | Also write a failed MPL entry with the validation error for every message that fails validation (the payload only in its trace, if trace is active). When `false`, a discarded message leaves only a WARN log line, which does not reach the tenant trace in production. |
 
 For more details, see [JSON Schema Validation](features/json-schema-validation.md).
 

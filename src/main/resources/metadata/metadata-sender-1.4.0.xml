@@ -247,7 +247,7 @@
                 </AttributeReference>
                 <AttributeReference>
                     <ReferenceName>jsonSchemaReportError</ReferenceName>
-                    <description>Also write a failed message processing log (MPL) with the payload for every message that fails validation, so that it shows up in CPI Monitoring. When disabled, a discarded message leaves only a WARN log line, which does not reach the tenant trace in production. Either way the message is not passed to the IFlow.</description>
+                    <description>Also write a failed message processing log (MPL) with the validation error for every message that fails validation, so that it shows up in CPI Monitoring; the payload is added to its trace if trace is active. When disabled, a discarded message leaves only a WARN log line, which does not reach the tenant trace in production. Either way the message is not passed to the IFlow.</description>
                     <EditCondition>
                         <AttributeName>jsonSchemaValidation</AttributeName>
                         <AttributeValue>true</AttributeValue>
