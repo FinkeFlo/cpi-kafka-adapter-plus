@@ -63,6 +63,18 @@ public class ProducerTopicHeaderTest {
     }
 
     @Test
+    public void aTopicTheFlowSetBeforeTheBatchReceiverStillRoutesTheNextReceiver() {
+        // The flow routes both receivers to region-eu; the batch receiver sent there and answered
+        // with the same value. That header is the flow's, not the adapter's.
+        Exchange exchange = new DefaultExchange(ctx);
+        exchange.getIn().setHeader("CamelKafkaTopic", "region-eu");
+        ProducerBatchHelper.setResponseHeadersAndBody(exchange.getIn(), "region-eu", "JSON_ARRAY",
+                new ProducerBatchHelper.BatchSendResult(1, 0L, 0L, "0", 5L));
+
+        Assert.assertEquals("region-eu", producerFor("invoices").targetTopic(exchange));
+    }
+
+    @Test
     public void aReceiverWithoutItsOwnTopicStillFollowsTheHeader() {
         // Flows that rely on the header to route the next receiver keep working.
         Exchange exchange = afterBatchSendTo("orders");

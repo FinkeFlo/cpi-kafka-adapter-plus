@@ -309,9 +309,16 @@ public final class ProducerBatchHelper {
     public static void setResponseHeadersAndBody(Message message, String topic,
                                                   String batchMode, BatchSendResult result) {
         message.setHeader("SAP_Receiver", topic);
+        String headerBefore = message.getHeader("CamelKafkaTopic", String.class);
         message.setHeader("CamelKafkaTopic", topic);
         if (message.getExchange() != null) {
-            message.getExchange().setProperty(RESPONSE_TOPIC_PROPERTY, topic);
+            // Mark the value only if the adapter authored it. If the flow had already set the header
+            // to this topic, it is the flow's override and must keep routing the next receiver.
+            if (topic.equals(headerBefore)) {
+                message.getExchange().removeProperty(RESPONSE_TOPIC_PROPERTY);
+            } else {
+                message.getExchange().setProperty(RESPONSE_TOPIC_PROPERTY, topic);
+            }
         }
         message.setHeader("CpiKafkaPlusTopic", topic);
         message.setHeader("CpiKafkaPlusStatus", "OK");

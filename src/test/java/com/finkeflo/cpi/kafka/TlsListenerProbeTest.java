@@ -171,11 +171,14 @@ public class TlsListenerProbeTest {
     }
 
     @Test
-    public void peerThatStaysSilentStaysInconclusive() throws Exception {
+    public void peerThatAcceptsButStaysSilentCountsAsUnreachable() throws Exception {
+        // A load balancer in front of Kafka accepts the connection while every broker behind it is
+        // down and then stays silent. That is no evidence about the listener, so it must not be
+        // cached as "no TLS here" (#176). A plaintext Kafka broker closes the connection instead.
         ServerSocket server = new ServerSocket(0);
         Thread acceptor = acceptAndStaySilent(server);
         try {
-            Assert.assertEquals(TlsListenerProbe.Verdict.INCONCLUSIVE,
+            Assert.assertEquals(TlsListenerProbe.Verdict.UNREACHABLE,
                     TlsListenerProbe.probe("localhost", server.getLocalPort()));
         } finally {
             close(server, acceptor);

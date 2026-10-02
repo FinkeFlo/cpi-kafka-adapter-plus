@@ -294,7 +294,8 @@ public class ProducerBatchSendIT {
         List<ConsumerRecord<String, String>> inSecond = KafkaTestInfrastructure.consumeAllMessages(second, 1, 10000);
         Assert.assertEquals(1, inSecond.size());
         Assert.assertEquals("to-second", inSecond.get(0).value());
-        List<ConsumerRecord<String, String>> inFirst = KafkaTestInfrastructure.consumeAllMessages(first, 1, 5000);
+        // Ask for two so a leaked second record would be seen; only the batch record may be there.
+        List<ConsumerRecord<String, String>> inFirst = KafkaTestInfrastructure.consumeAllMessages(first, 2, 5000);
         Assert.assertEquals("only the batch record belongs to the first topic", 1, inFirst.size());
     }
 

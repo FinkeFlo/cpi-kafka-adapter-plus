@@ -720,9 +720,9 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
                                         Integer partition, Long timestamp,
                                         ProducerBatchHelper.ByteSerializer valueSerializer) throws Exception {
         // The transactional producer is created outside ensureInitialized(), so it needs the same
-        // protection against a plaintext protocol on a TLS-only broker. The probe is cached per
-        // bootstrap/security config, and it runs before acquiring a transaction slot so a first
-        // inconclusive timeout on a silent endpoint cannot hold scarce slots.
+        // protection against a plaintext protocol on a TLS-only broker. A conclusive probe is cached
+        // per bootstrap/security config (an unreachable broker is probed again), and it runs before
+        // acquiring a transaction slot so a timeout on a silent endpoint cannot hold scarce slots.
         TlsListenerProbe.assertNoTlsListener(endpoint.getBootstrapServers(),
                 endpoint.getSecurityProtocol());
 
@@ -1209,7 +1209,7 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
         }
         String topic = resolveTopic(exchange, header);
         if (topic == null || topic.isEmpty()) {
-            topic = resolveTopic(exchange, endpoint.getEffectiveTopic());
+            topic = resolveTopic(exchange, configured);
         }
         return topic;
     }

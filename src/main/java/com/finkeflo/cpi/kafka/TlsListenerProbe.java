@@ -185,9 +185,15 @@ final class TlsListenerProbe {
             LOG.debug("[CPI-KAFKA-PLUS-DIAG] TLS probe of {}:{} found no TLS server (first byte {}) "
                     + "— inconclusive", host, port, firstByte);
             return Verdict.INCONCLUSIVE;
+        } catch (java.net.SocketTimeoutException e) {
+            // Connected, but the peer stayed silent: typically a load balancer whose brokers are all
+            // down. No evidence about the listener, so it must not be cached (#176).
+            LOG.debug("[CPI-KAFKA-PLUS-DIAG] TLS probe of {}:{} got no answer ({}) — unreachable",
+                    host, port, e.toString());
+            return Verdict.UNREACHABLE;
         } catch (IOException e) {
-            // Connected, but the peer closed or stayed silent: a plaintext Kafka listener does exactly
-            // that with a TLS client hello, so this is the common, cacheable "no TLS here" answer.
+            // Connected, but the peer closed or reset the connection: a plaintext Kafka listener does
+            // exactly that with a TLS client hello, so this is the common, cacheable "no TLS here".
             LOG.debug("[CPI-KAFKA-PLUS-DIAG] TLS probe of {}:{} got no TLS answer ({}) — inconclusive",
                     host, port, e.toString());
             return Verdict.INCONCLUSIVE;
