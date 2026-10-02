@@ -106,7 +106,7 @@ Yes. Set the following headers on the exchange before sending:
 
 | Header | Description |
 |---|---|
-| `CamelKafkaTopic` | Overrides the topic configured on the endpoint |
+| `CamelKafkaTopic` | Overrides the topic configured on the endpoint (a batch receiver's own response header excepted, see [Producer Batch](features/producer-batch.md#headers)) |
 | `kafka.PARTITION_KEY` | Target partition (numeric string) |
 | `kafka.KEY` | Record key |
 

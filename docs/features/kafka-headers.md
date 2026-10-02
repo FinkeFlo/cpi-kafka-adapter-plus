@@ -30,7 +30,7 @@ When `batchOutputFormat` is configured the adapter accumulates multiple records 
 | Header | Type | Description |
 |---|---|---|
 | `SAP_Sender` | `String` | Topic name |
-| `CpiKafkaPlusTopic` | `String` | Topic name |
+| `CpiKafkaPlusTopic` | `String` | Topic the batch was read from — a batch never spans topics, also on a channel subscribed to several |
 | `CpiKafkaPlusRecordCount` | `Integer` | Number of records in the batch |
 | `CpiKafkaPlusPayloadSize` | `Integer` | Total payload size in bytes |
 | `CpiKafkaPlusBatchOutputFormat` | `String` | Batch output format (`JSON_ARRAY`, `XML`, …) |
@@ -53,7 +53,7 @@ Set these headers on the exchange **before** sending to control the producer beh
 | `kafka.KEY` | `String` | Record key to use. If absent, the record is sent without a key. |
 | `kafka.PARTITION_KEY` | `String` | Target partition (numeric string). If absent, Kafka's partitioner decides. |
 | `kafka.OVERRIDE_TIMESTAMP` | `Long` | Record timestamp to use (epoch ms). If absent, the broker assigns the timestamp. |
-| `CamelKafkaTopic` | `String` | Overrides the topic configured on the endpoint for this single message. |
+| `CamelKafkaTopic` | `String` | Overrides the topic configured on the endpoint for this single message. A batch receiver's own `CamelKafkaTopic` response header is not treated as an override by a later receiver that has its own topic (see [Producer Batch](producer-batch.md#headers)). |
 
 Any additional headers whose names match the `allowedHeaders` pattern configured on the endpoint are forwarded as **Kafka record headers** on the outgoing message.
 

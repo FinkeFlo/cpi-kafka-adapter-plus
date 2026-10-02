@@ -260,6 +260,46 @@ public class ProducerBatchSendIT {
     // -----------------------------------------------------------------------
 
     @Test
+    public void aSecondReceiverInTheSameExchangeWritesToItsOwnTopic() throws Exception {
+        // The batch response sets CamelKafkaTopic; a second Kafka receiver in the same exchange used
+        // to read it as an override and write to the first receiver's topic (#185).
+        String first = "it-batch-first-" + System.nanoTime();
+        String second = "it-batch-second-" + System.nanoTime();
+        KafkaTestInfrastructure.createTopic(first, 1);
+        KafkaTestInfrastructure.createTopic(second, 1);
+
+        Map<String, String> batchParams = new HashMap<>();
+        batchParams.put("producerBatchMode", "JSON_ARRAY");
+        CpiKafkaPlusProducer batchReceiver = createProducer(first, batchParams);
+        CpiKafkaPlusProducer singleReceiver = createProducer(second, new HashMap<>());
+
+        Exchange exchange = new DefaultExchange(ctx);
+        try {
+            batchReceiver.doStart();
+            singleReceiver.doStart();
+
+            exchange.getIn().setBody("[{\"key\": \"k1\", \"value\": \"to-first\"}]");
+            batchReceiver.process(exchange);
+            Assert.assertEquals("precondition: the batch response carries the first topic",
+                    first, exchange.getIn().getHeader("CamelKafkaTopic"));
+
+            exchange.getIn().setBody("to-second");
+            singleReceiver.process(exchange);
+        } finally {
+            batchReceiver.doStop();
+            singleReceiver.doStop();
+        }
+
+        Assert.assertEquals(second, exchange.getIn().getHeader("CpiKafkaPlusTopic"));
+        List<ConsumerRecord<String, String>> inSecond = KafkaTestInfrastructure.consumeAllMessages(second, 1, 10000);
+        Assert.assertEquals(1, inSecond.size());
+        Assert.assertEquals("to-second", inSecond.get(0).value());
+        // Ask for two so a leaked second record would be seen; only the batch record may be there.
+        List<ConsumerRecord<String, String>> inFirst = KafkaTestInfrastructure.consumeAllMessages(first, 2, 5000);
+        Assert.assertEquals("only the batch record belongs to the first topic", 1, inFirst.size());
+    }
+
+    @Test
     public void testResponseHeadersAndBody() throws Exception {
         String topic = "it-batch-resp-" + System.nanoTime();
         KafkaTestInfrastructure.createTopic(topic, 1);

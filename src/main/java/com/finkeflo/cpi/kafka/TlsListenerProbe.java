@@ -92,8 +92,13 @@ final class TlsListenerProbe {
     enum Verdict {
         /** The peer completed or attempted a TLS server handshake. */
         TLS,
-        /** No evidence of TLS, or the peer could not be reached at all. */
-        INCONCLUSIVE
+        /** The peer was reached but gave no evidence of TLS. */
+        INCONCLUSIVE,
+        /**
+         * The peer could not be reached at all. Says nothing about the listener, so it is never
+         * cached: the next start probes again instead of leaving the protection off for good.
+         */
+        UNREACHABLE
     }
 
     /**
@@ -104,13 +109,17 @@ final class TlsListenerProbe {
         if (!isPlaintext(securityProtocol) || bootstrapServers == null) {
             return;
         }
-        ProbeResult result = CACHE.computeIfAbsent(new ProbeCacheKey(bootstrapServers, securityProtocol),
-                new java.util.function.Function<ProbeCacheKey, ProbeResult>() {
-                    @Override
-                    public ProbeResult apply(ProbeCacheKey key) {
-                        return probeBootstrapServers(key.bootstrapServers);
-                    }
-                });
+        ProbeCacheKey key = new ProbeCacheKey(bootstrapServers, securityProtocol);
+        ProbeResult result = CACHE.get(key);
+        if (result == null) {
+            // Probed outside the map: computeIfAbsent would hold the map's lock for the whole probe
+            // (up to two 3 s timeouts per server) and stall every other endpoint starting meanwhile.
+            // Two threads may probe the same key concurrently; both get the same answer.
+            result = probeBootstrapServers(bootstrapServers);
+            if (result.cacheable) {
+                CACHE.putIfAbsent(key, result);
+            }
+        }
         if (result.verdict == Verdict.TLS) {
             throw new IllegalStateException(
                     "Security Protocol '" + securityProtocol + "' sends unencrypted traffic, but "
@@ -119,16 +128,20 @@ final class TlsListenerProbe {
     }
 
     private static ProbeResult probeBootstrapServers(String bootstrapServers) {
+        boolean anyUnreachable = false;
         for (String server : bootstrapServers.split(",")) {
             String address = server.trim();
             if (address.isEmpty()) {
                 continue;
             }
-            if (probeRunner.probe(address) == Verdict.TLS) {
-                return new ProbeResult(Verdict.TLS, address);
+            Verdict verdict = probeRunner.probe(address);
+            if (verdict == Verdict.TLS) {
+                return new ProbeResult(Verdict.TLS, address, true);
             }
+            anyUnreachable |= verdict == Verdict.UNREACHABLE;
         }
-        return new ProbeResult(Verdict.INCONCLUSIVE, null);
+        // A server that could not be reached may well be the TLS one: probe again next time (#176).
+        return new ProbeResult(Verdict.INCONCLUSIVE, null, !anyUnreachable);
     }
 
     /** Visible for testing. */
@@ -150,7 +163,15 @@ final class TlsListenerProbe {
     /** Visible for testing. */
     static Verdict probe(String host, int port) {
         try (Socket plain = new Socket()) {
-            plain.connect(new InetSocketAddress(host, port), CONNECT_TIMEOUT_MS);
+            try {
+                plain.connect(new InetSocketAddress(host, port), CONNECT_TIMEOUT_MS);
+            } catch (IOException e) {
+                // Unreachable, refused or timed out: says nothing about the protocol. Kafka's own
+                // connection error is the better message here, so do not interfere.
+                LOG.debug("[CPI-KAFKA-PLUS-DIAG] TLS probe of {}:{} could not connect ({}) — unreachable",
+                        host, port, e.toString());
+                return Verdict.UNREACHABLE;
+            }
             plain.setSoTimeout(HANDSHAKE_TIMEOUT_MS);
 
             sendClientHello(plain, host, port);
@@ -164,10 +185,16 @@ final class TlsListenerProbe {
             LOG.debug("[CPI-KAFKA-PLUS-DIAG] TLS probe of {}:{} found no TLS server (first byte {}) "
                     + "— inconclusive", host, port, firstByte);
             return Verdict.INCONCLUSIVE;
+        } catch (java.net.SocketTimeoutException e) {
+            // Connected, but the peer stayed silent: typically a load balancer whose brokers are all
+            // down. No evidence about the listener, so it must not be cached (#176).
+            LOG.debug("[CPI-KAFKA-PLUS-DIAG] TLS probe of {}:{} got no answer ({}) — unreachable",
+                    host, port, e.toString());
+            return Verdict.UNREACHABLE;
         } catch (IOException e) {
-            // Unreachable, refused or timed out: says nothing about the protocol. Kafka's own
-            // connection error is the better message here, so do not interfere.
-            LOG.debug("[CPI-KAFKA-PLUS-DIAG] TLS probe of {}:{} could not connect ({}) — inconclusive",
+            // Connected, but the peer closed or reset the connection: a plaintext Kafka listener does
+            // exactly that with a TLS client hello, so this is the common, cacheable "no TLS here".
+            LOG.debug("[CPI-KAFKA-PLUS-DIAG] TLS probe of {}:{} got no TLS answer ({}) — inconclusive",
                     host, port, e.toString());
             return Verdict.INCONCLUSIVE;
         } catch (RuntimeException e) {
@@ -263,10 +290,12 @@ final class TlsListenerProbe {
     private static final class ProbeResult {
         private final Verdict verdict;
         private final String address;
+        private final boolean cacheable;
 
-        ProbeResult(Verdict verdict, String address) {
+        ProbeResult(Verdict verdict, String address, boolean cacheable) {
             this.verdict = verdict;
             this.address = address;
+            this.cacheable = cacheable;
         }
     }
 }

@@ -857,10 +857,13 @@ final class RecordProcessor {
      */
     void setBatchHeaders(Message message, List<ConsumerRecord<byte[], byte[]>> batch,
                          int schemaValidationFailures, int dlqCount, int payloadSize) {
-        message.setHeader("SAP_Sender", endpoint.getEffectiveTopic());
+        // A batch is formed per partition, so all its records share one topic. The configured topic
+        // may be a comma-separated subscription, which is not the topic these records came from.
+        String topic = batch.isEmpty() ? endpoint.getEffectiveTopic() : batch.get(0).topic();
+        message.setHeader("SAP_Sender", topic);
         message.setHeader("CpiKafkaPlusRecordCount", batch.size());
         message.setHeader("CpiKafkaPlusPayloadSize", payloadSize);
-        message.setHeader("CpiKafkaPlusTopic", endpoint.getEffectiveTopic());
+        message.setHeader("CpiKafkaPlusTopic", topic);
         message.setHeader("CpiKafkaPlusBatchOutputFormat", endpoint.getBatchOutputFormat());
         message.setHeader("CpiKafkaPlusConsumerGroup", endpoint.getGroupId());
         message.setHeader("CpiKafkaPlusCommitStrategy", endpoint.getCommitStrategy());

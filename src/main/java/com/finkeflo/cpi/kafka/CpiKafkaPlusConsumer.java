@@ -97,7 +97,8 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
     private static final long HEARTBEAT_INTERVAL_MS = 300_000L;
 
     private final CpiKafkaPlusEndpoint endpoint;
-    private KafkaConsumer<byte[], byte[]> kafkaConsumer;
+    // Volatile: written by the poll thread, read by doStop() on another thread (#176).
+    private volatile KafkaConsumer<byte[], byte[]> kafkaConsumer;
     private int consecutivePollFailures = 0;
     private long firstPollFailureMs = 0L;
     /** 0 = not in a fenced-instance cooldown; otherwise the epoch ms until which poll() is skipped. */
@@ -121,8 +122,8 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
      */
     private long lastHeartbeatMs = 0L;
     private boolean lastHeartbeatInitialized = false;
-    private ConsumerCircuitBreaker circuitBreaker;
-    private RecordProcessor recordProcessor;
+    private volatile ConsumerCircuitBreaker circuitBreaker;
+    private volatile RecordProcessor recordProcessor;
     /** Delays the retry of partitions blocked at a record that has to be retried (#187). */
     private PartitionBackoff retryBackoff;
     /** Partitions this consumer paused for {@link #retryBackoff}, so only those are resumed. */
