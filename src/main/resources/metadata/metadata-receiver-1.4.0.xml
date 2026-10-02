@@ -325,12 +325,20 @@
                 <AttributeReference>
                     <ReferenceName>producerRetryMaxAttempts</ReferenceName>
                     <description>Total number of send attempts, not additional attempts. 1 (default) keeps the previous behaviour and switches the retry off. Only failures that provably wrote nothing are repeated: a transactional batch that failed before the commit, or a single non-transactional message with the idempotent producer enabled. A failure inside the commit and a partially sent non-transactional batch are never repeated, because that could duplicate records. Range: 1 to 5.</description>
+                    <Restriction>Constraint.isValidRegex(^(?:\{\{[^{}]+\}\}|[1-5])$)</Restriction>
                     <ErrorMessage>Please enter a number between 1 and 5 for Max Send Attempts</ErrorMessage>
                 </AttributeReference>
                 <AttributeReference>
                     <ReferenceName>producerRetryDelaySeconds</ReferenceName>
                     <description>Constant wait between send attempts in seconds. There is no exponential backoff here because the Kafka client has already exhausted its own before giving up; a wait below one second cannot help against a disconnected broker node and only adds load. Range: 1 to 30.</description>
+                    <Restriction>Constraint.isValidRegex(^(?:\{\{[^{}]+\}\}|[1-9]|[12][0-9]|30)$)</Restriction>
                     <ErrorMessage>Please enter a number between 1 and 30 for Retry Delay</ErrorMessage>
+                    <NotCondition>
+                        <EditCondition>
+                            <AttributeName>producerRetryMaxAttempts</AttributeName>
+                            <AttributeValue>1</AttributeValue>
+                        </EditCondition>
+                    </NotCondition>
                 </AttributeReference>
                 <AttributeReference>
                     <ReferenceName>producerRetryOnlyTransientErrors</ReferenceName>
@@ -339,7 +347,14 @@
                 <AttributeReference>
                     <ReferenceName>producerRetryTotalBudgetSeconds</ReferenceName>
                     <description>Hard upper bound in seconds for all send attempts of one message together. It must stay below the timeout of the calling system: if the caller times out while the adapter is still retrying, it may resend the request and duplicate the message outside the adapter's control. A Kafka-to-Kafka or scheduled channel has no such caller and can use a larger budget. The start-up check rejects a configuration whose worst case exceeds the budget. One attempt costs Delivery Timeout plus min(30 s, Delivery Timeout), on the transactional path another 2 x min(30 s, Delivery Timeout) + 5 s: about four times Delivery Timeout up to 30 s, Delivery Timeout + 95 s above. To stay below a synchronous caller's timeout, lower Delivery Timeout or Max Send Attempts instead of raising the budget. Range: 5 to 900.</description>
+                    <Restriction>Constraint.isValidRegex(^(?:\{\{[^{}]+\}\}|[5-9]|[1-9][0-9]|[1-8][0-9]{2}|900)$)</Restriction>
                     <ErrorMessage>Please enter a number between 5 and 900 for Total Retry Budget</ErrorMessage>
+                    <NotCondition>
+                        <EditCondition>
+                            <AttributeName>producerRetryMaxAttempts</AttributeName>
+                            <AttributeValue>1</AttributeValue>
+                        </EditCondition>
+                    </NotCondition>
                 </AttributeReference>
             </AttributeGroup>
             <AttributeGroup id="diagnostics">

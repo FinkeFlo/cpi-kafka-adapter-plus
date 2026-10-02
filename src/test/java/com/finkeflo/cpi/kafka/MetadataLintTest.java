@@ -81,15 +81,8 @@ public class MetadataLintTest {
     /** Rule, direction and attribute of a violation, mapped to the open issue that decides it. */
     private static final Map<String, String> KNOWN_VIOLATIONS = new LinkedHashMap<>();
     static {
-        // An ErrorMessage is only ever shown by a Restriction; the five fields whose start check has
-        // a fixed range get one in #186, the remaining ones wait for the tenant tests of #206.
-        for (String field : Arrays.asList("maxPartitionFetchSizeKb", "retryDelaySeconds")) {
-            KNOWN_VIOLATIONS.put("error-message-without-restriction sender." + field, "#186");
-        }
-        for (String field : Arrays.asList("producerRetryMaxAttempts", "producerRetryDelaySeconds",
-                "producerRetryTotalBudgetSeconds")) {
-            KNOWN_VIOLATIONS.put("error-message-without-restriction receiver." + field, "#186");
-        }
+        // An ErrorMessage is only ever shown by a Restriction. The fields whose start check has a
+        // fixed range got one with #186; the remaining ones wait for the tenant tests of #206.
         for (String field : Arrays.asList("maxPollRecords", "batchTimeout", "fetchMinBytes", "fetchMaxWaitMs",
                 "minBacklogToDrain", "batchSize", "schemaRegistryUrl", "dlqTopic", "dlqMaxRetries",
                 "autoPauseErrorThreshold", "autoPauseCooldownSeconds")) {
@@ -114,6 +107,17 @@ public class MetadataLintTest {
     private static final Map<String, RangeSpec> RANGES = new LinkedHashMap<>();
     static {
         RANGES.put("sender.pollingIntervalSeconds", new RangeSpec(1, 21600));
+        RANGES.put("sender.maxPartitionFetchSizeKb", new RangeSpec(1, 51200));
+        RANGES.put("sender.retryDelaySeconds", new RangeSpec(0, 300));          // used by the default Retry
+        // The retry fields are only checked while the retry is on, and the worst case must fit the budget.
+        RANGES.put("receiver.producerRetryMaxAttempts", new RangeSpec(1, 5,
+                "deliveryTimeoutSeconds", "1", "producerRetryDelaySeconds", "1",
+                "producerRetryTotalBudgetSeconds", "900"));
+        RANGES.put("receiver.producerRetryDelaySeconds", new RangeSpec(1, 30,
+                "producerRetryMaxAttempts", "2", "deliveryTimeoutSeconds", "1",
+                "producerRetryTotalBudgetSeconds", "900"));
+        RANGES.put("receiver.producerRetryTotalBudgetSeconds", new RangeSpec(5, 900,
+                "producerRetryMaxAttempts", "2", "deliveryTimeoutSeconds", "1", "producerRetryDelaySeconds", "1"));
     }
 
     /** Text Restrictions: one value the pattern must accept and one it must reject. */
@@ -169,11 +173,14 @@ public class MetadataLintTest {
     private static final class Attribute {
         final String name;
         boolean usage;
+        String dataType;
         String defaultValue = "";
         final List<String> fixedValues = new ArrayList<>();
         boolean offered;
         String errorMessage;
         final List<String> restrictions = new ArrayList<>();
+        /** The visibility condition of the reference, or {@code null} if always visible. */
+        Element condition;
 
         Attribute(String name) {
             this.name = name;
@@ -280,7 +287,7 @@ public class MetadataLintTest {
                     RangeSpec range = RANGES.get(key);
                     String[] text = TEXT_RESTRICTIONS.get(key);
                     if (range != null) {
-                        checkRange(direction, a.name, pattern, range, violations);
+                        checkRange(direction, line.getValue(), a, pattern, range, violations);
                     } else if (text != null) {
                         if (!pattern.matcher(text[0]).find() || pattern.matcher(text[1]).find()) {
                             violations.add("restriction-text-mismatch " + key + " (accepts '" + text[0]
@@ -389,8 +396,9 @@ public class MetadataLintTest {
     // Restriction ranges and runtime acceptance
     // ---------------------------------------------------------------------------------------------
 
-    private static void checkRange(Direction direction, String name, Pattern pattern, RangeSpec range,
-                                   Set<String> violations) throws Exception {
+    private static void checkRange(Direction direction, Metadata metadata, Attribute a, Pattern pattern,
+                                   RangeSpec range, Set<String> violations) throws Exception {
+        String name = a.name;
         String key = direction.id + "." + name;
         for (long value : new long[] {range.lo - 1, range.lo, range.hi, range.hi + 1}) {
             boolean inRange = value >= range.lo && value <= range.hi;
@@ -409,6 +417,62 @@ public class MetadataLintTest {
         if (!pattern.matcher(PARAMETER_PLACEHOLDER).find()) {
             violations.add("restriction-rejects-parameter " + key);
         }
+        if (a.condition != null) {
+            // A hidden field keeps whatever value it had. If the start check still looked at it, the
+            // operator could neither see nor fix what blocks the deployment (#174).
+            Map<String, String> params = new LinkedHashMap<>(range.activation);
+            params.putAll(conditionAssignment(a.condition, false, metadata));
+            params.put(name, String.valueOf(range.hi + 1));
+            String rejection = startRejection(direction, params);
+            if (rejection != null) {
+                violations.add("restriction-hidden-blocks-start " + key + " (" + params + ": " + rejection + ")");
+            }
+        }
+    }
+
+    /** Settings that make a visibility condition evaluate to {@code value}. */
+    private static Map<String, String> conditionAssignment(Element condition, boolean value, Metadata metadata) {
+        List<Element> children = new ArrayList<>();
+        for (Node child = condition.getFirstChild(); child != null; child = child.getNextSibling()) {
+            if (child instanceof Element && ((Element) child).getTagName().endsWith("Condition")) {
+                children.add((Element) child);
+            }
+        }
+        Map<String, String> out = new LinkedHashMap<>();
+        switch (condition.getTagName()) {
+            case "EditCondition": {
+                String attribute = childText(condition, "AttributeName");
+                String expected = childText(condition, "AttributeValue");
+                out.put(attribute, value ? expected : otherValue(metadata.attributes.get(attribute), expected));
+                return out;
+            }
+            case "NotCondition":
+                return conditionAssignment(children.get(0), !value, metadata);
+            case "OrCondition":
+            case "AndCondition": {
+                // An Or is true through any one child and false only if all are; an And the reverse.
+                boolean all = value == "AndCondition".equals(condition.getTagName());
+                for (Element child : all ? children : children.subList(0, 1)) {
+                    out.putAll(conditionAssignment(child, value, metadata));
+                }
+                return out;
+            }
+            default:
+                throw new AssertionError("unknown condition " + condition.getTagName());
+        }
+    }
+
+    private static String otherValue(Attribute attribute, String value) {
+        Assert.assertNotNull("a condition refers to an attribute without metadata", attribute);
+        for (String fixed : attribute.fixedValues) {
+            if (!fixed.equals(value)) {
+                return fixed;
+            }
+        }
+        if ("xsd:boolean".equals(attribute.dataType)) {
+            return String.valueOf(!Boolean.parseBoolean(value));
+        }
+        return value.matches("-?\\d+") ? String.valueOf(Long.parseLong(value) + 1) : value + "-other";
     }
 
     /** Why the runtime of the direction refuses the settings, or {@code null} if it takes them. */
@@ -613,6 +677,7 @@ public class MetadataLintTest {
             Element definition = (Element) definitions.item(i);
             Attribute a = new Attribute(childText(definition, "Name"));
             a.usage = "true".equals(childText(definition, "Usage"));
+            a.dataType = childText(definition, "DataType");
             String def = childText(definition, "Default");
             a.defaultValue = def == null ? "" : def;
             NodeList fixed = definition.getElementsByTagName("FixedValue");
@@ -630,6 +695,11 @@ public class MetadataLintTest {
             Assert.assertNotNull(file.getName() + " references '" + name + "' without an AttributeMetadata", a);
             a.offered = true;
             a.errorMessage = childText(reference, "ErrorMessage");
+            for (Node child = reference.getFirstChild(); child != null; child = child.getNextSibling()) {
+                if (child instanceof Element && ((Element) child).getTagName().endsWith("Condition")) {
+                    a.condition = (Element) child;
+                }
+            }
             a.restrictions.addAll(childTexts(reference, "Restriction"));
         }
         return metadata;

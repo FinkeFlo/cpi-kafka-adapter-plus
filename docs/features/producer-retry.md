@@ -49,6 +49,11 @@ retry for batches.
 | `producerRetryOnlyTransientErrors` | `true` | — | `true`: only `RETRIABLE`. `false`: also an unusable transactional producer. |
 | `producerRetryTotalBudgetSeconds` | `30` | 5–900 | Hard bound for all attempts of one message together. |
 
+From metadata version 1.4 the UI flags a value outside these ranges; an externalized `{{parameter}}`
+is not flagged and is checked when the channel starts. *Delay Between Attempts* and *Total Retry
+Budget* are hidden while *Max Send Attempts* is `1`, because they have no effect then and the start
+check ignores them.
+
 These are **separate** from the sender-side `retryDelaySeconds` / `retryOnlyTransientErrors`, which
 belong to the consumer's dead-letter path and use exponential backoff. One option meaning two
 different things depending on channel direction would be a support trap.

@@ -222,9 +222,9 @@ For details on Avro integration, see [Avro / Schema Registry](features/avro-sche
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `producerRetryMaxAttempts` | `1` | Total number of send attempts, not additional attempts. `1` keeps the previous behaviour and switches the retry off. Range 1–5. |
-| `producerRetryDelaySeconds` | `2` | Constant wait between attempts in seconds. Range 1–30. |
+| `producerRetryDelaySeconds` | `2` | Constant wait between attempts in seconds. Range 1–30. Shown only when `producerRetryMaxAttempts` is not `1`. |
 | `producerRetryOnlyTransientErrors` | `true` | Retry only transient (`RETRIABLE`) failures. `false` additionally retries an unusable transactional producer. |
-| `producerRetryTotalBudgetSeconds` | `30` | Hard upper bound for all attempts of one message together. Must stay below the calling system's timeout; a Kafka-to-Kafka or scheduled channel has no such caller and can use a larger budget. Range 5–900. |
+| `producerRetryTotalBudgetSeconds` | `30` | Hard upper bound for all attempts of one message together. Must stay below the calling system's timeout; a Kafka-to-Kafka or scheduled channel has no such caller and can use a larger budget. Range 5–900. Shown only when `producerRetryMaxAttempts` is not `1`. |
 
 Only failures that provably wrote nothing are repeated. See [Producer Retry](features/producer-retry.md)
 for the decision tree, the duplicate guarantees and the interaction with `deliveryTimeoutSeconds`,
