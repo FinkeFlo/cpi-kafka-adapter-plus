@@ -67,7 +67,8 @@ import org.w3c.dom.NodeList;
  *
  * <p>Known violations are listed in {@link #KNOWN_VIOLATIONS}, each with the open issue that
  * decides it. An entry that no longer matches a violation fails the test too, so the list cannot
- * outlive its fix.
+ * outlive its fix. The test runs offline and checks only that an issue is named; that the issue is
+ * still open is for the reviewer of a change to this list.
  */
 public class MetadataLintTest {
 

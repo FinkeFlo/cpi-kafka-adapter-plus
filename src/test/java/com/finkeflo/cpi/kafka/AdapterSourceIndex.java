@@ -49,6 +49,7 @@ import javax.tools.ToolProvider;
 import com.sun.source.tree.ClassTree;
 import com.sun.source.tree.CompilationUnitTree;
 import com.sun.source.tree.IdentifierTree;
+import com.sun.source.tree.MemberReferenceTree;
 import com.sun.source.tree.MemberSelectTree;
 import com.sun.source.tree.MethodInvocationTree;
 import com.sun.source.tree.MethodTree;
@@ -65,7 +66,8 @@ import com.sun.source.util.TreeScanner;
  * resolved to every method named {@code m} in the calling class and in each adapter class whose
  * simple name the calling file mentions. That over-approximates what is reachable, which can only
  * hide a violation, never invent one: an option reported as unread is truly read nowhere on that
- * path. Lambdas and anonymous classes count as part of the method that contains them.
+ * path. Lambdas and anonymous classes count as part of the method that contains them, and a method
+ * reference counts as a call.
  */
 final class AdapterSourceIndex {
 
@@ -160,8 +162,18 @@ final class AdapterSourceIndex {
                 }
 
                 @Override
+                public Void visitMemberReference(MemberReferenceTree reference, Void unused) {
+                    record(reference.getName().toString(), true);   // this::send counts as a call
+                    return super.visitMemberReference(reference, unused);
+                }
+
+                @Override
                 public Void visitNewClass(NewClassTree creation, Void unused) {
                     String created = creation.getIdentifier().toString();
+                    int typeArguments = created.indexOf('<');
+                    if (typeArguments >= 0) {
+                        created = created.substring(0, typeArguments);
+                    }
                     created = created.substring(created.lastIndexOf('.') + 1);
                     if (classNames.contains(created)) {
                         mentioned.add(created);
