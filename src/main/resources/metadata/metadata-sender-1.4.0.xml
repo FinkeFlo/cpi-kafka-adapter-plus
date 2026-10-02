@@ -71,6 +71,16 @@
                 <AttributeReference>
                     <ReferenceName>saslMechanism</ReferenceName>
                     <description>SASL authentication mechanism. Use PLAIN for Confluent Cloud (API Key/Secret). SCRAM-SHA-256/512 for self-managed Kafka clusters with SCRAM authentication.</description>
+                    <OrCondition>
+                        <EditCondition>
+                            <AttributeName>securityProtocol</AttributeName>
+                            <AttributeValue>SASL_SSL</AttributeValue>
+                        </EditCondition>
+                        <EditCondition>
+                            <AttributeName>securityProtocol</AttributeName>
+                            <AttributeValue>SASL_PLAINTEXT</AttributeValue>
+                        </EditCondition>
+                    </OrCondition>
                 </AttributeReference>
                 <AttributeReference>
                     <ReferenceName>credentialAlias</ReferenceName>
@@ -225,7 +235,7 @@
                 </GuiLabels>
                 <AttributeReference>
                     <ReferenceName>jsonSchemaValidation</ReferenceName>
-                    <description>Enable validation of incoming Kafka messages against a JSON Schema before they are passed to the IFlow. Invalid messages are skipped or reported based on error settings.</description>
+                    <description>Validate every incoming Kafka message against a JSON Schema before it is passed to the IFlow. A message that fails validation never reaches the IFlow: it is written to the Dead Letter Queue if one is enabled, otherwise it is discarded and its offset committed. Error Handling (Retry / Skip) does not apply to it, because an invalid message stays invalid.</description>
                 </AttributeReference>
                 <AttributeReference>
                     <ReferenceName>jsonSchema</ReferenceName>
@@ -237,7 +247,7 @@
                 </AttributeReference>
                 <AttributeReference>
                     <ReferenceName>jsonSchemaReportError</ReferenceName>
-                    <description>Report validation failures as ERROR in CPI Monitoring (MPL)</description>
+                    <description>Also write a failed message processing log (MPL) with the payload for every message that fails validation, so that it shows up in CPI Monitoring. When disabled, a discarded message leaves only a WARN log line, which does not reach the tenant trace in production. Either way the message is not passed to the IFlow.</description>
                     <EditCondition>
                         <AttributeName>jsonSchemaValidation</AttributeName>
                         <AttributeValue>true</AttributeValue>
@@ -264,7 +274,7 @@
                 </AttributeReference>
                 <AttributeReference>
                     <ReferenceName>batchOutputFormat</ReferenceName>
-                    <description>Output format for batched records. JSON Array: [{"key":"...","value":"..."},...]. XML List: wraps records in XML elements. Individual Exchanges: sends each record as a separate IFlow execution (no actual batching).</description>
+                    <description>Output format for batched records. JSON Array: [{"key":"...","value":"..."},...]. XML List: wraps records in XML elements.</description>
                     <EditCondition>
                         <AttributeName>batchMode</AttributeName>
                         <AttributeValue>true</AttributeValue>
@@ -376,7 +386,7 @@
                 </AttributeReference>
                 <AttributeReference>
                     <ReferenceName>dlqCredentialAlias</ReferenceName>
-                    <description>User Credentials alias for the DLQ Kafka cluster. Leave empty to reuse the main SASL credentials from the Connection tab. Only needed if the DLQ topic is on a different cluster.</description>
+                    <description>User Credentials alias for writing to the DLQ topic. The DLQ topic is always on the same Kafka cluster (Bootstrap Servers); set an alias only if writing to it needs other SASL credentials than the Connection tab, e.g. a user with WRITE permission on the DLQ topic. Leave empty to reuse the main SASL credentials.</description>
                     <EditCondition>
                         <AttributeName>dlqEnabled</AttributeName>
                         <AttributeValue>true</AttributeValue>
@@ -481,7 +491,7 @@
         <FixedValues>
             <FixedValue><Value>SASL_SSL</Value><GuiLabels guid="b1000002-0000-0000-0000-000000000011"><Label language="EN">SASL_SSL (SASL over TLS)</Label></GuiLabels></FixedValue>
             <FixedValue><Value>SASL_PLAINTEXT</Value><GuiLabels guid="b1000002-0000-0000-0000-000000000012"><Label language="EN">SASL_PLAINTEXT (no TLS)</Label></GuiLabels></FixedValue>
-            <FixedValue><Value>SSL</Value><GuiLabels guid="b1000002-0000-0000-0000-000000000013"><Label language="EN">SSL (TLS, certificate authentication)</Label></GuiLabels></FixedValue>
+            <FixedValue><Value>SSL</Value><GuiLabels guid="b1000002-0000-0000-0000-000000000013"><Label language="EN">SSL (TLS, client certificate optional via Keystore Alias)</Label></GuiLabels></FixedValue>
             <FixedValue><Value>PLAINTEXT</Value><GuiLabels guid="b1000002-0000-0000-0000-000000000014"><Label language="EN">PLAINTEXT (no TLS, no authentication)</Label></GuiLabels></FixedValue>
         </FixedValues>
     </AttributeMetadata>
@@ -733,7 +743,7 @@
         <Name>maxRequestSizeKb</Name>
         <Usage>false</Usage>
         <DataType>xsd:integer</DataType>
-        <Default>1024</Default>
+        <Default>5120</Default>
         <Length/>
         <isparameterized>true</isparameterized>
         <GuiLabels guid="b1000004-0000-0000-0000-000000000003"><Label language="EN">Max Request Size (KB)</Label></GuiLabels>
@@ -742,7 +752,7 @@
         <Name>producerBatchSizeKb</Name>
         <Usage>false</Usage>
         <DataType>xsd:integer</DataType>
-        <Default>249</Default>
+        <Default>1024</Default>
         <Length/>
         <isparameterized>true</isparameterized>
         <GuiLabels guid="b1000004-0000-0000-0000-000000000005"><Label language="EN">Batch Size (KB)</Label></GuiLabels>

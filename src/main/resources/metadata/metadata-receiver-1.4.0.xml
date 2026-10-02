@@ -50,7 +50,7 @@
                 </AttributeReference>
                 <AttributeReference>
                     <ReferenceName>topic</ReferenceName>
-                    <description>Kafka topic to produce messages to, e.g. orders-outbound. The topic must exist on the Kafka cluster unless auto-creation is enabled on the broker.</description>
+                    <description>Kafka topic to produce messages to, e.g. orders-outbound. It can also be a Camel Simple expression resolved per message, e.g. ${header.targetTopic} or ${property.targetTopic}; a message whose expression does not resolve to a topic name fails. A CamelKafkaTopic header on the message overrides this value. The topic must exist on the Kafka cluster unless auto-creation is enabled on the broker.</description>
                     <ErrorMessage>Please enter a Kafka topic name</ErrorMessage>
                 </AttributeReference>
             </AttributeGroup>
@@ -66,6 +66,16 @@
                 <AttributeReference>
                     <ReferenceName>saslMechanism</ReferenceName>
                     <description>SASL authentication mechanism. Use PLAIN for Confluent Cloud (API Key/Secret). SCRAM-SHA-256/512 for self-managed Kafka clusters with SCRAM authentication.</description>
+                    <OrCondition>
+                        <EditCondition>
+                            <AttributeName>securityProtocol</AttributeName>
+                            <AttributeValue>SASL_SSL</AttributeValue>
+                        </EditCondition>
+                        <EditCondition>
+                            <AttributeName>securityProtocol</AttributeName>
+                            <AttributeValue>SASL_PLAINTEXT</AttributeValue>
+                        </EditCondition>
+                    </OrCondition>
                 </AttributeReference>
                 <AttributeReference>
                     <ReferenceName>credentialAlias</ReferenceName>
@@ -131,7 +141,7 @@
                 </AttributeReference>
                 <AttributeReference>
                     <ReferenceName>enableIdempotence</ReferenceName>
-                    <description>Enable idempotent producer to guarantee exactly-once delivery per partition. Prevents duplicate messages on retries. Recommended to keep enabled (default: true).</description>
+                    <description>Enable the idempotent producer: the broker discards the duplicates that the producer's own internal retries would otherwise write, per partition. This is not end-to-end exactly-once: a message that the calling system sends twice is written twice. While enabled, Acknowledgments is fixed to All (acks=all) and hidden. Required for transactions and for retrying single messages. Recommended to keep enabled (default: true).</description>
                 </AttributeReference>
                 <AttributeReference>
                     <ReferenceName>deliveryTimeoutSeconds</ReferenceName>
@@ -163,7 +173,7 @@
                 </GuiLabels>
                 <AttributeReference>
                     <ReferenceName>enableTransactions</ReferenceName>
-                    <description>Enable transactional batching. Each batch is sent in an isolated Kafka transaction. Requires Transactional ID Prefix and idempotent producer.</description>
+                    <description>Enable transactional batching. Each batch is sent in its own Kafka transaction, so read_committed consumers see either all of its records or none. Applies only to Batch Send Mode JSON Array or XML List; with None (single message) messages are sent without a transaction. Requires Transactional ID Prefix and idempotent producer.</description>
                 </AttributeReference>
                 <AttributeReference>
                     <ReferenceName>transactionalIdPrefix</ReferenceName>
@@ -223,7 +233,7 @@
                 </GuiLabels>
                 <AttributeReference>
                     <ReferenceName>jsonSchemaValidation</ReferenceName>
-                    <description>Enable JSON Schema validation of outbound messages before sending to Kafka. Invalid messages are rejected with an error instead of being published.</description>
+                    <description>Enable JSON Schema validation of outbound messages before sending to Kafka. An invalid message fails the exchange and is not sent. Only for Batch Send Mode None: with JSON Array or XML List the validation is skipped and a warning is logged.</description>
                 </AttributeReference>
                 <AttributeReference>
                     <ReferenceName>jsonSchema</ReferenceName>
@@ -235,7 +245,7 @@
                 </AttributeReference>
                 <AttributeReference>
                     <ReferenceName>jsonSchemaReportError</ReferenceName>
-                    <description>Report validation failures as ERROR in CPI Monitoring (MPL)</description>
+                    <description>An invalid message always fails the exchange, whatever this setting says. When enabled, the rejected payload is also written to the message processing log trace, if trace is active for the integration flow.</description>
                     <EditCondition>
                         <AttributeName>jsonSchemaValidation</AttributeName>
                         <AttributeValue>true</AttributeValue>
@@ -285,7 +295,7 @@
                 </AttributeReference>
                 <AttributeReference>
                     <ReferenceName>subjectNameStrategy</ReferenceName>
-                    <description>Strategy for deriving the Schema Registry subject name. TopicNameStrategy (default): uses topic name. RecordNameStrategy: uses the Avro record's full name. TopicRecordNameStrategy: combines both.</description>
+                    <description>Strategy for deriving the Schema Registry subject name. Only TopicNameStrategy (default, subject = topic name + "-value") is supported: with RecordNameStrategy or TopicRecordNameStrategy every message fails, because the record name cannot be derived from the JSON input.</description>
                     <EditCondition>
                         <AttributeName>schemaRegistryEnabled</AttributeName>
                         <AttributeValue>true</AttributeValue>
@@ -328,7 +338,7 @@
                 </AttributeReference>
                 <AttributeReference>
                     <ReferenceName>producerRetryTotalBudgetSeconds</ReferenceName>
-                    <description>Hard upper bound in seconds for all send attempts of one message together. It must stay below the timeout of the calling system: if the caller times out while the adapter is still retrying, it may resend the request and duplicate the message outside the adapter's control. A Kafka-to-Kafka or scheduled channel has no such caller and can use a larger budget. One transactional attempt costs roughly four times Delivery Timeout, so raise this value rather than lowering Delivery Timeout when the start-up check reports a worst case above the budget. Range: 5 to 900.</description>
+                    <description>Hard upper bound in seconds for all send attempts of one message together. It must stay below the timeout of the calling system: if the caller times out while the adapter is still retrying, it may resend the request and duplicate the message outside the adapter's control. A Kafka-to-Kafka or scheduled channel has no such caller and can use a larger budget. The start-up check rejects a configuration whose worst case exceeds the budget. One attempt costs Delivery Timeout plus min(30 s, Delivery Timeout), on the transactional path another 2 x min(30 s, Delivery Timeout) + 5 s: about four times Delivery Timeout up to 30 s, Delivery Timeout + 95 s above. To stay below a synchronous caller's timeout, lower Delivery Timeout or Max Send Attempts instead of raising the budget. Range: 5 to 900.</description>
                     <ErrorMessage>Please enter a number between 5 and 900 for Total Retry Budget</ErrorMessage>
                 </AttributeReference>
             </AttributeGroup>
@@ -343,7 +353,7 @@
                 </AttributeReference>
                 <AttributeReference>
                     <ReferenceName>writeMplErrorAttachment</ReferenceName>
-                    <description>Write the full error diagnostic as MPL attachment 'KafkaAdapterError'. Disable to keep only searchable MPL headers/attributes without the full attachment payload.</description>
+                    <description>Currently without effect on the receiver: a failing receiver channel fails the exchange, and CPI writes the MPL entry without a 'KafkaAdapterError' attachment.</description>
                 </AttributeReference>
             </AttributeGroup>
         </Tab>
@@ -404,7 +414,7 @@
         <FixedValues>
             <FixedValue><Value>SASL_SSL</Value><GuiLabels guid="b1000002-0000-0000-0000-000000000011"><Label language="EN">SASL_SSL (SASL over TLS)</Label></GuiLabels></FixedValue>
             <FixedValue><Value>SASL_PLAINTEXT</Value><GuiLabels guid="b1000002-0000-0000-0000-000000000012"><Label language="EN">SASL_PLAINTEXT (no TLS)</Label></GuiLabels></FixedValue>
-            <FixedValue><Value>SSL</Value><GuiLabels guid="b1000002-0000-0000-0000-000000000013"><Label language="EN">SSL (TLS, certificate authentication)</Label></GuiLabels></FixedValue>
+            <FixedValue><Value>SSL</Value><GuiLabels guid="b1000002-0000-0000-0000-000000000013"><Label language="EN">SSL (TLS, client certificate optional via Keystore Alias)</Label></GuiLabels></FixedValue>
             <FixedValue><Value>PLAINTEXT</Value><GuiLabels guid="b1000002-0000-0000-0000-000000000014"><Label language="EN">PLAINTEXT (no TLS, no authentication)</Label></GuiLabels></FixedValue>
         </FixedValues>
     </AttributeMetadata>
