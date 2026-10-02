@@ -450,6 +450,10 @@ final class RecordProcessor {
                                         List<ConsumerRecord<byte[], byte[]>> batch,
                                         boolean commitAfterSuccess, PollProgress progress) {
         TopicPartition tp = partitionOf(batch.get(0));
+        if (!endpoint.isSkipFailedMessages()) {
+            progress.blocked(tp, batch.get(0).offset());
+            return;
+        }
         for (ConsumerRecord<byte[], byte[]> record : batch) {
             progress.resolved(tp, record.offset());
         }
@@ -712,13 +716,18 @@ final class RecordProcessor {
     }
 
     /**
-     * What happens to a failed record when there is no DLQ: it is skipped (at-most-once), so the
-     * next commit may pass it.
+     * What happens to a failed record when there is no DLQ, as chosen by {@code errorHandling}:
+     * Retry Failed Message (default) blocks the partition at the record so it is retried after a
+     * backoff; Skip Failed Message resolves it (at-most-once), so the next commit may pass it.
      */
     private void resolveWithoutDlq(Consumer<byte[], byte[]> kafkaConsumer,
                                    ConsumerRecord<byte[], byte[]> record,
                                    boolean commitAfterSuccess, PollProgress progress) {
         TopicPartition tp = partitionOf(record);
+        if (!endpoint.isSkipFailedMessages()) {
+            progress.blocked(tp, record.offset());
+            return;
+        }
         progress.resolved(tp, record.offset());
         if (commitAfterSuccess) {
             commitProgress(kafkaConsumer, tp, progress);

@@ -247,6 +247,14 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
     private boolean jsonSchemaReportError = false;
 
     // --- Error Handling / DLQ ---
+    @UriParam(label = "errorHandling", defaultValue = "RETRY", enums = "RETRY,SKIP",
+            description = "Sender (consumer) direction only. What happens to a message whose processing "
+                    + "fails when no Dead Letter Queue is configured: RETRY keeps retrying the same offset "
+                    + "(the partition waits, with a backoff that starts at retryDelaySeconds, at least 1 s, "
+                    + "and doubles up to 300 s); SKIP continues with the next offset (at-most-once). "
+                    + "Mirrors the 'Error Handling' option of the SAP Kafka sender adapter.")
+    private String errorHandling = "RETRY";
+
     @UriParam(label = "errorHandling", defaultValue = "false",
             description = "Enable Dead Letter Queue for failed messages")
     private boolean dlqEnabled = false;
@@ -631,6 +639,11 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
 
     public boolean isRetryOnlyTransientErrors() { return retryOnlyTransientErrors; }
     public void setRetryOnlyTransientErrors(boolean retryOnlyTransientErrors) { this.retryOnlyTransientErrors = retryOnlyTransientErrors; }
+
+    public String getErrorHandling() { return errorHandling; }
+    public void setErrorHandling(String errorHandling) { this.errorHandling = errorHandling; }
+    /** @return true if failed messages without a DLQ are skipped rather than retried */
+    public boolean isSkipFailedMessages() { return "SKIP".equalsIgnoreCase(errorHandling); }
 
     public int getRetryDelaySeconds() { return retryDelaySeconds; }
     public void setRetryDelaySeconds(int retryDelaySeconds) { this.retryDelaySeconds = retryDelaySeconds; }

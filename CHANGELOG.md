@@ -7,6 +7,14 @@ and the project follows [Semantic Versioning](https://semver.org/). See
 [VERSIONING.md](https://github.com/finkeflo/cpi-kafka-adapter-plus/blob/main/VERSIONING.md) for how the adapter version maps to SAP CPI
 iFlow compatibility.
 
+## [Unreleased]
+### Added
+- Sender option **Error Handling** (`errorHandling`, metadata version 1.4) decides what happens to a message whose processing fails while no Dead Letter Queue is enabled. It mirrors the option of the same name in SAP's Kafka sender adapter. **Retry Failed Message** (default) retries the same offset until it succeeds: the partition waits, the retries back off from **Retry Delay** (at least 1 second) doubling up to 5 minutes, and nothing is lost. **Skip Failed Message** continues with the next offset (at-most-once). It applies to failed IFlow calls, batches that cannot be formatted and records that cannot be deserialized; JSON Schema-invalid records stay dropped without a DLQ, as documented. In batch mode the whole failed batch is retried; only a DLQ isolates a single bad record. **Retry Delay** is now also shown without a DLQ, in a new *Failed Messages* group. See issue #187.
+
+### Changed
+- **Without a DLQ, failed messages are now retried instead of skipped.** Until now a sender channel without a DLQ skipped every message whose IFlow processing failed, although the documentation promised redelivery. The new default *Retry Failed Message* retries it. **Rollout note:** this applies to every sender channel without a DLQ as soon as this adapter version is deployed, also to iFlows that stay on an older metadata version (1.0 to 1.3) and therefore have no *Error Handling* field in their UI. A message that can never be processed now holds up its partition until the cause is fixed, instead of being dropped. With **Auto-Pause on Errors** enabled, every retry counts as a failure, so such a message pauses the whole consumer; use a DLQ for flows where single bad messages occur. To keep the old behaviour, update the channel to version 1.4 (*Update Version*) and select *Skip Failed Message*. See issue #187.
+- The sender's start checks no longer reject values in fields that have no effect: the drain fields while drain is off, and **Retry Delay** while neither a DLQ nor *Retry Failed Message* uses it. See issue #174.
+
 ## [1.3.8] - 2026-10-02
 ### Fixed
 - A second Kafka receiver in the same iFlow wrote to the first receiver's topic. The batch receiver answers with a `CamelKafkaTopic` header, and the next receiver read that header as a topic override. The header is still set for iFlows that read it, but a receiver with its own topic now ignores it while it still holds the value the batch response left; a value the iFlow sets explicitly, before or after the batch receiver, still overrides the topic, and a receiver without a topic of its own still follows the header. See issue #185.

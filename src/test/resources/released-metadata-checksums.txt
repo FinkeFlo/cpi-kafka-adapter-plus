@@ -8,3 +8,5 @@ metadata-sender-1.1.0.xml=d3742b02079dbe8e0eb57cf91397c111e2ca05e3cbc4c86b415bf4
 metadata-receiver-1.1.1.xml=d1a51376e90f5f5ea962d01f42b7e696e251c0ffaf2a8177fc354c1a9cb26167
 metadata-sender-1.2.8.xml=3187a4de9cba184b5707c559c8c074b641d888b2cb4bdcaa5e17fc2f118a57cd
 metadata-receiver-1.2.8.xml=bc8017cb00a1e3e009a0f95fab72ab3081a76275e6e32c436e618516475e81eb
+metadata-sender-1.3.0.xml=e60880240d3961d774656990c1fcc9fb609810867b79bbbc0a3299f49a6c4ecc
+metadata-receiver-1.3.0.xml=f298cf25508aa14dd56ee1ffeff6f36e8cad42d6cc58823f3f0d7817c85a984e

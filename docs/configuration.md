@@ -103,6 +103,13 @@ For details on Avro integration, see [Avro / Schema Registry](features/avro-sche
 
 ### Error Handling
 
+**Failed Messages**
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `errorHandling` | `RETRY` | **Sender (consumer) direction only.** What happens to a message whose processing fails when no DLQ is enabled. `RETRY` (*Retry Failed Message*) retries the same offset until it succeeds; the partition waits meanwhile. `SKIP` (*Skip Failed Message*) continues with the next offset; the failed message is lost (at-most-once). Has no effect while the DLQ is enabled. Available from metadata version 1.4; iFlows on an older version (1.0 to 1.3) have no such field and run with `RETRY` — move them to 1.4 with *Update Version* to select `SKIP`. With **Auto-Pause** enabled every retry counts as a failure, so a message that can never succeed pauses the whole consumer; use a DLQ for such messages. |
+| `retryDelaySeconds` | `0` | **Sender (consumer) direction only.** Initial retry delay in seconds with exponential backoff, capped at 300 seconds. Applies to the retries before a message is dead-lettered and to *Retry Failed Message*, where the first wait is at least 1 second. The receiver direction uses `producerRetryDelaySeconds`, which is constant rather than exponential. |
+
 **Dead Letter Queue**
 
 | Parameter | Default | Description |
@@ -112,7 +119,6 @@ For details on Avro integration, see [Avro / Schema Registry](features/avro-sche
 | `dlqMaxRetries` | `3` | Maximum processing retries before routing to the DLQ. |
 | `dlqCredentialAlias` | — | SASL credential alias for the DLQ Kafka cluster, if different from the main connection. |
 | `retryOnlyTransientErrors` | `true` | **Sender (consumer) direction only.** Retry only transient errors; send permanent errors directly to the DLQ. The receiver direction uses `producerRetryOnlyTransientErrors`. |
-| `retryDelaySeconds` | `0` | **Sender (consumer) direction only.** Initial retry delay in seconds with exponential backoff capped at 300 seconds. The receiver direction uses `producerRetryDelaySeconds`, which is constant rather than exponential. |
 | `writeMplErrorAttachment` | `true` | Write the full error diagnostic (including full stack trace) as MPL attachment `KafkaAdapterError`. Disable to keep only searchable MPL headers/attributes. |
 
 **Auto-Pause on Errors**
