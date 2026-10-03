@@ -7,7 +7,7 @@ and the project follows [Semantic Versioning](https://semver.org/). See
 [VERSIONING.md](https://github.com/finkeflo/cpi-kafka-adapter-plus/blob/main/VERSIONING.md) for how the adapter version maps to SAP CPI
 iFlow compatibility.
 
-## [Unreleased]
+## [1.4.0] - 2026-10-03
 ### Added
 - Sender option **Error Handling** (`errorHandling`, metadata version 1.4) decides what happens to a message whose processing fails while no Dead Letter Queue is enabled. It mirrors the option of the same name in SAP's Kafka sender adapter. **Retry Failed Message** (default) retries the same offset until it succeeds: the partition waits, the retries back off from **Retry Delay** (at least 1 second) doubling up to 5 minutes, and nothing is lost. **Skip Failed Message** continues with the next offset (at-most-once). It applies to failed IFlow calls, batches that cannot be formatted and records that cannot be deserialized; JSON Schema-invalid records stay dropped without a DLQ, as documented. In batch mode the whole failed batch is retried; only a DLQ isolates a single bad record. **Retry Delay** is now also shown without a DLQ, in a new *Failed Messages* group. See issue #187.
 
