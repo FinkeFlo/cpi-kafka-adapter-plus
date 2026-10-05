@@ -1125,7 +1125,7 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
             } catch (Exception e) {
                 lastError = e;
                 ProducerRetryPolicy.Decision decision = ProducerRetryPolicy.decideSingle(
-                        e, attempt, maxAttempts, delayMs, budgetDeadlineMs,
+                        e, true, attempt, maxAttempts, delayMs, budgetDeadlineMs,
                         System.currentTimeMillis(), endpoint.isEnableIdempotence());
                 if (!decision.isRetry()) {
                     stopReason = decision.stopReason();

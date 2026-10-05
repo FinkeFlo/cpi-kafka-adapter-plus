@@ -135,9 +135,9 @@ public class ProducerRetryPolicyTest {
     @Test
     public void singlePathRequiresIdempotence() {
         assertStop(StopReason.IDEMPOTENCE_DISABLED, ProducerRetryPolicy.decideSingle(
-                new NetworkException("boom"), 1, 3, DELAY_MS, FAR_DEADLINE, NOW, false));
+                new NetworkException("boom"), true, 1, 3, DELAY_MS, FAR_DEADLINE, NOW, false));
         Assert.assertTrue(ProducerRetryPolicy.decideSingle(
-                new NetworkException("boom"), 1, 3, DELAY_MS, FAR_DEADLINE, NOW, true).isRetry());
+                new NetworkException("boom"), true, 1, 3, DELAY_MS, FAR_DEADLINE, NOW, true).isRetry());
     }
 
     @Test
@@ -145,13 +145,13 @@ public class ProducerRetryPolicyTest {
         // The shared producer belongs in the existing rebuild path, not in a retry loop that would
         // keep sending through the broken instance.
         assertStop(StopReason.PERMANENT, ProducerRetryPolicy.decideSingle(
-                new ProducerFencedException("fenced"), 1, 3, DELAY_MS, FAR_DEADLINE, NOW, true));
+                new ProducerFencedException("fenced"), true, 1, 3, DELAY_MS, FAR_DEADLINE, NOW, true));
     }
 
     @Test
     public void singlePathFeatureOffNeverRetries() {
         assertStop(StopReason.RETRY_DISABLED, ProducerRetryPolicy.decideSingle(
-                new NetworkException("boom"), 1, 1, DELAY_MS, FAR_DEADLINE, NOW, true));
+                new NetworkException("boom"), true, 1, 1, DELAY_MS, FAR_DEADLINE, NOW, true));
     }
 
     @Test
@@ -163,9 +163,43 @@ public class ProducerRetryPolicyTest {
                 KafkaErrorHelper.classify(monitorFault()));
         Assert.assertTrue("the monitor fault must be retried before the commit",
                 txn(monitorFault(), TxnPhase.SEND, 1, 3, true).isRetry());
-        Assert.assertTrue("the single path deduplicates on (PID, sequence)",
-                ProducerRetryPolicy.decideSingle(monitorFault(), 1, 3, DELAY_MS, FAR_DEADLINE,
+        Assert.assertTrue("the monitor fault is thrown by send() before the record is buffered",
+                ProducerRetryPolicy.decideSingle(monitorFault(), true, 1, 3, DELAY_MS, FAR_DEADLINE,
                         NOW, true).isRetry());
+    }
+
+    @Test
+    public void singlePathNeverRetriesAFailureAfterBuffering() {
+        // A buffered record may already be on the broker; a new send() gets a new sequence number,
+        // which the broker does not deduplicate.
+        assertStop(StopReason.OUTCOME_UNKNOWN, ProducerRetryPolicy.decideSingle(
+                new TimeoutException("Expiring 1 record(s) for orders-0: 2000 ms has passed since batch creation"),
+                false, 1, 3, DELAY_MS, FAR_DEADLINE, NOW, true));
+        assertStop(StopReason.OUTCOME_UNKNOWN, ProducerRetryPolicy.decideSingle(
+                new NetworkException("Disconnected from node 3"),
+                false, 1, 3, DELAY_MS, FAR_DEADLINE, NOW, true));
+    }
+
+    @Test
+    public void singlePathRetriesATransientFailureBeforeBuffering() {
+        Assert.assertTrue(ProducerRetryPolicy.decideSingle(
+                new TimeoutException("Topic orders not present in metadata after 2000 ms."),
+                true, 1, 3, DELAY_MS, FAR_DEADLINE, NOW, true).isRetry());
+    }
+
+    @Test
+    public void aPermanentErrorAfterBufferingKeepsItsOwnStopReason() {
+        // OUTCOME_UNKNOWN only replaces a retry; a failure that is not retried anyway keeps the
+        // more specific reason.
+        assertStop(StopReason.PERMANENT, ProducerRetryPolicy.decideSingle(
+                new RecordTooLargeException("too large"), false, 1, 3, DELAY_MS, FAR_DEADLINE, NOW, true));
+    }
+
+    @Test
+    public void anOrdinaryFutureDoesNotCountAsFailedBeforeBuffering() {
+        Assert.assertFalse(ProducerRetryPolicy.failedBeforeBuffering(
+                new java.util.concurrent.CompletableFuture<Object>()));
+        Assert.assertFalse(ProducerRetryPolicy.failedBeforeBuffering(null));
     }
 
     @Test
