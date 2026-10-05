@@ -285,6 +285,14 @@ Note when counting dead-letter records that the adapter partitions them by the o
 so a multi-partition dead-letter topic spreads them across all partitions. Reading only partition 0
 will make records look lost that are not.
 
+### A channel does not start after updating to 1.4.1
+
+1.4.1 rejects sender settings that could never work at deployment instead of failing at every poll. The
+deployment error names the field: an empty *Consumer Group ID*, a *Commit Strategy* other than
+`BATCH_COMPLETE`/`AUTO`, *Max Poll Records* below 1, a negative *Fetch Min Bytes*, *Fetch Max Wait*,
+*Poll Timeout* or *DLQ Max Retries*, a *Batch Size* below 1 in batch mode, or a DLQ topic that is also a
+source topic. These channels did not work before either; fix the value and redeploy.
+
 ### Nothing from the adapter in the trace at all
 
 Check the marker spelling first, then whether the flow ran at all. A *successful* send now produces

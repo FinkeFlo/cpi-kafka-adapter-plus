@@ -23,14 +23,17 @@ package com.finkeflo.cpi.kafka;
 import java.time.Duration;
 import java.util.Collections;
 import java.util.Map;
+import java.util.Properties;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Future;
 
+import org.apache.camel.impl.DefaultCamelContext;
 import org.apache.kafka.clients.consumer.ConsumerGroupMetadata;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.clients.producer.Callback;
 import org.apache.kafka.clients.producer.Producer;
+import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.clients.producer.RecordMetadata;
 import org.apache.kafka.common.KafkaException;
@@ -179,6 +182,28 @@ public class DlqProducerHelperTest {
 
         @Override
         public void close(Duration timeout) {
+        }
+    }
+
+    @Test
+    public void dlqProducerAcceptsEveryRecordTheConsumerCanFetch() throws Exception {
+        try (DefaultCamelContext ctx = new DefaultCamelContext()) {
+            ctx.addComponent("cpi-kafka-plus", new CpiKafkaPlusComponent());
+            ctx.start();
+            CpiKafkaPlusEndpoint endpoint = (CpiKafkaPlusEndpoint) ctx.getEndpoint(
+                    "cpi-kafka-plus:orders?bootstrapServers=localhost:9092&groupId=g&securityProtocol=PLAINTEXT");
+
+            endpoint.setMaxPartitionFetchSizeKb(51200);
+            Properties big = DlqProducerHelper.buildProducerProperties(endpoint);
+            int expected = 51200 * 1024 + DlqProducerHelper.DLQ_HEADER_HEADROOM_BYTES;
+            Assert.assertEquals(expected, big.get(ProducerConfig.MAX_REQUEST_SIZE_CONFIG));
+            Assert.assertTrue("buffer.memory must hold one full request",
+                    ((Long) big.get(ProducerConfig.BUFFER_MEMORY_CONFIG)) >= expected);
+            Assert.assertEquals(DlqProducerHelper.DLQ_MAX_BLOCK_MS, big.get(ProducerConfig.MAX_BLOCK_MS_CONFIG));
+
+            endpoint.setMaxPartitionFetchSizeKb(1024);
+            Properties small = DlqProducerHelper.buildProducerProperties(endpoint);
+            Assert.assertEquals(32L * 1024 * 1024, small.get(ProducerConfig.BUFFER_MEMORY_CONFIG));
         }
     }
 }
