@@ -386,6 +386,10 @@ numbers.
 }
 ```
 
+A key or value that is exactly one JSON document is embedded as JSON; numbers keep their textual form
+(`100.00` stays `100.00`, exponent notation such as `1e3` is written as `1E+3`). Anything else — including
+JSON followed by more text, and empty values — is embedded as a string.
+
 ### XML List (`XML_LIST`)
 
 **XML List** (`XML_LIST`) wraps records in `<kafkaRecords count="N"><record>...</record>...</kafkaRecords>`. Each record contains `key`, `value`, `topic`, `partition`, `offset`, and `timestamp`.

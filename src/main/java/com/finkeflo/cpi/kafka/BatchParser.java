@@ -49,7 +49,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
  */
 public final class BatchParser {
 
-    private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final ObjectMapper MAPPER = PayloadJson.newMapper();
 
     private BatchParser() {}
 
@@ -207,51 +207,43 @@ public final class BatchParser {
                     + root.getTagName() + ">");
         }
 
-        NodeList recordNodes = root.getElementsByTagName("record");
-        if (recordNodes.getLength() == 0) {
+        List<Element> recordEls = childElements(root, "record");
+        if (recordEls.isEmpty()) {
             throw new IllegalArgumentException(
                     "Producer batch mode received 0 records — nothing to send");
         }
 
-        List<BatchRecord> records = new ArrayList<>(recordNodes.getLength());
-        for (int i = 0; i < recordNodes.getLength(); i++) {
-            Element recordEl = (Element) recordNodes.item(i);
+        List<BatchRecord> records = new ArrayList<>(recordEls.size());
+        for (int i = 0; i < recordEls.size(); i++) {
+            Element recordEl = recordEls.get(i);
 
             // Key: optional; absent = null, empty string = explicit empty key
             String key = null;
-            NodeList keyNodes = recordEl.getElementsByTagName("key");
-            if (keyNodes.getLength() > 0) {
-                key = keyNodes.item(0).getTextContent();
+            List<Element> keyEls = childElements(recordEl, "key");
+            if (!keyEls.isEmpty()) {
+                key = keyEls.get(0).getTextContent();
             }
 
             // Value: required
-            NodeList valueNodes = recordEl.getElementsByTagName("value");
-            if (valueNodes.getLength() == 0) {
+            List<Element> valueEls = childElements(recordEl, "value");
+            if (valueEls.isEmpty()) {
                 throw new IllegalArgumentException(
                         "Record at index " + i + " is missing required <value> element");
             }
 
-            Element valueEl = (Element) valueNodes.item(0);
+            Element valueEl = valueEls.get(0);
             String value = extractValueContent(valueEl);
 
             // Headers: optional
             java.util.Map<String, String> headers = null;
-            Element headersEl = null;
-            NodeList recordChildren = recordEl.getChildNodes();
-            for (int j = 0; j < recordChildren.getLength(); j++) {
-                Node child = recordChildren.item(j);
-                if (child.getNodeType() == Node.ELEMENT_NODE && "headers".equals(child.getNodeName())) {
-                    headersEl = (Element) child;
-                    break;
-                }
-            }
+            List<Element> headersEls = childElements(recordEl, "headers");
+            Element headersEl = headersEls.isEmpty() ? null : headersEls.get(0);
 
             if (headersEl != null) {
-                NodeList headerList = headersEl.getElementsByTagName("header");
-                if (headerList.getLength() > 0) {
+                List<Element> headerList = childElements(headersEl, "header");
+                if (!headerList.isEmpty()) {
                     headers = new java.util.HashMap<>();
-                    for (int j = 0; j < headerList.getLength(); j++) {
-                        Element hEl = (Element) headerList.item(j);
+                    for (Element hEl : headerList) {
                         String hName = hEl.getAttribute("name");
                         if (hName != null && !hName.isEmpty()) {
                             headers.put(hName, hEl.getTextContent());
@@ -263,6 +255,23 @@ public final class BatchParser {
             records.add(new BatchRecord(key, value, headers));
         }
         return records;
+    }
+
+    /**
+     * Direct child elements of {@code parent} named {@code name}, in document order. The record
+     * structure is read only one level deep: a {@code <record>}, {@code <key>} or {@code <header>} inside
+     * a value is payload, and a deep search turned it into an extra record or a wrong partition key.
+     */
+    private static List<Element> childElements(Element parent, String name) {
+        List<Element> result = new ArrayList<>();
+        NodeList children = parent.getChildNodes();
+        for (int i = 0; i < children.getLength(); i++) {
+            Node child = children.item(i);
+            if (child.getNodeType() == Node.ELEMENT_NODE && name.equals(child.getNodeName())) {
+                result.add((Element) child);
+            }
+        }
+        return result;
     }
 
     /**
