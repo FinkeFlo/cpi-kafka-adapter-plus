@@ -422,6 +422,49 @@ public class BatchFormatterTest {
 
     // --- Helpers ---
 
+    private static String jsonArrayOf(String key, String value) throws Exception {
+        return BatchFormatter.toJsonArray(
+                Collections.singletonList(rec("t", 0, 0L, key, value)), STRING_DESER, STRING_DESER);
+    }
+
+    @Test
+    public void numbersKeepTheirTextualForm() throws Exception {
+        Assert.assertTrue(jsonArrayOf(null, "{\"amount\":12345678.90}").contains("\"value\":{\"amount\":12345678.90}"));
+        Assert.assertTrue(jsonArrayOf(null, "100.00").contains("\"value\":100.00"));
+        Assert.assertTrue(jsonArrayOf(null, "1.10").contains("\"value\":1.10"));
+        Assert.assertTrue(jsonArrayOf(null, "123456789012345678901234567890.123456789")
+                .contains("\"value\":123456789012345678901234567890.123456789"));
+        Assert.assertTrue(jsonArrayOf("1.50", "x").contains("\"key\":1.50"));
+    }
+
+    @Test
+    public void exponentNotationIsNormalisedButKeepsItsValue() throws Exception {
+        // Pinned on purpose: the release note says "textual form", not "original text".
+        Assert.assertTrue(jsonArrayOf(null, "1e3").contains("\"value\":1E+3"));
+    }
+
+    @Test
+    public void contentAfterTheFirstJsonValueKeepsTheWholeValueAsText() throws Exception {
+        Assert.assertTrue(jsonArrayOf(null, "{\"a\":1} {\"b\":2}").contains("\"value\":\"{\\\"a\\\":1} {\\\"b\\\":2}\""));
+        Assert.assertTrue(jsonArrayOf(null, "{\"a\":1}garbage").contains("\"value\":\"{\\\"a\\\":1}garbage\""));
+        Assert.assertTrue(jsonArrayOf(null, "true story").contains("\"value\":\"true story\""));
+    }
+
+    @Test
+    public void emptyAndBlankValuesStayStrings() throws Exception {
+        Assert.assertTrue(jsonArrayOf(null, "").contains("\"value\":\"\""));
+        Assert.assertTrue(jsonArrayOf(null, "   ").contains("\"value\":\"   \""));
+        Assert.assertTrue(jsonArrayOf("", "x").contains("\"key\":\"\""));
+    }
+
+    @Test
+    public void scalarJsonValuesAreStillEmbedded() throws Exception {
+        Assert.assertTrue(jsonArrayOf(null, "\"x\"").contains("\"value\":\"x\""));
+        Assert.assertTrue(jsonArrayOf(null, "true").contains("\"value\":true"));
+        Assert.assertTrue(jsonArrayOf(null, "42").contains("\"value\":42"));
+        Assert.assertTrue(jsonArrayOf(null, null).contains("\"value\":null"));
+    }
+
     private static ConsumerRecord<byte[], byte[]> rec(String topic, int partition, long offset,
                                                        String key, String value) {
         byte[] keyBytes = key != null ? key.getBytes(StandardCharsets.UTF_8) : null;

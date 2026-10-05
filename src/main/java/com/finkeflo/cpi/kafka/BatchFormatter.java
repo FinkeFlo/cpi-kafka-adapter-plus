@@ -27,6 +27,7 @@ import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -37,7 +38,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 public final class BatchFormatter {
 
     private static final Logger LOG = LoggerFactory.getLogger(BatchFormatter.class);
-    private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final ObjectMapper MAPPER = PayloadJson.newMapper();
 
     private BatchFormatter() {}
 
@@ -63,26 +64,8 @@ public final class BatchFormatter {
             String key = keyDeserializer.apply(record.topic(), record.key());
             String value = valueDeserializer.apply(record.topic(), record.value());
 
-            if (key != null) {
-                // Try to parse as JSON, if it fails, use as plain string
-                try {
-                    node.set("key", MAPPER.readTree(key));
-                } catch (Exception e) {
-                    node.put("key", key);
-                }
-            } else {
-                node.putNull("key");
-            }
-
-            if (value != null) {
-                try {
-                    node.set("value", MAPPER.readTree(value));
-                } catch (Exception e) {
-                    node.put("value", value);
-                }
-            } else {
-                node.putNull("value");
-            }
+            putJsonOrText(node, "key", key);
+            putJsonOrText(node, "value", value);
 
             node.put("topic", record.topic());
             node.put("partition", record.partition());
@@ -97,6 +80,28 @@ public final class BatchFormatter {
         ObjectNode root = MAPPER.createObjectNode();
         root.set("kafkaRecords", inner);
         return MAPPER.writeValueAsString(root);
+    }
+
+    /**
+     * Embeds a key or value as JSON when it is exactly one JSON document, otherwise as a string. An empty
+     * or blank text parses to a missing node, which would be written as {@code null}; it stays a string.
+     */
+    private static void putJsonOrText(ObjectNode node, String field, String text) {
+        if (text == null) {
+            node.putNull(field);
+            return;
+        }
+        JsonNode parsed = null;
+        try {
+            parsed = MAPPER.readTree(text);
+        } catch (Exception e) {
+            // Not a single JSON document — kept verbatim as a string below.
+        }
+        if (parsed == null || parsed.isMissingNode()) {
+            node.put(field, text);
+        } else {
+            node.set(field, parsed);
+        }
     }
 
     /**
