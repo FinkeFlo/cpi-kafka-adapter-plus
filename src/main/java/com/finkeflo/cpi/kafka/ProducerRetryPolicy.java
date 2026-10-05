@@ -53,9 +53,12 @@ import com.finkeflo.cpi.kafka.KafkaErrorHelper.Classification;
  *       same from the caller's side: a {@code TimeoutException} "does not mean the request did not
  *       actually reach the broker" ({@code KafkaProducer.java:769-773}). Retrying here would commit
  *       the same batch twice. This is documented behaviour, not a residual risk.</li>
- *   <li><b>Non-transactional single message</b> — retried only while the broker can still deduplicate
- *       it, i.e. with idempotence enabled <em>and</em> the same producer instance, because the
- *       broker deduplicates on {@code (PID, sequence)} and a new producer gets a new PID.</li>
+ *   <li><b>Non-transactional single message</b> — retried only when the send failed before the record
+ *       reached the producer's buffer: {@code send()} threw, or returned Kafka's {@code FutureFailure}
+ *       (metadata wait, buffer exhausted, the KAFKA-10902 monitor fault). A failure after buffering —
+ *       delivery timeout, disconnect, lost acknowledgement — stops with {@code OUTCOME_UNKNOWN}: the
+ *       broker deduplicates only the client's internal retries of the same batch, not a new
+ *       {@code send()}, which gets a new sequence number.</li>
  *   <li><b>Non-transactional batch</b> — never retried; the caller does not even ask. Records
  *       {@code 0..k-1} of a batch can already be committed when {@code k} fails, so resending the
  *       batch duplicates them.</li>
@@ -87,6 +90,29 @@ final class ProducerRetryPolicy {
     }
 
     /**
+     * The class {@code KafkaProducer.send()} returns when {@code doSend()} failed before or inside
+     * {@code RecordAccumulator.append()} ({@code KafkaProducer.java:1049-1061} in kafka-clients 4.3.1).
+     * In practice the record never reached the buffer. The one exception is
+     * {@code TransactionManager.maybeAddPartition()}, which runs after the append inside the same
+     * try and can fail once the producer is in a fatal state — but those failures (fencing, an
+     * invalid epoch) classify as {@code FATAL_PRODUCER_UNUSABLE}, which this path never retries, and
+     * the sender aborts the buffered batch in that state anyway. It is private, so it is matched by
+     * name; a client upgrade that renames it makes {@link #failedBeforeBuffering} return {@code false},
+     * which stops retries rather than risking duplicates. A test pins the name.
+     */
+    static final String KAFKA_FUTURE_FAILURE_CLASS =
+            "org.apache.kafka.clients.producer.KafkaProducer$FutureFailure";
+
+    /**
+     * Whether a future returned by {@code send()} proves that the record was never buffered.
+     * {@code isDone()} is no substitute: a buffered batch can fail between {@code send()} returning and
+     * the check.
+     */
+    static boolean failedBeforeBuffering(java.util.concurrent.Future<?> future) {
+        return future != null && KAFKA_FUTURE_FAILURE_CLASS.equals(future.getClass().getName());
+    }
+
+    /**
      * Why no further attempt was made. Carried into the diagnostic line and the MPL, because
      * "was not retried" is useless to support without the reason: a permanent error, an exhausted
      * budget and a disabled feature look identical from the outside.
@@ -100,6 +126,12 @@ final class ProducerRetryPolicy {
         BUDGET_EXHAUSTED,
         /** The failure happened in or after {@code commitTransaction()}; a retry could duplicate. */
         COMMIT_OUTCOME_UNKNOWN,
+        /**
+         * Non-transactional single path: the send failed after the record was handed to the producer's
+         * buffer, so it may already be on the broker. A new {@code send()} gets a new sequence number,
+         * which the broker does not deduplicate, so a retry could write the record twice.
+         */
+        OUTCOME_UNKNOWN,
         /** The error will fail identically on a fresh producer (data error / unknown fatal). */
         PERMANENT,
         /** Non-transactional single path with {@code enableIdempotence=false}. */
@@ -194,16 +226,19 @@ final class ProducerRetryPolicy {
     /**
      * Decides whether the non-transactional single-message path may run another attempt.
      *
-     * <p>Unlike the transactional path this reuses the <em>same</em> producer, so the broker's
-     * {@code (PID, sequence)} deduplication still covers the "record was written, acknowledgement
-     * lost" case — which is why idempotence is a precondition rather than a nicety.
+     * <p>Retries only a failure that happened before the record was buffered (see
+     * {@link #failedBeforeBuffering}). Idempotence is still required, as before; it no longer carries
+     * the safety argument but keeps the set of retrying configurations unchanged.
      *
-     * @param idempotenceEnabled value of {@code enableIdempotence}
+     * @param failedBeforeBuffering result of {@link #failedBeforeBuffering} for the attempt, or
+     *                              {@code true} when {@code send()} threw
+     * @param idempotenceEnabled    value of {@code enableIdempotence}
      */
-    static Decision decideSingle(Throwable error, int attempt, int maxAttempts, long delayMs,
-                                 long budgetDeadlineMs, long nowMs, boolean idempotenceEnabled) {
-        return decideSingle(classifyForRetry(error), attempt, maxAttempts, delayMs,
-                budgetDeadlineMs, nowMs, idempotenceEnabled);
+    static Decision decideSingle(Throwable error, boolean failedBeforeBuffering, int attempt,
+                                 int maxAttempts, long delayMs, long budgetDeadlineMs, long nowMs,
+                                 boolean idempotenceEnabled) {
+        return decideSingle(classifyForRetry(error), failedBeforeBuffering, attempt, maxAttempts,
+                delayMs, budgetDeadlineMs, nowMs, idempotenceEnabled);
     }
 
     /**
@@ -219,8 +254,8 @@ final class ProducerRetryPolicy {
      * {@code RETRIABLE} is safe here for the same reason the inner {@code MonitorFaultRetry} is
      * safe, and independently of it: in the transactional path the phase check has already stopped
      * everything from {@code COMMIT} onwards, so the failed attempt's transaction is aborted and
-     * invisible to {@code read_committed} consumers; in the single path idempotence is a
-     * precondition, so the broker deduplicates on {@code (PID, sequence)}.
+     * invisible to {@code read_committed} consumers; in the single path the fault is thrown by
+     * {@code send()} before the record reaches the buffer.
      *
      * <p>This is a second line of defence, not the fix. The fix is the metadata pre-warm and the
      * raised {@code metadata.max.idle.ms}, which keep the client out of the defective code path.
@@ -233,9 +268,9 @@ final class ProducerRetryPolicy {
     }
 
     /** Classification-level variant, see {@link #decideTransactional(Classification, TxnPhase, int, int, long, long, long, boolean)}. */
-    static Decision decideSingle(Classification classification, int attempt, int maxAttempts,
-                                 long delayMs, long budgetDeadlineMs, long nowMs,
-                                 boolean idempotenceEnabled) {
+    static Decision decideSingle(Classification classification, boolean failedBeforeBuffering,
+                                 int attempt, int maxAttempts, long delayMs, long budgetDeadlineMs,
+                                 long nowMs, boolean idempotenceEnabled) {
         if (maxAttempts <= 1) {
             return Decision.stop(StopReason.RETRY_DISABLED);
         }
@@ -244,16 +279,24 @@ final class ProducerRetryPolicy {
             // lost record, so retrying would silently duplicate. Refusing loudly is the point.
             return Decision.stop(StopReason.IDEMPOTENCE_DISABLED);
         }
+        // FATAL_PRODUCER_UNUSABLE is never retried here regardless of configuration: this path
+        // reuses the shared producer, and a broken shared producer belongs in the existing rebuild
+        // path (handleSendFailure), not in a retry loop that would keep using it.
+        Decision decision = classify(classification, true, false);
+        if (decision.isRetry() && !failedBeforeBuffering) {
+            // "Transient" only says the next attempt may succeed, not that this one wrote nothing.
+            // An expired or disconnected batch looks exactly like this and may be on the broker.
+            // Checked before the attempt and budget limits: on the last attempt "the record may be
+            // on the broker" is what support needs to read, not "attempts used up".
+            return Decision.stop(StopReason.OUTCOME_UNKNOWN);
+        }
         if (attempt >= maxAttempts) {
             return Decision.stop(StopReason.ATTEMPTS_EXHAUSTED);
         }
         if (nowMs + delayMs > budgetDeadlineMs) {
             return Decision.stop(StopReason.BUDGET_EXHAUSTED);
         }
-        // FATAL_PRODUCER_UNUSABLE is never retried here regardless of configuration: this path
-        // reuses the shared producer, and a broken shared producer belongs in the existing rebuild
-        // path (handleSendFailure), not in a retry loop that would keep using it.
-        return classify(classification, true, false);
+        return decision;
     }
 
     private static Decision classify(Classification classification, boolean onlyTransient,

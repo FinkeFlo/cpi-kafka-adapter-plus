@@ -1081,10 +1081,10 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
         // KAFKA-10902 JVM defect in the millisecond range on the send() call itself; the outer loop
         // catches broker outages in the second range. Both are covered by the same total budget.
         //
-        // The shared producer is deliberately *reused* across attempts rather than rebuilt: the
-        // broker deduplicates a re-sent record on (PID, sequence), and only the same producer
-        // instance keeps that PID. A fresh producer would get a new PID and turn a lost
-        // acknowledgement into a duplicate record. This is also why the loop requires idempotence.
+        // The shared producer is reused across attempts, and an attempt is only repeated when the
+        // record provably never reached the producer's buffer (send() threw, or returned Kafka's
+        // FutureFailure). A failure after buffering may already be on the broker, and a second send()
+        // gets a new sequence number the broker does not deduplicate — see ProducerRetryPolicy.
         int maxAttempts = endpoint.getProducerRetryMaxAttempts();
         long delayMs = endpoint.getProducerRetryDelaySeconds() * 1000L;
         long startedAtMs = System.currentTimeMillis();
@@ -1094,6 +1094,8 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
         int attempt = 0;
 
         for (attempt = 1; attempt <= maxAttempts; attempt++) {
+            // Stays true when send() itself throws: then nothing was buffered.
+            boolean failedBeforeBuffering = true;
             try {
                 long deadlineMs = sendGuard.newDeadline();
                 Future<RecordMetadata> future = MonitorFaultRetry.execute(
@@ -1102,6 +1104,7 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
                         deadlineMs,
                         topic,
                         0);
+                failedBeforeBuffering = ProducerRetryPolicy.failedBeforeBuffering(future);
                 RecordMetadata metadata = sendGuard.await(future, deadlineMs,
                         "Send to topic '" + topic + "'");
 
@@ -1125,7 +1128,7 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
             } catch (Exception e) {
                 lastError = e;
                 ProducerRetryPolicy.Decision decision = ProducerRetryPolicy.decideSingle(
-                        e, attempt, maxAttempts, delayMs, budgetDeadlineMs,
+                        e, failedBeforeBuffering, attempt, maxAttempts, delayMs, budgetDeadlineMs,
                         System.currentTimeMillis(), endpoint.isEnableIdempotence());
                 if (!decision.isRetry()) {
                     stopReason = decision.stopReason();
