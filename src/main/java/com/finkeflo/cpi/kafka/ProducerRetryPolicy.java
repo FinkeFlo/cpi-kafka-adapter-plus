@@ -91,8 +91,12 @@ final class ProducerRetryPolicy {
 
     /**
      * The class {@code KafkaProducer.send()} returns when {@code doSend()} failed before or inside
-     * {@code RecordAccumulator.append()} — the record never reached the buffer
-     * ({@code KafkaProducer.java:1049-1061} in kafka-clients 4.3.1). It is private, so it is matched by
+     * {@code RecordAccumulator.append()} ({@code KafkaProducer.java:1049-1061} in kafka-clients 4.3.1).
+     * In practice the record never reached the buffer. The one exception is
+     * {@code TransactionManager.maybeAddPartition()}, which runs after the append inside the same
+     * try and can fail once the producer is in a fatal state — but those failures (fencing, an
+     * invalid epoch) classify as {@code FATAL_PRODUCER_UNUSABLE}, which this path never retries, and
+     * the sender aborts the buffered batch in that state anyway. It is private, so it is matched by
      * name; a client upgrade that renames it makes {@link #failedBeforeBuffering} return {@code false},
      * which stops retries rather than risking duplicates. A test pins the name.
      */
@@ -275,12 +279,6 @@ final class ProducerRetryPolicy {
             // lost record, so retrying would silently duplicate. Refusing loudly is the point.
             return Decision.stop(StopReason.IDEMPOTENCE_DISABLED);
         }
-        if (attempt >= maxAttempts) {
-            return Decision.stop(StopReason.ATTEMPTS_EXHAUSTED);
-        }
-        if (nowMs + delayMs > budgetDeadlineMs) {
-            return Decision.stop(StopReason.BUDGET_EXHAUSTED);
-        }
         // FATAL_PRODUCER_UNUSABLE is never retried here regardless of configuration: this path
         // reuses the shared producer, and a broken shared producer belongs in the existing rebuild
         // path (handleSendFailure), not in a retry loop that would keep using it.
@@ -288,7 +286,15 @@ final class ProducerRetryPolicy {
         if (decision.isRetry() && !failedBeforeBuffering) {
             // "Transient" only says the next attempt may succeed, not that this one wrote nothing.
             // An expired or disconnected batch looks exactly like this and may be on the broker.
+            // Checked before the attempt and budget limits: on the last attempt "the record may be
+            // on the broker" is what support needs to read, not "attempts used up".
             return Decision.stop(StopReason.OUTCOME_UNKNOWN);
+        }
+        if (attempt >= maxAttempts) {
+            return Decision.stop(StopReason.ATTEMPTS_EXHAUSTED);
+        }
+        if (nowMs + delayMs > budgetDeadlineMs) {
+            return Decision.stop(StopReason.BUDGET_EXHAUSTED);
         }
         return decision;
     }

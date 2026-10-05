@@ -181,6 +181,17 @@ public class ProducerRetryPolicyTest {
     }
 
     @Test
+    public void aFailureAfterBufferingOnTheLastAttemptStillReportsTheUnknownOutcome() {
+        // The record may be on the broker; that is what support needs to read, not "attempts used up".
+        assertStop(StopReason.OUTCOME_UNKNOWN, ProducerRetryPolicy.decideSingle(
+                new NetworkException("Disconnected from node 3"),
+                false, 3, 3, DELAY_MS, FAR_DEADLINE, NOW, true));
+        assertStop(StopReason.OUTCOME_UNKNOWN, ProducerRetryPolicy.decideSingle(
+                new NetworkException("Disconnected from node 3"),
+                false, 1, 3, DELAY_MS, NOW, NOW, true));
+    }
+
+    @Test
     public void singlePathRetriesATransientFailureBeforeBuffering() {
         Assert.assertTrue(ProducerRetryPolicy.decideSingle(
                 new TimeoutException("Topic orders not present in metadata after 2000 ms."),

@@ -214,7 +214,7 @@ fields, so "how often does the retry actually rescue a message" is a ratio of tw
 | `ATTEMPTS_EXHAUSTED` | every configured attempt was used |
 | `BUDGET_EXHAUSTED` | the next attempt would have exceeded `producerRetryTotalBudgetSeconds` |
 | `COMMIT_OUTCOME_UNKNOWN` | the failure was in or after the commit; a retry could duplicate |
-| `OUTCOME_UNKNOWN` | single path: the send failed after the record was buffered; it may be on the broker, so a retry could duplicate |
+| `OUTCOME_UNKNOWN` | single path: the send failed after the record was buffered; it may be on the broker, so a retry could duplicate. Reported even on the last attempt, ahead of `ATTEMPTS_EXHAUSTED` / `BUDGET_EXHAUSTED` |
 | `PERMANENT` | a data error or an unclassifiable failure |
 | `IDEMPOTENCE_DISABLED` | single path with `enableIdempotence=false` |
 | `RETRY_DISABLED` | `producerRetryMaxAttempts=1` |
