@@ -596,6 +596,7 @@ public class CpiKafkaPlusComponentTest {
     public void testValidateConfigurationPassesWithDefaults() {
         CpiKafkaPlusEndpoint ep = new CpiKafkaPlusEndpoint();
         ep.setTopic("test-topic");
+        ep.setBootstrapServers("localhost:9092");
         // Default securityProtocol is SASL_SSL, so a credentialAlias is required
         ep.setCredentialAlias("test-alias");
         ep.validateConfiguration(); // should not throw
@@ -605,6 +606,7 @@ public class CpiKafkaPlusComponentTest {
     public void testValidateConfigurationFailsSchemaRegistryWithoutUrl() {
         CpiKafkaPlusEndpoint ep = new CpiKafkaPlusEndpoint();
         ep.setTopic("test-topic");
+        ep.setBootstrapServers("localhost:9092");
         ep.setSchemaRegistryEnabled(true);
         ep.setSchemaRegistryUrl(null);
         ep.validateConfiguration();
@@ -614,6 +616,7 @@ public class CpiKafkaPlusComponentTest {
     public void testValidateConfigurationFailsJsonSchemaWithoutSchema() {
         CpiKafkaPlusEndpoint ep = new CpiKafkaPlusEndpoint();
         ep.setTopic("test-topic");
+        ep.setBootstrapServers("localhost:9092");
         ep.setJsonSchemaValidation(true);
         ep.setJsonSchema("   ");
         ep.validateConfiguration();
@@ -623,6 +626,7 @@ public class CpiKafkaPlusComponentTest {
     public void testValidateConfigurationFailsSaslWithoutCredentialAlias() {
         CpiKafkaPlusEndpoint ep = new CpiKafkaPlusEndpoint();
         ep.setTopic("test-topic");
+        ep.setBootstrapServers("localhost:9092");
         ep.setSecurityProtocol("SASL_SSL");
         ep.setCredentialAlias(null);
         ep.validateConfiguration();
@@ -632,6 +636,7 @@ public class CpiKafkaPlusComponentTest {
     public void testValidateConfigurationPassesSaslWithAlias() {
         CpiKafkaPlusEndpoint ep = new CpiKafkaPlusEndpoint();
         ep.setTopic("test-topic");
+        ep.setBootstrapServers("localhost:9092");
         ep.setSecurityProtocol("SASL_SSL");
         ep.setCredentialAlias("my-alias");
         ep.validateConfiguration(); // should not throw
@@ -641,6 +646,7 @@ public class CpiKafkaPlusComponentTest {
     public void testValidateConfigurationPassesPlaintextWithoutAlias() {
         CpiKafkaPlusEndpoint ep = new CpiKafkaPlusEndpoint();
         ep.setTopic("test-topic");
+        ep.setBootstrapServers("localhost:9092");
         ep.setSecurityProtocol("PLAINTEXT");
         ep.setCredentialAlias(null);
         ep.validateConfiguration(); // should not throw
@@ -686,6 +692,7 @@ public class CpiKafkaPlusComponentTest {
     public void testValidateConfigurationAcceptsStandardDiagnosticsLevel() {
         CpiKafkaPlusEndpoint ep = new CpiKafkaPlusEndpoint();
         ep.setTopic("test-topic");
+        ep.setBootstrapServers("localhost:9092");
         ep.setSecurityProtocol("PLAINTEXT");
         ep.setDiagnosticsLevel("STANDARD");
         ep.validateConfiguration(); // should not throw
@@ -695,6 +702,7 @@ public class CpiKafkaPlusComponentTest {
     public void testValidateConfigurationAcceptsFullDiagnosticsLevel() {
         CpiKafkaPlusEndpoint ep = new CpiKafkaPlusEndpoint();
         ep.setTopic("test-topic");
+        ep.setBootstrapServers("localhost:9092");
         ep.setSecurityProtocol("PLAINTEXT");
         ep.setDiagnosticsLevel("FULL");
         ep.validateConfiguration(); // should not throw
@@ -704,6 +712,7 @@ public class CpiKafkaPlusComponentTest {
     public void testValidateConfigurationRejectsInvalidDiagnosticsLevel() {
         CpiKafkaPlusEndpoint ep = new CpiKafkaPlusEndpoint();
         ep.setTopic("test-topic");
+        ep.setBootstrapServers("localhost:9092");
         ep.setSecurityProtocol("PLAINTEXT");
         ep.setDiagnosticsLevel("INVALID_LEVEL");
         ep.validateConfiguration();
@@ -713,6 +722,7 @@ public class CpiKafkaPlusComponentTest {
     public void testValidateConfigurationInvalidDiagnosticsLevelMessage() {
         CpiKafkaPlusEndpoint ep = new CpiKafkaPlusEndpoint();
         ep.setTopic("test-topic");
+        ep.setBootstrapServers("localhost:9092");
         ep.setSecurityProtocol("PLAINTEXT");
         ep.setDiagnosticsLevel("VERBOSE");
         try {

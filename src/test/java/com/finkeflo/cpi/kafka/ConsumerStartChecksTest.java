@@ -223,6 +223,23 @@ public class ConsumerStartChecksTest {
         Assert.assertTrue(message, message.contains("'" + uiLabel + "'"));
     }
 
+    @Test
+    public void emptyBootstrapServersAreRejected() throws Exception {
+        CpiKafkaPlusEndpoint e = endpoint();
+        e.setBootstrapServers("");
+        String message = startFailure(e);
+        Assert.assertTrue(message, message.contains("bootstrapServers"));
+    }
+
+    @Test
+    public void malformedJsonSchemaIsRejected() throws Exception {
+        CpiKafkaPlusEndpoint e = endpoint();
+        e.setJsonSchemaValidation(true);
+        e.setJsonSchema("{\"type\": \"object\"} {\"type\": \"string\"}");
+        String message = startFailure(e);
+        Assert.assertTrue(message, message.contains("JSON Schema"));
+    }
+
     private int endpointCount;
 
     /**

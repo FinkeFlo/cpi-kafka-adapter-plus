@@ -31,6 +31,8 @@ import org.apache.camel.spi.UriParam;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+
 @UriEndpoint(scheme = "cpi-kafka-plus", syntax = "cpi-kafka-plus:topic", title = "CPI Kafka Plus")
 public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
 
@@ -418,6 +420,10 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
                     "[CPI-KAFKA-PLUS-DIAG] Topic name '" + effectiveTopic + "' contains leading or trailing whitespace. "
                     + "Please remove any spaces around the topic name in the adapter Connection tab.");
         }
+        if (bootstrapServers == null || bootstrapServers.trim().isEmpty()) {
+            throw new IllegalArgumentException(
+                    "bootstrapServers must not be empty. Please set the Kafka broker address in the adapter Connection tab.");
+        }
         if (schemaRegistryEnabled
                 && (schemaRegistryUrl == null || schemaRegistryUrl.isEmpty())) {
             throw new IllegalArgumentException(
@@ -428,6 +434,12 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
                 throw new IllegalArgumentException(
                         "JSON Schema validation is enabled but no JSON Schema is configured. "
                         + "Please provide a valid JSON Schema (draft-07) or disable JSON Schema validation.");
+            }
+            try {
+                JsonSchemaValidator.parseSchemaDocument(new ObjectMapper(), jsonSchema);
+            } catch (IllegalArgumentException e) {
+                throw new IllegalArgumentException("JSON Schema validation is enabled but the JSON Schema "
+                        + "is not valid JSON. " + e.getMessage(), e);
             }
         }
         if (securityProtocol != null
