@@ -167,6 +167,23 @@ public class CpiKafkaPlusProducerSinglePathRetryTest {
                 kafkaFutureFailure(new org.apache.kafka.common.errors.TimeoutException("t"))));
     }
 
+    @Test
+    public void aRealProducerReturnsAFailedBeforeBufferingFutureWhenMetadataTimesOut() throws Exception {
+        // Behavioural pin: the class-name test above only catches a rename. If a kafka-clients release
+        // keeps the class but stops returning it from doSend(), every single-path retry would silently
+        // stop — this sends through a real producer against an unreachable broker instead.
+        Properties props = new Properties();
+        props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, "localhost:1");
+        props.put(ProducerConfig.CLIENT_ID_CONFIG, "future-failure-pin");
+        props.put(ProducerConfig.MAX_BLOCK_MS_CONFIG, "200");
+        try (KafkaProducer<byte[], byte[]> real = new KafkaProducer<>(
+                props, new ByteArraySerializer(), new ByteArraySerializer())) {
+            Future<RecordMetadata> future = real.send(new ProducerRecord<>("orders", new byte[] {1}));
+            Assert.assertTrue("metadata timeout must come back as Kafka's pre-buffer FutureFailure, got "
+                    + future.getClass().getName(), ProducerRetryPolicy.failedBeforeBuffering(future));
+        }
+    }
+
     /** Outer retry on (2 attempts, no delay), rebuild side effects suppressed. */
     private static CpiKafkaPlusProducer newRetryingProducer(DefaultCamelContext ctx) throws Exception {
         CpiKafkaPlusProducer producer = newProducer(ctx);
