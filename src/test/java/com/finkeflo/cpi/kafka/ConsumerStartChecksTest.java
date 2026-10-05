@@ -229,6 +229,7 @@ public class ConsumerStartChecksTest {
         e.setBootstrapServers("");
         String message = startFailure(e);
         Assert.assertTrue(message, message.contains("bootstrapServers"));
+        Assert.assertTrue(message, message.contains("'Bootstrap Servers'"));
     }
 
     @Test
@@ -237,7 +238,7 @@ public class ConsumerStartChecksTest {
         e.setJsonSchemaValidation(true);
         e.setJsonSchema("{\"type\": \"object\"} {\"type\": \"string\"}");
         String message = startFailure(e);
-        Assert.assertTrue(message, message.contains("JSON Schema"));
+        Assert.assertTrue(message, message.contains("'JSON Schema' (jsonSchema)"));
     }
 
     private int endpointCount;

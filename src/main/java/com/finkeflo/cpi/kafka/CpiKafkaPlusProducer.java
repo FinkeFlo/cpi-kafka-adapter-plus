@@ -269,14 +269,14 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
             throw unknownBatchMode(batchMode);
         }
         if (endpoint.getDeliveryTimeoutSeconds() < 1) {
-            throw new IllegalArgumentException("deliveryTimeoutSeconds must be at least 1, got: "
+            throw new IllegalArgumentException("'Delivery Timeout (Seconds)' (deliveryTimeoutSeconds) must be at least 1, got: "
                     + endpoint.getDeliveryTimeoutSeconds() + ". With 0 every send times out before it is sent.");
         }
         // null keeps today's meaning, TopicNameStrategy; case-sensitive exactly like resolveSubject().
         String strategy = endpoint.getSubjectNameStrategy();
         if (endpoint.isSchemaRegistryEnabled() && endpoint.isAvroValueSerialization()
                 && strategy != null && !AvroSerializerHelper.TOPIC_NAME_STRATEGY.equals(strategy)) {
-            throw new IllegalArgumentException("subjectNameStrategy '" + strategy + "' is not supported for "
+            throw new IllegalArgumentException("'Subject Name Strategy' (subjectNameStrategy) '" + strategy + "' is not supported for "
                     + "Avro serialization: the subject cannot be resolved from JSON input without the record "
                     + "name. Please use TopicNameStrategy.");
         }
@@ -1038,7 +1038,7 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
     }
 
     static IllegalArgumentException unknownBatchMode(String batchMode) {
-        return new IllegalArgumentException("Unknown producerBatchMode: " + batchMode
+        return new IllegalArgumentException("Unknown 'Batch Send Mode' (producerBatchMode): " + batchMode
                 + ". Supported: NONE, JSON_ARRAY, XML_LIST");
     }
 

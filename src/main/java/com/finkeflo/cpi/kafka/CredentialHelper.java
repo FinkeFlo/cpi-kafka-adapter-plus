@@ -63,11 +63,33 @@ public final class CredentialHelper {
      */
     public interface CredentialResolver {
         UserCredentials resolveUserCredential(String alias);
+
+        /**
+         * Whether a credential store exists at all. {@code false} outside CPI, where an alias has
+         * nothing to resolve against; {@link #requireUserCredential} then keeps the old behaviour
+         * (no authentication) instead of failing.
+         */
+        default boolean isAvailable() {
+            return true;
+        }
     }
 
     private static final CredentialResolver DEFAULT_RESOLVER = new CredentialResolver() {
         public UserCredentials resolveUserCredential(String alias) {
             return resolveFromSecureStore(alias);
+        }
+
+        /**
+         * {@code false} only when the API factory answers without a SecureStoreService. A failing
+         * lookup is not treated as "no store": resolution then throws, exactly as before.
+         */
+        @Override
+        public boolean isAvailable() {
+            try {
+                return ITApiFactory.getService(SecureStoreService.class, null) != null;
+            } catch (Exception e) {
+                return true;
+            }
         }
     };
     private static volatile CredentialResolver credentialResolver = DEFAULT_RESOLVER;
@@ -121,6 +143,11 @@ public final class CredentialHelper {
             return null;
         }
         UserCredentials credentials = getUserCredential(alias);
+        if (credentials == null && !credentialResolver.isAvailable()) {
+            LOG.warn("[CPI-KAFKA-PLUS-DIAG] No credential store available (not running on CPI?) - "
+                    + "{} '{}' is ignored and the connection is made without authentication", parameter, alias);
+            return null;
+        }
         if (credentials == null) {
             throw new IllegalStateException(parameter + " '" + alias + "' could not be resolved. Please "
                     + "deploy a User Credentials artifact with this name, or clear the field to connect "

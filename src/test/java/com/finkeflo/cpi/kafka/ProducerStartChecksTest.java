@@ -50,7 +50,7 @@ public class ProducerStartChecksTest {
     public void emptyBootstrapServersAreRejected() throws Exception {
         CpiKafkaPlusEndpoint e = endpoint();
         e.setBootstrapServers(" ");
-        assertRejected(e, "bootstrapServers");
+        assertRejected(e, "bootstrapServers", "Bootstrap Servers");
     }
 
     @Test
@@ -58,7 +58,7 @@ public class ProducerStartChecksTest {
         CpiKafkaPlusEndpoint e = endpoint();
         e.setJsonSchemaValidation(true);
         e.setJsonSchema("{\"type\": \"object\",");
-        assertRejected(e, "JSON Schema");
+        assertRejected(e, "jsonSchema", "JSON Schema");
     }
 
     @Test
@@ -73,7 +73,7 @@ public class ProducerStartChecksTest {
     public void unknownProducerBatchModeIsRejected() throws Exception {
         CpiKafkaPlusEndpoint e = endpoint();
         e.setProducerBatchMode("CSV");
-        assertRejected(e, "producerBatchMode");
+        assertRejected(e, "producerBatchMode", "Batch Send Mode");
     }
 
     @Test
@@ -87,7 +87,7 @@ public class ProducerStartChecksTest {
     public void deliveryTimeoutBelowOneSecondIsRejected() throws Exception {
         CpiKafkaPlusEndpoint e = endpoint();
         e.setDeliveryTimeoutSeconds(0);
-        assertRejected(e, "deliveryTimeoutSeconds");
+        assertRejected(e, "deliveryTimeoutSeconds", "Delivery Timeout (Seconds)");
     }
 
     @Test
@@ -97,7 +97,7 @@ public class ProducerStartChecksTest {
         e.setSchemaRegistryUrl("http://localhost:8081");
         e.setAvroValueSerialization(true);
         e.setSubjectNameStrategy("RecordNameStrategy");
-        assertRejected(e, "subjectNameStrategy");
+        assertRejected(e, "subjectNameStrategy", "Subject Name Strategy");
     }
 
     @Test
@@ -119,13 +119,16 @@ public class ProducerStartChecksTest {
                 "cpi-kafka-plus:orders?bootstrapServers=localhost:9999&securityProtocol=PLAINTEXT");
     }
 
-    private static void assertRejected(CpiKafkaPlusEndpoint endpoint, String field) throws Exception {
+    /** The message names both the UI label and the parameter, so it is findable from either side. */
+    private static void assertRejected(CpiKafkaPlusEndpoint endpoint, String field, String uiLabel)
+            throws Exception {
         CpiKafkaPlusProducer producer = new CpiKafkaPlusProducer(endpoint);
         try {
             producer.doStart();
             Assert.fail("expected the deployment to be rejected");
         } catch (IllegalArgumentException expected) {
             Assert.assertTrue(expected.getMessage(), expected.getMessage().contains(field));
+            Assert.assertTrue(expected.getMessage(), expected.getMessage().contains("'" + uiLabel + "'"));
         } finally {
             try {
                 producer.doStop();

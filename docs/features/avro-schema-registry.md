@@ -73,10 +73,11 @@ A receiver channel with Avro serialization and a strategy other than `TopicNameS
 
 Schema Registry credentials are stored in the CPI Secure Store. Create a User Credentials artifact with the Schema Registry API key and secret, then reference its alias in `schemaRegistryCredentialAlias`.
 
-If the alias is set but no User Credentials artifact of that name is deployed, the channel fails with
-`schemaRegistryCredentialAlias '<alias>' could not be resolved` (sender: at the first connect; receiver: at
-the first send). Before 1.4.1 it silently connected without authentication. Leave the field empty for a
-registry without authentication.
+If *Schema Registry Credential Alias* is set but no User Credentials artifact of that name is deployed,
+the channel fails with `'Schema Registry Credential Alias' (schemaRegistryCredentialAlias) '<alias>' could
+not be resolved` (sender: at the first connect; receiver: at the first send). Before 1.4.1 it silently
+connected without authentication. Leave the field empty for a registry without authentication. Outside
+CPI, where no secure store exists, the alias is ignored as before.
 
 !!! note
     Avro serialization/deserialization applies to message values only. Keys are always treated as strings.

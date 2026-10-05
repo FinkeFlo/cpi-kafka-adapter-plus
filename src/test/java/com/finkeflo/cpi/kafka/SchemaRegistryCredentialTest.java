@@ -75,6 +75,25 @@ public class SchemaRegistryCredentialTest {
     }
 
     @Test
+    public void withoutAnySecureStoreAnAliasIsIgnoredAsBefore() throws Exception {
+        // A runtime that offers no secure store at all has nothing to resolve against; the helper
+        // keeps the pre-1.4.1 behaviour (no authentication) instead of failing.
+        CredentialHelper.setCredentialResolver(new CredentialHelper.CredentialResolver() {
+            @Override
+            public CredentialHelper.UserCredentials resolveUserCredential(String alias) {
+                return null;
+            }
+
+            @Override
+            public boolean isAvailable() {
+                return false;
+            }
+        });
+        new AvroDeserializerHelper(endpoint("sr-cred"));
+        new AvroSerializerHelper(endpoint("sr-cred"));
+    }
+
+    @Test
     public void aResolvableAliasIsUsed() throws Exception {
         CredentialHelper.setCredentialResolver(alias -> new CredentialHelper.UserCredentials("u", "p"));
         new AvroDeserializerHelper(endpoint("sr-cred"));

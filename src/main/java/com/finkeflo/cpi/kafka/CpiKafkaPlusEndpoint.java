@@ -422,7 +422,7 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
         }
         if (bootstrapServers == null || bootstrapServers.trim().isEmpty()) {
             throw new IllegalArgumentException(
-                    "bootstrapServers must not be empty. Please set the Kafka broker address in the adapter Connection tab.");
+                    "'Bootstrap Servers' (bootstrapServers) must not be empty. Please set the Kafka broker address in the adapter Connection tab.");
         }
         if (schemaRegistryEnabled
                 && (schemaRegistryUrl == null || schemaRegistryUrl.isEmpty())) {
@@ -438,8 +438,8 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
             try {
                 JsonSchemaValidator.parseSchemaDocument(new ObjectMapper(), jsonSchema);
             } catch (IllegalArgumentException e) {
-                throw new IllegalArgumentException("JSON Schema validation is enabled but the JSON Schema "
-                        + "is not valid JSON. " + e.getMessage(), e);
+                throw new IllegalArgumentException("JSON Schema validation is enabled but 'JSON Schema' "
+                        + "(jsonSchema) is not valid JSON. " + e.getMessage(), e);
             }
         }
         if (securityProtocol != null
