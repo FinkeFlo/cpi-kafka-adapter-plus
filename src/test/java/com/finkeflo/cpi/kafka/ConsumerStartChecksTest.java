@@ -101,14 +101,14 @@ public class ConsumerStartChecksTest {
     public void emptyGroupIdIsRejected() throws Exception {
         CpiKafkaPlusEndpoint e = endpoint();
         e.setGroupId(" ");
-        assertRejected(e, "groupId");
+        assertRejected(e, "groupId", "Consumer Group ID");
     }
 
     @Test
     public void unknownCommitStrategyIsRejected() throws Exception {
         CpiKafkaPlusEndpoint e = endpoint();
         e.setCommitStrategy("MANUAL");
-        assertRejected(e, "commitStrategy");
+        assertRejected(e, "commitStrategy", "Offset Commit Strategy");
     }
 
     @Test
@@ -122,25 +122,24 @@ public class ConsumerStartChecksTest {
     public void maxPollRecordsBelowOneIsRejected() throws Exception {
         CpiKafkaPlusEndpoint e = endpoint();
         e.setMaxPollRecords(0);
-        assertRejected(e, "maxPollRecords");
+        assertRejected(e, "maxPollRecords", "Max Poll Records");
     }
 
     @Test
     public void negativeFetchValuesAreRejected() throws Exception {
         CpiKafkaPlusEndpoint a = endpoint();
         a.setFetchMinBytes(-1);
-        assertRejected(a, "fetchMinBytes");
+        assertRejected(a, "fetchMinBytes", "Fetch Min Bytes");
         CpiKafkaPlusEndpoint b = endpoint();
-        b.setFetchMinBytes(1);
         b.setFetchMaxWaitMs(-1);
-        assertRejected(b, "fetchMaxWaitMs");
+        assertRejected(b, "fetchMaxWaitMs", "Fetch Max Wait (ms)");
     }
 
     @Test
     public void negativeBatchTimeoutIsRejected() throws Exception {
         CpiKafkaPlusEndpoint e = endpoint();
         e.setBatchTimeout(-1);
-        assertRejected(e, "batchTimeout");
+        assertRejected(e, "batchTimeout", "Poll Timeout (ms)");
     }
 
     @Test
@@ -149,7 +148,7 @@ public class ConsumerStartChecksTest {
         e.setBatchMode(true);
         e.setBatchOutputFormat("JSON_ARRAY");
         e.setBatchSize(0);
-        assertRejected(e, "batchSize");
+        assertRejected(e, "batchSize", "Max Records per IFlow Run (MPL)");
     }
 
     @Test
@@ -172,9 +171,8 @@ public class ConsumerStartChecksTest {
         withDlq.setDlqEnabled(true);
         withDlq.setDlqTopic("orders-dlq");
         withDlq.setDlqMaxRetries(-1);
-        assertRejected(withDlq, "dlqMaxRetries");
+        assertRejected(withDlq, "dlqMaxRetries", "Max Retries before DLQ");
         CpiKafkaPlusEndpoint withoutDlq = endpoint();
-        withoutDlq.setDlqEnabled(false);
         withoutDlq.setDlqMaxRetries(-1);
         assertStarts(withoutDlq);
     }
@@ -183,16 +181,25 @@ public class ConsumerStartChecksTest {
     public void dlqTopicThatIsAlsoASourceTopicIsRejected() throws Exception {
         CpiKafkaPlusEndpoint e = endpoint();
         e.setDlqEnabled(true);
-        e.setDlqMaxRetries(3);
-        e.setDlqTopic(" orders ");
-        assertRejected(e, "dlqTopic");
+        e.setDlqTopic("orders");
+        assertRejected(e, "dlqTopic", "Dead Letter Topic");
+    }
+
+    @Test
+    public void dlqTopicWithSurroundingWhitespaceIsRejectedAsSuch() throws Exception {
+        // The DLQ producer sends to the untrimmed name, which Kafka rejects as an invalid topic.
+        CpiKafkaPlusEndpoint e = endpoint();
+        e.setDlqEnabled(true);
+        e.setDlqTopic(" orders-dlq ");
+        String message = startFailure(e);
+        Assert.assertTrue(message, message.contains("whitespace"));
+        Assert.assertTrue(message, message.contains("'Dead Letter Topic'"));
     }
 
     @Test
     public void dlqTopicComparisonIsCaseSensitiveLikeKafka() throws Exception {
         CpiKafkaPlusEndpoint e = endpoint();
         e.setDlqEnabled(true);
-        e.setDlqMaxRetries(3);
         e.setDlqTopic("Orders");
         assertStarts(e);
     }
@@ -209,14 +216,22 @@ public class ConsumerStartChecksTest {
         assertStarts(e);
     }
 
-    private void assertRejected(CpiKafkaPlusEndpoint endpoint, String field) throws Exception {
+    /** The message names both the UI label and the parameter, so it is findable from either side. */
+    private void assertRejected(CpiKafkaPlusEndpoint endpoint, String field, String uiLabel) throws Exception {
         String message = startFailure(endpoint);
         Assert.assertTrue(message, message.contains(field));
+        Assert.assertTrue(message, message.contains("'" + uiLabel + "'"));
     }
 
+    private int endpointCount;
+
+    /**
+     * A fresh endpoint per call. Camel caches endpoints by URI, so a shared URI would hand every test
+     * step the instance a previous step already modified.
+     */
     private CpiKafkaPlusEndpoint endpoint() throws Exception {
-        return (CpiKafkaPlusEndpoint) ctx.getEndpoint(
-                "cpi-kafka-plus:orders?bootstrapServers=localhost:9092&groupId=g&securityProtocol=PLAINTEXT");
+        return (CpiKafkaPlusEndpoint) ctx.getEndpoint("cpi-kafka-plus:orders?bootstrapServers=localhost:9092"
+                + "&groupId=g" + (++endpointCount) + "&securityProtocol=PLAINTEXT");
     }
 
     private static String startFailure(CpiKafkaPlusEndpoint endpoint) throws Exception {

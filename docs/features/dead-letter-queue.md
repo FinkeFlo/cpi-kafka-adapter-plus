@@ -26,8 +26,9 @@ When **Enable Dead Letter Queue** (`dlqEnabled`) is turned on, records that fail
     [Producer Retry](producer-retry.md).
 
 The DLQ topic must differ from every topic the channel consumes — the channel does not start
-otherwise. The DLQ producer accepts records up to *Max Fetch Size per Partition* plus 1 MB for the
-error headers, and waits at most 15 s for a missing DLQ topic. The broker or topic must allow messages
+otherwise. The DLQ producer is sized for *Max Fetch Size per Partition* plus 1 MB for the error
+headers, and waits at most 15 s for a missing DLQ topic. The fetch size is a soft limit on compressed
+bytes, so a single record larger than that (after decompression) can still be rejected. The broker or topic must allow messages
 of that size (`message.max.bytes` / `max.message.bytes`).
 
 ## How Retries Work

@@ -542,9 +542,11 @@ public final class DlqProducerHelper implements Closeable {
         props.put(ProducerConfig.ACKS_CONFIG, "all");
         props.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, true);
         props.put(ProducerConfig.MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION, 1);
-        // A dead-lettered record is as large as anything the consumer fetches (up to
-        // maxPartitionFetchSizeKb, 50 MB) plus its error headers. The client default of 1 MB rejected
-        // larger ones with RecordTooLargeException — the record that most needed the DLQ lost it.
+        // Sized for the configured fetch size (maxPartitionFetchSizeKb, up to 50 MB) plus the error
+        // headers. The client default of 1 MB rejected larger records with RecordTooLargeException —
+        // the record that most needed the DLQ lost it. This is not a hard guarantee:
+        // max.partition.fetch.bytes is a soft limit (the first oversized batch is still returned) and
+        // counts compressed bytes, so a single very large or well-compressed record can still exceed it.
         int maxRequestBytes = endpoint.getMaxPartitionFetchSizeKb() * 1024 + DLQ_HEADER_HEADROOM_BYTES;
         props.put(ProducerConfig.MAX_REQUEST_SIZE_CONFIG, maxRequestBytes);
         // buffer.memory must hold one full request, or the failure only moves to "Attempt to allocate

@@ -186,7 +186,7 @@ public class DlqProducerHelperTest {
     }
 
     @Test
-    public void dlqProducerAcceptsEveryRecordTheConsumerCanFetch() throws Exception {
+    public void dlqProducerIsSizedForTheConfiguredFetchSize() throws Exception {
         try (DefaultCamelContext ctx = new DefaultCamelContext()) {
             ctx.addComponent("cpi-kafka-plus", new CpiKafkaPlusComponent());
             ctx.start();

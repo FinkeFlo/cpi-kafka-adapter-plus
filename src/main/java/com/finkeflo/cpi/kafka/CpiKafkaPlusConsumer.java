@@ -325,44 +325,50 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
     private void validateNeverWorkingValues() {
         if (endpoint.getGroupId() == null || endpoint.getGroupId().trim().isEmpty()) {
             throw new IllegalArgumentException(
-                    "groupId must not be empty — the consumer cannot join a consumer group without it.");
+                    "'Consumer Group ID' (groupId) must not be empty — the consumer cannot join a consumer group without it.");
         }
         String commitStrategy = endpoint.getCommitStrategy();
         if (!"BATCH_COMPLETE".equalsIgnoreCase(commitStrategy) && !"AUTO".equalsIgnoreCase(commitStrategy)) {
-            throw new IllegalArgumentException("commitStrategy must be BATCH_COMPLETE or AUTO, got: "
+            throw new IllegalArgumentException("'Offset Commit Strategy' (commitStrategy) must be BATCH_COMPLETE or AUTO, got: "
                     + commitStrategy + ". Any other value never commits an offset, so every message "
                     + "would be delivered again on every restart and rebalance.");
         }
         if (endpoint.getMaxPollRecords() < 1) {
             throw new IllegalArgumentException(
-                    "maxPollRecords must be at least 1, got: " + endpoint.getMaxPollRecords());
+                    "'Max Poll Records' (maxPollRecords) must be at least 1, got: " + endpoint.getMaxPollRecords());
         }
         if (endpoint.getFetchMinBytes() < 0) {
             throw new IllegalArgumentException(
-                    "fetchMinBytes must not be negative, got: " + endpoint.getFetchMinBytes());
+                    "'Fetch Min Bytes' (fetchMinBytes) must not be negative, got: " + endpoint.getFetchMinBytes());
         }
         if (endpoint.getFetchMaxWaitMs() < 0) {
             throw new IllegalArgumentException(
-                    "fetchMaxWaitMs must not be negative, got: " + endpoint.getFetchMaxWaitMs());
+                    "'Fetch Max Wait (ms)' (fetchMaxWaitMs) must not be negative, got: " + endpoint.getFetchMaxWaitMs());
         }
         if (endpoint.getBatchTimeout() < 0) {
             throw new IllegalArgumentException(
-                    "batchTimeout must not be negative, got: " + endpoint.getBatchTimeout());
+                    "'Poll Timeout (ms)' (batchTimeout) must not be negative, got: " + endpoint.getBatchTimeout());
         }
         String batchOutputFormat = endpoint.getBatchOutputFormat();
         boolean batchPath = endpoint.isBatchMode() && !"SPLIT_EXCHANGES".equalsIgnoreCase(batchOutputFormat);
         if (batchPath && endpoint.getBatchSize() < 1) {
             throw new IllegalArgumentException(
-                    "batchSize must be at least 1 in batch mode, got: " + endpoint.getBatchSize());
+                    "'Max Records per IFlow Run (MPL)' (batchSize) must be at least 1 in batch mode, got: " + endpoint.getBatchSize());
         }
         if (endpoint.isDlqEnabled()) {
             if (endpoint.getDlqMaxRetries() < 0) {
                 throw new IllegalArgumentException(
-                        "dlqMaxRetries must not be negative, got: " + endpoint.getDlqMaxRetries());
+                        "'Max Retries before DLQ' (dlqMaxRetries) must not be negative, got: " + endpoint.getDlqMaxRetries());
             }
-            String dlqTopic = endpoint.getDlqTopic().trim();
+            String dlqTopic = endpoint.getDlqTopic();
+            if (!dlqTopic.equals(dlqTopic.trim())) {
+                // The DLQ producer sends to the name as configured, which Kafka rejects as invalid.
+                throw new IllegalArgumentException("'Dead Letter Topic' (dlqTopic) '" + dlqTopic
+                        + "' contains leading or trailing whitespace. Please remove the spaces around "
+                        + "the topic name.");
+            }
             if (parseTopics(endpoint.getEffectiveTopic()).contains(dlqTopic)) {
-                throw new IllegalArgumentException("dlqTopic '" + dlqTopic + "' is also a topic this channel "
+                throw new IllegalArgumentException("'Dead Letter Topic' (dlqTopic) '" + dlqTopic + "' is also a topic this channel "
                         + "consumes. A failed record would be dead-lettered into its own source and consumed "
                         + "again, endlessly. Please use a separate DLQ topic.");
             }
