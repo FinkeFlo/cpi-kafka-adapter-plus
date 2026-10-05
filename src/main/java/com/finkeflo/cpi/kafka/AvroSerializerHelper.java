@@ -68,11 +68,8 @@ public class AvroSerializerHelper implements Closeable {
         this.strategyName = endpoint.getSubjectNameStrategy() != null
                 ? endpoint.getSubjectNameStrategy() : TOPIC_NAME_STRATEGY;
 
-        CredentialHelper.UserCredentials creds =
-                (endpoint.getSchemaRegistryCredentialAlias() != null
-                        && !endpoint.getSchemaRegistryCredentialAlias().isEmpty())
-                ? CredentialHelper.getUserCredential(endpoint.getSchemaRegistryCredentialAlias())
-                : null;
+        CredentialHelper.UserCredentials creds = CredentialHelper.requireUserCredential(
+                endpoint.getSchemaRegistryCredentialAlias(), "schemaRegistryCredentialAlias");
         String username = creds != null ? creds.username() : null;
         String password = creds != null ? creds.password() : null;
 

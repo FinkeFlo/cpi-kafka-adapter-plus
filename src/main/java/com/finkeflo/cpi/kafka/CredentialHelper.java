@@ -111,6 +111,24 @@ public final class CredentialHelper {
         return credentialResolver.resolveUserCredential(alias);
     }
 
+    /**
+     * Resolves an alias the configuration relies on. A blank alias means "no authentication" and
+     * returns {@code null}; an alias that is set but cannot be resolved fails, because running without
+     * the credential turned every Schema Registry call into a 401 that looked like a bad record.
+     */
+    public static UserCredentials requireUserCredential(String alias, String parameter) {
+        if (alias == null || alias.trim().isEmpty()) {
+            return null;
+        }
+        UserCredentials credentials = getUserCredential(alias);
+        if (credentials == null) {
+            throw new IllegalStateException(parameter + " '" + alias + "' could not be resolved. Please "
+                    + "deploy a User Credentials artifact with this name, or clear the field to connect "
+                    + "without authentication.");
+        }
+        return credentials;
+    }
+
     private static UserCredentials resolveFromSecureStore(String alias) {
         try {
             SecureStoreService secureStoreService = ITApiFactory.getService(SecureStoreService.class, null);
