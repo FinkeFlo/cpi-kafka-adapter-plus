@@ -97,6 +97,123 @@ public class ConsumerStartChecksTest {
         Assert.assertTrue(message, message.contains("minBacklogToDrain"));
     }
 
+    @Test
+    public void emptyGroupIdIsRejected() throws Exception {
+        CpiKafkaPlusEndpoint e = endpoint();
+        e.setGroupId(" ");
+        assertRejected(e, "groupId");
+    }
+
+    @Test
+    public void unknownCommitStrategyIsRejected() throws Exception {
+        CpiKafkaPlusEndpoint e = endpoint();
+        e.setCommitStrategy("MANUAL");
+        assertRejected(e, "commitStrategy");
+    }
+
+    @Test
+    public void commitStrategyIsCaseInsensitiveAsAtRuntime() throws Exception {
+        CpiKafkaPlusEndpoint e = endpoint();
+        e.setCommitStrategy("auto");
+        assertStarts(e);
+    }
+
+    @Test
+    public void maxPollRecordsBelowOneIsRejected() throws Exception {
+        CpiKafkaPlusEndpoint e = endpoint();
+        e.setMaxPollRecords(0);
+        assertRejected(e, "maxPollRecords");
+    }
+
+    @Test
+    public void negativeFetchValuesAreRejected() throws Exception {
+        CpiKafkaPlusEndpoint a = endpoint();
+        a.setFetchMinBytes(-1);
+        assertRejected(a, "fetchMinBytes");
+        CpiKafkaPlusEndpoint b = endpoint();
+        b.setFetchMinBytes(1);
+        b.setFetchMaxWaitMs(-1);
+        assertRejected(b, "fetchMaxWaitMs");
+    }
+
+    @Test
+    public void negativeBatchTimeoutIsRejected() throws Exception {
+        CpiKafkaPlusEndpoint e = endpoint();
+        e.setBatchTimeout(-1);
+        assertRejected(e, "batchTimeout");
+    }
+
+    @Test
+    public void batchSizeBelowOneIsRejectedInBatchMode() throws Exception {
+        CpiKafkaPlusEndpoint e = endpoint();
+        e.setBatchMode(true);
+        e.setBatchOutputFormat("JSON_ARRAY");
+        e.setBatchSize(0);
+        assertRejected(e, "batchSize");
+    }
+
+    @Test
+    public void batchSizeIsIgnoredOutsideTheBatchPath() throws Exception {
+        CpiKafkaPlusEndpoint single = endpoint();
+        single.setBatchMode(false);
+        single.setBatchSize(0);
+        assertStarts(single);
+        // Legacy 1.0/1.1 sender: SPLIT_EXCHANGES bypasses the batch path.
+        CpiKafkaPlusEndpoint legacy = endpoint();
+        legacy.setBatchMode(true);
+        legacy.setBatchOutputFormat("SPLIT_EXCHANGES");
+        legacy.setBatchSize(0);
+        assertStarts(legacy);
+    }
+
+    @Test
+    public void negativeDlqRetriesAreRejectedOnlyWithDlq() throws Exception {
+        CpiKafkaPlusEndpoint withDlq = endpoint();
+        withDlq.setDlqEnabled(true);
+        withDlq.setDlqTopic("orders-dlq");
+        withDlq.setDlqMaxRetries(-1);
+        assertRejected(withDlq, "dlqMaxRetries");
+        CpiKafkaPlusEndpoint withoutDlq = endpoint();
+        withoutDlq.setDlqEnabled(false);
+        withoutDlq.setDlqMaxRetries(-1);
+        assertStarts(withoutDlq);
+    }
+
+    @Test
+    public void dlqTopicThatIsAlsoASourceTopicIsRejected() throws Exception {
+        CpiKafkaPlusEndpoint e = endpoint();
+        e.setDlqEnabled(true);
+        e.setDlqMaxRetries(3);
+        e.setDlqTopic(" orders ");
+        assertRejected(e, "dlqTopic");
+    }
+
+    @Test
+    public void dlqTopicComparisonIsCaseSensitiveLikeKafka() throws Exception {
+        CpiKafkaPlusEndpoint e = endpoint();
+        e.setDlqEnabled(true);
+        e.setDlqMaxRetries(3);
+        e.setDlqTopic("Orders");
+        assertStarts(e);
+    }
+
+    @Test
+    public void unknownOutputFormatsAndBadAutoPauseValuesStillStart() throws Exception {
+        // Each has a working fallback today: ERROR log, no rejection.
+        CpiKafkaPlusEndpoint e = endpoint();
+        e.setBatchMode(true);
+        e.setBatchOutputFormat("CSV");
+        e.setAutoPauseEnabled(true);
+        e.setAutoPauseErrorThreshold(0);
+        e.setAutoPauseCooldownSeconds(0);
+        assertStarts(e);
+    }
+
+    private void assertRejected(CpiKafkaPlusEndpoint endpoint, String field) throws Exception {
+        String message = startFailure(endpoint);
+        Assert.assertTrue(message, message.contains(field));
+    }
+
     private CpiKafkaPlusEndpoint endpoint() throws Exception {
         return (CpiKafkaPlusEndpoint) ctx.getEndpoint(
                 "cpi-kafka-plus:orders?bootstrapServers=localhost:9092&groupId=g&securityProtocol=PLAINTEXT");

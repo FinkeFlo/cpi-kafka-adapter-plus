@@ -269,6 +269,7 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
                         "DLQ is enabled but no DLQ topic is configured. Please set the 'dlqTopic' property.");
             }
         }
+        validateNeverWorkingValues();
         // Drain- and interval-related validations only apply to SCHEDULED. In STREAMING these
         // fields are documented as ignored, so a stale value (e.g. drainEnabled=true left over
         // from a SCHEDULED configuration) must not prevent the iFlow from starting.
@@ -314,6 +315,80 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
                 endpoint.getEffectiveTopic(), endpoint.getGroupId());
 
         tracingHelper = new AdapterTracingHelper(endpoint);
+    }
+
+    /**
+     * Rejects values that can never work (#183) — each only where the field is in effect (#174). Every
+     * one of them used to surface only at the first poll, as an endless error loop, or not at all.
+     * Values with a working fallback are logged, not rejected.
+     */
+    private void validateNeverWorkingValues() {
+        if (endpoint.getGroupId() == null || endpoint.getGroupId().trim().isEmpty()) {
+            throw new IllegalArgumentException(
+                    "groupId must not be empty — the consumer cannot join a consumer group without it.");
+        }
+        String commitStrategy = endpoint.getCommitStrategy();
+        if (!"BATCH_COMPLETE".equalsIgnoreCase(commitStrategy) && !"AUTO".equalsIgnoreCase(commitStrategy)) {
+            throw new IllegalArgumentException("commitStrategy must be BATCH_COMPLETE or AUTO, got: "
+                    + commitStrategy + ". Any other value never commits an offset, so every message "
+                    + "would be delivered again on every restart and rebalance.");
+        }
+        if (endpoint.getMaxPollRecords() < 1) {
+            throw new IllegalArgumentException(
+                    "maxPollRecords must be at least 1, got: " + endpoint.getMaxPollRecords());
+        }
+        if (endpoint.getFetchMinBytes() < 0) {
+            throw new IllegalArgumentException(
+                    "fetchMinBytes must not be negative, got: " + endpoint.getFetchMinBytes());
+        }
+        if (endpoint.getFetchMaxWaitMs() < 0) {
+            throw new IllegalArgumentException(
+                    "fetchMaxWaitMs must not be negative, got: " + endpoint.getFetchMaxWaitMs());
+        }
+        if (endpoint.getBatchTimeout() < 0) {
+            throw new IllegalArgumentException(
+                    "batchTimeout must not be negative, got: " + endpoint.getBatchTimeout());
+        }
+        String batchOutputFormat = endpoint.getBatchOutputFormat();
+        boolean batchPath = endpoint.isBatchMode() && !"SPLIT_EXCHANGES".equalsIgnoreCase(batchOutputFormat);
+        if (batchPath && endpoint.getBatchSize() < 1) {
+            throw new IllegalArgumentException(
+                    "batchSize must be at least 1 in batch mode, got: " + endpoint.getBatchSize());
+        }
+        if (endpoint.isDlqEnabled()) {
+            if (endpoint.getDlqMaxRetries() < 0) {
+                throw new IllegalArgumentException(
+                        "dlqMaxRetries must not be negative, got: " + endpoint.getDlqMaxRetries());
+            }
+            String dlqTopic = endpoint.getDlqTopic().trim();
+            if (parseTopics(endpoint.getEffectiveTopic()).contains(dlqTopic)) {
+                throw new IllegalArgumentException("dlqTopic '" + dlqTopic + "' is also a topic this channel "
+                        + "consumes. A failed record would be dead-lettered into its own source and consumed "
+                        + "again, endlessly. Please use a separate DLQ topic.");
+            }
+        }
+        if (batchPath && !"JSON_ARRAY".equalsIgnoreCase(batchOutputFormat)
+                && !"XML_LIST".equalsIgnoreCase(batchOutputFormat)) {
+            AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("consumer.config.ineffective")
+                    .with("parameter", "batchOutputFormat")
+                    .with("value", batchOutputFormat)
+                    .with("reason", "unknown value; batches are formatted as JSON_ARRAY"));
+        }
+        if (endpoint.isSchemaRegistryEnabled() && endpoint.isAvroValueDeserialization()
+                && !"JSON".equalsIgnoreCase(endpoint.getAvroOutputFormat())
+                && !"XML".equalsIgnoreCase(endpoint.getAvroOutputFormat())) {
+            AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("consumer.config.ineffective")
+                    .with("parameter", "avroOutputFormat")
+                    .with("value", endpoint.getAvroOutputFormat())
+                    .with("reason", "unknown value; Avro records are converted to JSON"));
+        }
+        if (endpoint.isAutoPauseEnabled()
+                && (endpoint.getAutoPauseErrorThreshold() < 1 || endpoint.getAutoPauseCooldownSeconds() < 1)) {
+            AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("consumer.config.clamped")
+                    .with("autoPauseErrorThreshold", endpoint.getAutoPauseErrorThreshold())
+                    .with("autoPauseCooldownSeconds", endpoint.getAutoPauseCooldownSeconds())
+                    .with("reason", "values below 1 are used as 1"));
+        }
     }
 
     @Override

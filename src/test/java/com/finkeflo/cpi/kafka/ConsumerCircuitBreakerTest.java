@@ -112,6 +112,22 @@ public class ConsumerCircuitBreakerTest {
                 cb.handlePausedState(null));
     }
 
+    @Test
+    public void aCooldownBelowOneSecondIsClampedToOneSecond() throws Exception {
+        ConsumerCircuitBreaker cb = createCircuitBreaker(1, 0);
+        long before = System.currentTimeMillis();
+        Assert.assertTrue(cb.recordFailure());
+        java.lang.reflect.Field f = ConsumerCircuitBreaker.class.getDeclaredField("pausedUntil");
+        f.setAccessible(true);
+        Assert.assertTrue("a zero cooldown must still pause", (long) f.get(cb) >= before + 1000L);
+    }
+
+    @Test
+    public void aThresholdBelowOneIsClampedToOne() throws Exception {
+        Assert.assertEquals(1, createCircuitBreaker(-5, 10).effectiveThreshold());
+        Assert.assertEquals(1L, createCircuitBreaker(1, -3).effectiveCooldownSeconds());
+    }
+
     private ConsumerCircuitBreaker createCircuitBreaker(int threshold, int cooldown) throws Exception {
         CpiKafkaPlusEndpoint endpoint = (CpiKafkaPlusEndpoint) ctx.getEndpoint(
                 "cpi-kafka-plus:test-topic?bootstrapServers=localhost:9092&groupId=test-group"

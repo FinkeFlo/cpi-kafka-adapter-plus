@@ -129,11 +129,21 @@ final class ConsumerCircuitBreaker {
             return false;
         }
         consecutiveProcessingFailures += count;
-        if (consecutiveProcessingFailures >= endpoint.getAutoPauseErrorThreshold()) {
+        if (consecutiveProcessingFailures >= effectiveThreshold()) {
             triggerAutoPause();
             return true;
         }
         return false;
+    }
+
+    /** A threshold below 1 behaves like 1; named so the start-up log and the runtime agree (#183). */
+    int effectiveThreshold() {
+        return Math.max(1, endpoint.getAutoPauseErrorThreshold());
+    }
+
+    /** A cooldown below 1 s paused for zero seconds, i.e. not at all (#183). */
+    long effectiveCooldownSeconds() {
+        return Math.max(1L, endpoint.getAutoPauseCooldownSeconds());
     }
 
     /**
@@ -149,7 +159,7 @@ final class ConsumerCircuitBreaker {
         pauseCount++;
         int clampedShift = Math.min(pauseCount - 1, 30);
         long cooldownSeconds = Math.min(
-                endpoint.getAutoPauseCooldownSeconds() * (1L << clampedShift),
+                effectiveCooldownSeconds() * (1L << clampedShift),
                 MAX_COOLDOWN_SECONDS);
         pausedUntil = System.currentTimeMillis() + (cooldownSeconds * 1000L);
         LOG.warn("[CPI-KAFKA-PLUS-DIAG] auto-pause: ACTIVATED after {} consecutive failures. " +
