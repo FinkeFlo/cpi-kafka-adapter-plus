@@ -69,6 +69,51 @@ public class ProducerStartChecksTest {
         assertStarts(e);
     }
 
+    @Test
+    public void unknownProducerBatchModeIsRejected() throws Exception {
+        CpiKafkaPlusEndpoint e = endpoint();
+        e.setProducerBatchMode("CSV");
+        assertRejected(e, "producerBatchMode");
+    }
+
+    @Test
+    public void producerBatchModeIsCaseInsensitiveAsAtRuntime() throws Exception {
+        CpiKafkaPlusEndpoint e = endpoint();
+        e.setProducerBatchMode("json_array");
+        assertStarts(e);
+    }
+
+    @Test
+    public void deliveryTimeoutBelowOneSecondIsRejected() throws Exception {
+        CpiKafkaPlusEndpoint e = endpoint();
+        e.setDeliveryTimeoutSeconds(0);
+        assertRejected(e, "deliveryTimeoutSeconds");
+    }
+
+    @Test
+    public void unsupportedSubjectNameStrategyIsRejectedForAvroSerialization() throws Exception {
+        CpiKafkaPlusEndpoint e = endpoint();
+        e.setSchemaRegistryEnabled(true);
+        e.setSchemaRegistryUrl("http://localhost:8081");
+        e.setAvroValueSerialization(true);
+        e.setSubjectNameStrategy("RecordNameStrategy");
+        assertRejected(e, "subjectNameStrategy");
+    }
+
+    @Test
+    public void subjectNameStrategyIsIgnoredWithoutAvroSerialization() throws Exception {
+        CpiKafkaPlusEndpoint e = endpoint();
+        e.setSchemaRegistryEnabled(false);
+        e.setSubjectNameStrategy("RecordNameStrategy");
+        assertStarts(e);
+    }
+
+    @Test
+    public void receiverWithoutGroupIdStarts() throws Exception {
+        // groupId is a sender field; the endpoint() URI has none on purpose.
+        assertStarts(endpoint());
+    }
+
     private CpiKafkaPlusEndpoint endpoint() throws Exception {
         return (CpiKafkaPlusEndpoint) ctx.getEndpoint(
                 "cpi-kafka-plus:orders?bootstrapServers=localhost:9999&securityProtocol=PLAINTEXT");

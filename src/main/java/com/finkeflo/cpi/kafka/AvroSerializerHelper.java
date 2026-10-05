@@ -57,7 +57,7 @@ public class AvroSerializerHelper implements Closeable {
 
     private static final Logger LOG = LoggerFactory.getLogger(AvroSerializerHelper.class);
 
-    private static final String TOPIC_NAME_STRATEGY = "TopicNameStrategy";
+    static final String TOPIC_NAME_STRATEGY = "TopicNameStrategy";
 
     private final SchemaRegistryHttpClient registryClient;
     private final String                   strategyName;

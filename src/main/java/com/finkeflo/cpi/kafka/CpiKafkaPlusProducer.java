@@ -262,6 +262,25 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
         // Fail-fast: validate shared configuration (Schema Registry, JSON Schema, SASL)
         endpoint.validateConfiguration();
 
+        // Values that can never work (#183): each used to fail every single message instead.
+        String batchMode = endpoint.getProducerBatchMode();
+        if (!"NONE".equalsIgnoreCase(batchMode) && !"JSON_ARRAY".equalsIgnoreCase(batchMode)
+                && !"XML_LIST".equalsIgnoreCase(batchMode)) {
+            throw unknownBatchMode(batchMode);
+        }
+        if (endpoint.getDeliveryTimeoutSeconds() < 1) {
+            throw new IllegalArgumentException("deliveryTimeoutSeconds must be at least 1, got: "
+                    + endpoint.getDeliveryTimeoutSeconds() + ". With 0 every send times out before it is sent.");
+        }
+        // null keeps today's meaning, TopicNameStrategy; case-sensitive exactly like resolveSubject().
+        String strategy = endpoint.getSubjectNameStrategy();
+        if (endpoint.isSchemaRegistryEnabled() && endpoint.isAvroValueSerialization()
+                && strategy != null && !AvroSerializerHelper.TOPIC_NAME_STRATEGY.equals(strategy)) {
+            throw new IllegalArgumentException("subjectNameStrategy '" + strategy + "' is not supported for "
+                    + "Avro serialization: the subject cannot be resolved from JSON input without the record "
+                    + "name. Please use TopicNameStrategy.");
+        }
+
         super.doStart();
         BundleClassWarmup.ensureStarted(CpiKafkaPlusProducer.class, "producer.start");
         LOG.info("[CPI-KAFKA-PLUS-DIAG] Starting CPI Kafka Producer for topic '{}' (lazy init — Kafka resources created on first send) {}",
@@ -1015,8 +1034,11 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
         } else if ("XML_LIST".equalsIgnoreCase(batchMode)) {
             return BatchParser.parseXml(body);
         }
-        throw new IllegalArgumentException(
-                "Unknown producerBatchMode: " + batchMode
+        throw unknownBatchMode(batchMode);
+    }
+
+    static IllegalArgumentException unknownBatchMode(String batchMode) {
+        return new IllegalArgumentException("Unknown producerBatchMode: " + batchMode
                 + ". Supported: NONE, JSON_ARRAY, XML_LIST");
     }
 
