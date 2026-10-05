@@ -208,6 +208,13 @@ public final class BatchParser {
         }
 
         List<Element> recordEls = childElements(root, "record");
+        if (recordEls.isEmpty() && root.getElementsByTagName("record").getLength() > 0) {
+            // Accepted before #181, which read records at any depth; name the cause instead of
+            // reporting an empty batch.
+            throw new IllegalArgumentException(
+                    "Producer batch mode found <record> elements, but <record> must be a direct child of "
+                    + "<kafkaRecords> — remove the wrapper element around the records");
+        }
         if (recordEls.isEmpty()) {
             throw new IllegalArgumentException(
                     "Producer batch mode received 0 records — nothing to send");

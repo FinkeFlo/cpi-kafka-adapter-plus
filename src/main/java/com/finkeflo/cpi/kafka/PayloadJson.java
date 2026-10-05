@@ -30,7 +30,9 @@ import com.fasterxml.jackson.databind.cfg.JsonNodeFeature;
  * {@code 100.0} and loses digits beyond 17, the tree model strips trailing zeros of a BigDecimal, and
  * {@code readTree()} stops after the first value and silently drops whatever follows it.
  *
- * <p>Exponent notation is still normalised ({@code 1e3} becomes {@code 1E+3}); the value is unchanged.
+ * <p>Numbers are written in canonical {@code BigDecimal} form: exponent input and decimals below
+ * {@code 0.000001} come out in E-notation ({@code 1e3} becomes {@code 1E+3}, {@code 0.0000001} becomes
+ * {@code 1E-7}); the value is unchanged.
  */
 final class PayloadJson {
 

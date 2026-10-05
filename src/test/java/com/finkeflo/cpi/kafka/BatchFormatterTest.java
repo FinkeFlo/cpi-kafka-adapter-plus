@@ -444,6 +444,14 @@ public class BatchFormatterTest {
     }
 
     @Test
+    public void verySmallDecimalsComeOutInScientificForm() throws Exception {
+        // Pinned on purpose: BigDecimal.toString() switches to E-notation below 1E-6, and the release
+        // note says so instead of promising the original text.
+        Assert.assertTrue(jsonArrayOf(null, "{\"r\":0.0000001}").contains("\"value\":{\"r\":1E-7}"));
+        Assert.assertTrue(jsonArrayOf(null, "{\"r\":0.000001}").contains("\"value\":{\"r\":0.000001}"));
+    }
+
+    @Test
     public void contentAfterTheFirstJsonValueKeepsTheWholeValueAsText() throws Exception {
         Assert.assertTrue(jsonArrayOf(null, "{\"a\":1} {\"b\":2}").contains("\"value\":\"{\\\"a\\\":1} {\\\"b\\\":2}\""));
         Assert.assertTrue(jsonArrayOf(null, "{\"a\":1}garbage").contains("\"value\":\"{\\\"a\\\":1}garbage\""));

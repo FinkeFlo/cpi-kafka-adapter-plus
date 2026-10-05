@@ -342,4 +342,14 @@ public class BatchParserTest {
                 + "</record></kafkaRecords>");
         Assert.assertNull(records.get(0).getKey());
     }
+
+    @Test
+    public void recordsInsideAWrapperElementGetAnErrorNamingTheCause() {
+        try {
+            BatchParser.parseXml("<kafkaRecords><batch><record><value>x</value></record></batch></kafkaRecords>");
+            Assert.fail("expected a wrapped record to be rejected");
+        } catch (IllegalArgumentException e) {
+            Assert.assertTrue(e.getMessage(), e.getMessage().contains("direct child of <kafkaRecords>"));
+        }
+    }
 }
