@@ -301,7 +301,8 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
                     + "attempts. 1 (default) keeps today's behaviour and switches the feature off. "
                     + "Only failures that provably wrote nothing are retried: a transactional batch "
                     + "that failed before commitTransaction(), or a single non-transactional message "
-                    + "with idempotence enabled. A failure inside commitTransaction() and a "
+                    + "that failed before it reached the producer's buffer (idempotence required). "
+                    + "A failure inside commitTransaction() and a "
                     + "partially sent non-transactional batch are never retried, because a retry "
                     + "could duplicate records. Range: 1-5.")
     private int producerRetryMaxAttempts = 1;

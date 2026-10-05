@@ -20,12 +20,19 @@
  */
 package com.finkeflo.cpi.kafka;
 
+import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.util.ArrayDeque;
+import java.util.Arrays;
+import java.util.Deque;
+import java.util.List;
 import java.util.Properties;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.apache.camel.Exchange;
@@ -101,6 +108,90 @@ public class CpiKafkaPlusProducerSinglePathRetryTest {
         }
     }
 
+    @Test
+    public void aSendThatFailsAfterBufferingIsNotRepeated() throws Exception {
+        try (DefaultCamelContext ctx = new DefaultCamelContext()) {
+            ctx.start();
+            CpiKafkaPlusProducer producer = newRetryingProducer(ctx);
+            Exchange exchange = new DefaultExchange(ctx);
+            Message in = exchange.getIn();
+            in.setBody("payload");
+
+            try (QueuedFutureKafkaProducer kafkaProducer = new QueuedFutureKafkaProducer(Arrays.asList(
+                    new ExpiredInFlightFuture(),
+                    CompletableFuture.completedFuture(new RecordMetadata(
+                            new TopicPartition("orders", 0), 1L, 0, 1L, 0, 0))))) {
+                setField(producer, "kafkaProducer", kafkaProducer);
+                try {
+                    invokeProcessSingle(producer, exchange, in, "orders");
+                    Assert.fail("expected the send to fail without a retry");
+                } catch (RuntimeException expected) {
+                    Assert.assertEquals("a buffered record may be on the broker; a second send() would duplicate it",
+                            1, kafkaProducer.sendCalls());
+                }
+            }
+        }
+    }
+
+    @Test
+    public void aSendThatFailsBeforeBufferingIsRepeated() throws Exception {
+        try (DefaultCamelContext ctx = new DefaultCamelContext()) {
+            ctx.start();
+            CpiKafkaPlusProducer producer = newRetryingProducer(ctx);
+            Exchange exchange = new DefaultExchange(ctx);
+            Message in = exchange.getIn();
+            in.setBody("payload");
+
+            try (QueuedFutureKafkaProducer kafkaProducer = new QueuedFutureKafkaProducer(Arrays.asList(
+                    kafkaFutureFailure(new org.apache.kafka.common.errors.TimeoutException(
+                            "Topic orders not present in metadata after 2000 ms.")),
+                    CompletableFuture.completedFuture(new RecordMetadata(
+                            new TopicPartition("orders", 0), 5L, 0, 1L, 0, 0))))) {
+                setField(producer, "kafkaProducer", kafkaProducer);
+
+                invokeProcessSingle(producer, exchange, in, "orders");
+
+                Assert.assertEquals(2, kafkaProducer.sendCalls());
+                Assert.assertEquals("OK", in.getHeader("CpiKafkaPlusStatus"));
+                Assert.assertEquals(2, in.getHeader("CamelKafkaPlusRetryAttempts"));
+            }
+        }
+    }
+
+    @Test
+    public void kafkaStillReturnsItsFutureFailureClass() throws Exception {
+        // Pre-buffer detection matches this private class by name. If a kafka-clients upgrade renames
+        // it, every single-path retry silently stops — this test makes the upgrade fail instead.
+        Class.forName(ProducerRetryPolicy.KAFKA_FUTURE_FAILURE_CLASS);
+        Assert.assertTrue(ProducerRetryPolicy.failedBeforeBuffering(
+                kafkaFutureFailure(new org.apache.kafka.common.errors.TimeoutException("t"))));
+    }
+
+    /** Outer retry on (2 attempts, no delay), rebuild side effects suppressed. */
+    private static CpiKafkaPlusProducer newRetryingProducer(DefaultCamelContext ctx) throws Exception {
+        CpiKafkaPlusProducer producer = newProducer(ctx);
+        CpiKafkaPlusEndpoint endpoint = (CpiKafkaPlusEndpoint) getField(producer, "endpoint");
+        endpoint.setProducerRetryMaxAttempts(2);
+        endpoint.setProducerRetryDelaySeconds(0); // the 1 s floor is a start check; doStart is not run here
+        endpoint.setProducerRetryTotalBudgetSeconds(60);
+        setField(producer, "lastRebuildAttemptMs", System.currentTimeMillis());
+        return producer;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Future<RecordMetadata> kafkaFutureFailure(Exception e) throws Exception {
+        Constructor<?> ctor = Class.forName(ProducerRetryPolicy.KAFKA_FUTURE_FAILURE_CLASS)
+                .getDeclaredConstructor(Exception.class);
+        ctor.setAccessible(true);
+        return (Future<RecordMetadata>) ctor.newInstance(e);
+    }
+
+    private static Object getField(Object target, String name) throws Exception {
+        Field field = target.getClass().getDeclaredField(name);
+        field.setAccessible(true);
+        return field.get(target);
+    }
+
     private static CpiKafkaPlusProducer newProducer(DefaultCamelContext ctx) throws Exception {
         CpiKafkaPlusEndpoint endpoint = new CpiKafkaPlusEndpoint();
         endpoint.setCamelContext(ctx);
@@ -168,6 +259,58 @@ public class CpiKafkaPlusProducerSinglePathRetryTest {
                 throw monitorFault();
             }
             return successFuture;
+        }
+
+        int sendCalls() {
+            return sendCalls.get();
+        }
+    }
+
+    /** A record the producer had buffered, still pending when send() returned, then expired. */
+    private static final class ExpiredInFlightFuture implements Future<RecordMetadata> {
+        private final ExecutionException failure = new ExecutionException(
+                new org.apache.kafka.common.errors.TimeoutException(
+                        "Expiring 1 record(s) for orders-0: 2000 ms has passed since batch creation"));
+
+        @Override
+        public boolean cancel(boolean mayInterrupt) {
+            return false;
+        }
+
+        @Override
+        public boolean isCancelled() {
+            return false;
+        }
+
+        @Override
+        public boolean isDone() {
+            return false;
+        }
+
+        @Override
+        public RecordMetadata get() throws ExecutionException {
+            throw failure;
+        }
+
+        @Override
+        public RecordMetadata get(long timeout, TimeUnit unit) throws ExecutionException {
+            throw failure;
+        }
+    }
+
+    private static final class QueuedFutureKafkaProducer extends KafkaProducer<byte[], byte[]> {
+        private final Deque<Future<RecordMetadata>> futures;
+        private final AtomicInteger sendCalls = new AtomicInteger();
+
+        QueuedFutureKafkaProducer(List<Future<RecordMetadata>> futures) {
+            super(testProducerProps(), new ByteArraySerializer(), new ByteArraySerializer());
+            this.futures = new ArrayDeque<>(futures);
+        }
+
+        @Override
+        public Future<RecordMetadata> send(ProducerRecord<byte[], byte[]> record) {
+            sendCalls.incrementAndGet();
+            return futures.poll();
         }
 
         int sendCalls() {

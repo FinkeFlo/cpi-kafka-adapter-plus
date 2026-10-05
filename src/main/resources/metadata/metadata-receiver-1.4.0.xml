@@ -324,7 +324,7 @@
                 </GuiLabels>
                 <AttributeReference>
                     <ReferenceName>producerRetryMaxAttempts</ReferenceName>
-                    <description>Total number of send attempts, not additional attempts. 1 (default) keeps the previous behaviour and switches the retry off. Only failures that provably wrote nothing are repeated: a transactional batch that failed before the commit, or a single non-transactional message with the idempotent producer enabled. A failure inside the commit and a partially sent non-transactional batch are never repeated, because that could duplicate records. Range: 1 to 5.</description>
+                    <description>Total number of send attempts, not additional attempts. 1 (default) keeps the previous behaviour and switches the retry off. Only failures that provably wrote nothing are repeated: a transactional batch that failed before the commit, or a single non-transactional message that failed before it reached the producer's buffer (idempotent producer required). A failure inside the commit and a partially sent non-transactional batch are never repeated, because that could duplicate records. Range: 1 to 5.</description>
                     <Restriction>Constraint.isValidRegex(^(?:\{\{[^{}]+\}\}|[1-5])$)</Restriction>
                     <ErrorMessage>Please enter a number between 1 and 5 for Max Send Attempts</ErrorMessage>
                 </AttributeReference>

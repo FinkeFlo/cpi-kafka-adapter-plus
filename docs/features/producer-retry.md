@@ -20,7 +20,7 @@ A retry is only permitted where the previous attempt provably wrote **nothing**.
 |---|---|---|
 | Transactional, failure **before** the commit | :material-check: yes | The aborted transaction is never visible to `read_committed` consumers. The successor producer uses the same `transactional.id`, fences the old epoch and has the broker clean up. |
 | Transactional, failure **during** the commit | :material-close: no | The outcome is unknowable. The commit may have succeeded broker-side with only the response lost, so a retry would commit the batch a second time. |
-| Non-transactional **single** message | :material-check: yes | One record, one acknowledgement. Requires `enableIdempotence=true`, and the shared producer is reused so the broker can still deduplicate on `(PID, sequence)`. |
+| Non-transactional **single** message | :material-check: only before buffering | Repeated only when the record never reached the producer's buffer: `send()` failed on metadata, a full buffer or the KAFKA-10902 fault. A failure after buffering (delivery timeout, disconnect) may already be on the broker, and a new `send()` is not deduplicated — stopped with `stopReason=OUTCOME_UNKNOWN`. Requires `enableIdempotence=true`. |
 | Non-transactional **batch** | :material-close: no | Records `0..k-1` may already be committed when `k` fails. Resending the batch would duplicate them, and a new producer would get a new PID, disabling broker-side deduplication. |
 
 This is not a judgement call. The Kafka client documents both clean-up mechanisms the transactional
@@ -78,8 +78,8 @@ defect in the client itself.
 
 Retrying it cannot duplicate: in the transactional path the phase rule has already stopped
 everything from the commit onwards, so the failed attempt's transaction is aborted and never visible
-to `read_committed` consumers; in the single path idempotence is a precondition, so the broker
-deduplicates on `(PID, sequence)`. The exemption requires a Kafka frame in the stack trace, so the
+to `read_committed` consumers; in the single path the fault is thrown by `send()` before the record
+reaches the buffer. The exemption requires a Kafka frame in the stack trace, so the
 same exception raised by application code gets no special treatment.
 
 This is a second line of defence. The primary mitigation is the metadata pre-warm and the raised
@@ -133,6 +133,9 @@ With `producerRetryDelaySeconds=2`:
 | 3 | 2 | 36 s | 14 s | transactional: no, just over; single: yes |
 | **2** | **2** | **28 s** | **10 s** | yes |
 | 2 | 3 | 43 s | 16 s | transactional: no; single: yes |
+
+On the single-message path the retry only helps when the broker is unreachable *before* a record is
+buffered (metadata or buffer timeouts); a broker that drops the connection mid-delivery is not retried.
 
 **Recommended starting point:**
 
@@ -211,6 +214,7 @@ fields, so "how often does the retry actually rescue a message" is a ratio of tw
 | `ATTEMPTS_EXHAUSTED` | every configured attempt was used |
 | `BUDGET_EXHAUSTED` | the next attempt would have exceeded `producerRetryTotalBudgetSeconds` |
 | `COMMIT_OUTCOME_UNKNOWN` | the failure was in or after the commit; a retry could duplicate |
+| `OUTCOME_UNKNOWN` | single path: the send failed after the record was buffered; it may be on the broker, so a retry could duplicate |
 | `PERMANENT` | a data error or an unclassifiable failure |
 | `IDEMPOTENCE_DISABLED` | single path with `enableIdempotence=false` |
 | `RETRY_DISABLED` | `producerRetryMaxAttempts=1` |
