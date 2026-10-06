@@ -25,6 +25,12 @@ When **Enable Dead Letter Queue** (`dlqEnabled`) is turned on, records that fail
     `producerRetryTotalBudgetSeconds` — with a constant delay and completely different rules. See
     [Producer Retry](producer-retry.md).
 
+The DLQ topic must differ from every topic the channel consumes — the channel does not start
+otherwise. The DLQ producer is sized for *Max Fetch Size per Partition (KB)* plus 1 MB for the error
+headers, and waits at most 15 s for a missing DLQ topic. The fetch size is a soft limit on compressed
+bytes, so a single record larger than that (after decompression) can still be rejected. The broker or topic must allow messages
+of that size (`message.max.bytes` / `max.message.bytes`).
+
 ## How Retries Work
 
 Retries happen **synchronously in memory** during the same poll cycle — the record is not re-read from Kafka. The consumer holds the record and passes it to the IFlow pipeline up to **Max Retries before DLQ** (`dlqMaxRetries`) + 1 times (1 initial attempt + N retries).

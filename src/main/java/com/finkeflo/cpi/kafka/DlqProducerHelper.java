@@ -69,6 +69,15 @@ public final class DlqProducerHelper implements Closeable {
     private static final Logger LOG = LoggerFactory.getLogger(DlqProducerHelper.class);
 
     /**
+     * Room for the headers a dead-lettered record gains on top of the original (error message, cause,
+     * origin). The error message is not truncated, so this is generous.
+     */
+    static final int DLQ_HEADER_HEADROOM_BYTES = 1024 * 1024;
+
+    /** A missing DLQ topic blocked every send for the client default of 60 s. */
+    static final long DLQ_MAX_BLOCK_MS = 15_000L;
+
+    /**
      * Minimum interval between rebuild attempts. A stalled partition re-delivers the same record
      * continuously, so without this a single unrecoverable record would rebuild the client on every
      * poll instead of once.
@@ -527,12 +536,23 @@ public final class DlqProducerHelper implements Closeable {
         return sdf.format(new Date());
     }
 
-    private static Properties buildProducerProperties(CpiKafkaPlusEndpoint endpoint) {
+    static Properties buildProducerProperties(CpiKafkaPlusEndpoint endpoint) {
         Properties props = new Properties();
         props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, endpoint.getBootstrapServers());
         props.put(ProducerConfig.ACKS_CONFIG, "all");
         props.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, true);
         props.put(ProducerConfig.MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION, 1);
+        // Sized for the configured fetch size (maxPartitionFetchSizeKb, up to 50 MB) plus the error
+        // headers. The client default of 1 MB rejected larger records with RecordTooLargeException —
+        // the record that most needed the DLQ lost it. This is not a hard guarantee:
+        // max.partition.fetch.bytes is a soft limit (the first oversized batch is still returned) and
+        // counts compressed bytes, so a single very large or well-compressed record can still exceed it.
+        int maxRequestBytes = endpoint.getMaxPartitionFetchSizeKb() * 1024 + DLQ_HEADER_HEADROOM_BYTES;
+        props.put(ProducerConfig.MAX_REQUEST_SIZE_CONFIG, maxRequestBytes);
+        // buffer.memory must hold one full request, or the failure only moves to "Attempt to allocate
+        // ... hard limit of buffer.memory". The client default (32 MB) stays the floor.
+        props.put(ProducerConfig.BUFFER_MEMORY_CONFIG, Math.max(32L * 1024 * 1024, (long) maxRequestBytes));
+        props.put(ProducerConfig.MAX_BLOCK_MS_CONFIG, DLQ_MAX_BLOCK_MS);
 
         // Unique client.id per consumer group to avoid metric collision on the broker
         String clientId = "cpi-kafka-plus-dlq";
