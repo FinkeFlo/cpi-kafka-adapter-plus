@@ -386,6 +386,11 @@ numbers.
 }
 ```
 
+A key or value that is exactly one JSON document is embedded as JSON; numbers keep their trailing zeros and precision
+(`100.00` stays `100.00`). Exponent input and decimals below `0.000001` are written in E-notation
+(`1e3` → `1E+3`, `0.0000001` → `1E-7`). Anything else — including
+JSON followed by more text, and empty values — is embedded as a string.
+
 ### XML List (`XML_LIST`)
 
 **XML List** (`XML_LIST`) wraps records in `<kafkaRecords count="N"><record>...</record>...</kafkaRecords>`. Each record contains `key`, `value`, `topic`, `partition`, `offset`, and `timestamp`.

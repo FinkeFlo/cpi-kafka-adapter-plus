@@ -298,4 +298,58 @@ public class BatchParserTest {
             Assert.assertTrue(e.getMessage().contains("<kafkaRecords>"));
         }
     }
+
+    // -----------------------------------------------------------------------
+    //  Payload fidelity (#181)
+    // -----------------------------------------------------------------------
+
+    @Test
+    public void jsonRecordValuesKeepTheirDecimalText() {
+        List<BatchRecord> records = BatchParser.parseJson(
+                "[{\"key\":1.50,\"value\":{\"amount\":99.90,\"big\":12345678901234567890.12}}]");
+        Assert.assertEquals("1.50", records.get(0).getKey());
+        Assert.assertEquals("{\"amount\":99.90,\"big\":12345678901234567890.12}", records.get(0).getValue());
+    }
+
+    @Test(expected = IllegalArgumentException.class)
+    public void jsonBodyWithContentAfterTheArrayIsRejected() {
+        BatchParser.parseJson("[{\"value\":\"a\"}] [{\"value\":\"b\"}]");
+    }
+
+    @Test
+    public void aRecordInsideAValueIsPayloadNotAnotherRecord() {
+        List<BatchRecord> records = BatchParser.parseXml(
+                "<kafkaRecords><record><key>k1</key><value format=\"xml\">"
+                + "<record><key>inner</key><value>x</value></record>"
+                + "</value></record></kafkaRecords>");
+        Assert.assertEquals(1, records.size());
+        Assert.assertEquals("k1", records.get(0).getKey());
+        Assert.assertTrue(records.get(0).getValue(), records.get(0).getValue().contains("<key>inner</key>"));
+    }
+
+    @Test
+    public void aKeyInsideTheValueDoesNotBecomeTheRecordKey() {
+        List<BatchRecord> records = BatchParser.parseXml(
+                "<kafkaRecords><record><value format=\"xml\"><Order><key>payload-key</key></Order></value>"
+                + "<key>real</key></record></kafkaRecords>");
+        Assert.assertEquals("real", records.get(0).getKey());
+    }
+
+    @Test
+    public void aRecordWithoutItsOwnKeyHasNoKeyEvenIfThePayloadHasOne() {
+        List<BatchRecord> records = BatchParser.parseXml(
+                "<kafkaRecords><record><value format=\"xml\"><Order><key>payload-key</key></Order></value>"
+                + "</record></kafkaRecords>");
+        Assert.assertNull(records.get(0).getKey());
+    }
+
+    @Test
+    public void recordsInsideAWrapperElementGetAnErrorNamingTheCause() {
+        try {
+            BatchParser.parseXml("<kafkaRecords><batch><record><value>x</value></record></batch></kafkaRecords>");
+            Assert.fail("expected a wrapped record to be rejected");
+        } catch (IllegalArgumentException e) {
+            Assert.assertTrue(e.getMessage(), e.getMessage().contains("direct child of <kafkaRecords>"));
+        }
+    }
 }

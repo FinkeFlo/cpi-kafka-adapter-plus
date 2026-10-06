@@ -25,6 +25,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import java.util.function.BiFunction;
@@ -59,6 +60,17 @@ public class BatchFormatterGoldenTest {
 
         Assert.assertEquals("XML_LIST output must match golden fixture exactly",
                 loadGolden("batch-xml-list.xml"), normalizeLineEndings(actual));
+    }
+
+    @Test
+    public void testJsonArrayKeepsDecimalTextExactly() throws Exception {
+        String actual = BatchFormatter.toJsonArray(Collections.singletonList(
+                rec(0, 1L, 1700000000000L, null, "{\"amount\":12345678.90,\"rate\":1.10}", "h", "v")),
+                STRING_DESER, STRING_DESER);
+
+        Assert.assertEquals("{\"kafkaRecords\":{\"record\":[{\"key\":null,"
+                + "\"value\":{\"amount\":12345678.90,\"rate\":1.10},\"topic\":\"golden-topic\","
+                + "\"partition\":0,\"offset\":1,\"timestamp\":1700000000000}]}}", actual);
     }
 
     private static List<ConsumerRecord<byte[], byte[]>> records() {
