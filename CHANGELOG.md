@@ -7,7 +7,7 @@ and the project follows [Semantic Versioning](https://semver.org/). See
 [VERSIONING.md](https://github.com/finkeflo/cpi-kafka-adapter-plus/blob/main/VERSIONING.md) for how the adapter version maps to SAP CPI
 iFlow compatibility.
 
-## [Unreleased]
+## [1.4.1] - 2026-10-06
 ### Fixed
 - The receiver's single-message retry (`producerRetryMaxAttempts > 1`, no batch mode) could write a record twice. It repeated a send whose record was already in the producer's buffer — after a delivery timeout or a dropped connection the record may already be on the broker, and the broker only deduplicates the client's own retries of the same batch, not a new send. A send is now only repeated when the record provably never reached the buffer (metadata wait, full buffer, the KAFKA-10902 monitor fault); otherwise the message fails with `stopReason=OUTCOME_UNKNOWN`. Single-message retries therefore recover fewer failures than before, as the tooltip always promised. See issue #184.
 - Numbers in JSON_ARRAY batch output (sender) and in records produced from a JSON_ARRAY batch (receiver) now keep their trailing zeros and precision: `100.00` became `100.0`, `12345678.90` became `1.23456789E7`, and digits beyond double precision were lost. Values are unchanged. Numbers are still written in canonical decimal form, so exponent input and decimals below `0.000001` come out in E-notation (`1e3` → `1E+3`, `0.0000001` → `1E-7`). A sender value that is JSON followed by more text (`{"a":1}garbage`, `true story`) is now embedded as the full string instead of being cut after the first JSON value, an empty value stays `""` instead of becoming `null`, and a receiver JSON batch with content after the array is rejected. See issue #181.
