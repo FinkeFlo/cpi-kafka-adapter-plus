@@ -49,8 +49,22 @@ public final class JsonSchemaValidator {
         }
         this.objectMapper = new ObjectMapper();
         JsonSchemaFactory factory = JsonSchemaFactory.getInstance(SpecVersion.VersionFlag.V7);
-        try (JsonParser parser = objectMapper.getFactory().createParser(jsonSchemaString)) {
-            JsonNode schemaNode = objectMapper.readTree(parser);
+        JsonNode schemaNode = parseSchemaDocument(objectMapper, jsonSchemaString);
+        try {
+            this.schema = factory.getSchema(schemaNode);
+            LOG.debug("[CPI-KAFKA-PLUS-DIAG] JSON Schema validator compiled successfully");
+        } catch (Exception e) {
+            throw new IllegalArgumentException("Invalid JSON Schema: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Parses the schema text as exactly one JSON document, without compiling it. Used at start-up as
+     * well: compiling could fetch a remote {@code $ref}, which a deployment must not do.
+     */
+    static JsonNode parseSchemaDocument(ObjectMapper mapper, String jsonSchemaString) {
+        try (JsonParser parser = mapper.getFactory().createParser(jsonSchemaString)) {
+            JsonNode schemaNode = mapper.readTree(parser);
             if (parser.nextToken() != null) {
                 throw new IllegalArgumentException(
                     "Invalid JSON Schema: found content after the first JSON value. "
@@ -58,8 +72,7 @@ public final class JsonSchemaValidator {
                     + "schemas using 'oneOf', 'anyOf', or 'allOf' instead of concatenating "
                     + "them with a comma.");
             }
-            this.schema = factory.getSchema(schemaNode);
-            LOG.debug("[CPI-KAFKA-PLUS-DIAG] JSON Schema validator compiled successfully");
+            return schemaNode;
         } catch (IllegalArgumentException e) {
             throw e;
         } catch (Exception e) {

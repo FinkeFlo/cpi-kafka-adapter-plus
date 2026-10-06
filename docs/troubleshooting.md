@@ -287,11 +287,21 @@ will make records look lost that are not.
 
 ### A channel does not start after updating to 1.4.1
 
-1.4.1 rejects sender settings that could never work at deployment instead of failing at every poll. The
-deployment error names the field: an empty *Consumer Group ID*, an *Offset Commit Strategy* other than
-`BATCH_COMPLETE`/`AUTO`, *Max Poll Records* below 1, a negative *Fetch Min Bytes*, *Fetch Max Wait (ms)*,
-*Poll Timeout (ms)* or *Max Retries before DLQ*, *Max Records per IFlow Run (MPL)* below 1 in batch mode,
-or a *Dead Letter Topic* that is also a source topic or has spaces around its name. These channels did not work before either; fix the value and redeploy.
+1.4.1 rejects settings that could never work at deployment instead of failing at every poll or send. The
+deployment error names the field.
+
+* **Sender:** an empty *Consumer Group ID*, an *Offset Commit Strategy* other than `BATCH_COMPLETE`/`AUTO`,
+  *Max Poll Records* below 1, a negative *Fetch Min Bytes*, *Fetch Max Wait (ms)*, *Poll Timeout (ms)* or
+  *Max Retries before DLQ*, *Max Records per IFlow Run (MPL)* below 1 in batch mode, or a
+  *Dead Letter Topic* that is also a source topic or has spaces around its name.
+* **Receiver:** an unknown *Batch Send Mode*, *Delivery Timeout (Seconds)* below 1, or a
+  *Subject Name Strategy* other than `TopicNameStrategy` with Avro serialization.
+* **Both:** empty *Bootstrap Servers*, or a *JSON Schema* that is not valid JSON while
+  *Enable JSON Schema Validation* is on.
+
+The message gives the UI label and the parameter name, e.g. `'Batch Send Mode' (producerBatchMode)`.
+
+These channels did not work before either; fix the value and redeploy.
 
 ### Nothing from the adapter in the trace at all
 
