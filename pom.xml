@@ -22,6 +22,9 @@
         <kafka.version>4.3.1</kafka.version>
         <avro.version>1.12.2</avro.version>
         <jackson.version>2.22.2</jackson.version>
+        <!-- Shared by the runtime linux_amd64 zstd-jni dependency and the test-only darwin_aarch64
+             one in the zstd-darwin-aarch64 profile; both must stay on the same version. -->
+        <zstd-jni.version>1.5.7-17</zstd-jni.version>
         <!-- CI toggle: when true, Surefire (unit tests) is skipped so the integration-test
              CI job can run *IT tests only, without re-running the unit tests. Default false. -->
         <skip.unit.tests>false</skip.unit.tests>
@@ -131,11 +134,14 @@
             <scope>runtime</scope>
         </dependency>
 
-        <!-- Zstd compression (Linux AMD64 only to save size) -->
+        <!-- Zstd compression. Only the linux_amd64 native build is shipped: CPI runs on linux/amd64
+             and the multi-platform jar would add several MB to the ESA. On an Apple Silicon developer
+             machine the zstd-darwin-aarch64 profile (bottom of this file) adds the matching native
+             build at test scope so CompressionMatrixIT can run locally. -->
         <dependency>
             <groupId>com.github.luben</groupId>
             <artifactId>zstd-jni</artifactId>
-            <version>1.5.7-17</version>
+            <version>${zstd-jni.version}</version>
             <classifier>linux_amd64</classifier>
             <scope>runtime</scope>
         </dependency>
@@ -720,6 +726,32 @@
                     </plugin>
                 </plugins>
             </build>
+        </profile>
+
+        <!-- Local developer convenience; never active in CI (linux/amd64) or in scripts/build-esa.sh
+             (linux/amd64 container). The runtime zstd-jni dependency is pinned to the linux_amd64
+             classifier to keep the ESA small, so on an Apple Silicon Mac the zstd round trip in
+             CompressionMatrixIT fails with UnsatisfiedLinkError: no darwin/aarch64 dylib is on the
+             test classpath. This profile adds the matching native jar at test scope. Test scope is
+             neither embedded (Embed-Dependency filters on scope=runtime) nor staged into the ESA
+             (copy-dependencies uses includeScope=runtime), so the shipped bundle is unchanged. -->
+        <profile>
+            <id>zstd-darwin-aarch64</id>
+            <activation>
+                <os>
+                    <family>mac</family>
+                    <arch>aarch64</arch>
+                </os>
+            </activation>
+            <dependencies>
+                <dependency>
+                    <groupId>com.github.luben</groupId>
+                    <artifactId>zstd-jni</artifactId>
+                    <version>${zstd-jni.version}</version>
+                    <classifier>darwin_aarch64</classifier>
+                    <scope>test</scope>
+                </dependency>
+            </dependencies>
         </profile>
     </profiles>
 </project>
