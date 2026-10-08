@@ -1,5 +1,6 @@
 # Dependabot configuration
-# Keeps Maven dependencies (pom.xml) and GitHub Actions up to date.
+# Keeps Maven dependencies (pom.xml), the Python docs toolchain (requirements-docs.txt)
+# and GitHub Actions up to date.
 # Docs: https://docs.github.com/code-security/dependabot/dependabot-version-updates
 version: 2
 updates:
@@ -44,6 +45,28 @@ updates:
         update-types:
           - "minor"
           - "patch"
+
+  # --- Python: requirements-docs.txt (MkDocs toolchain installed by docs.yml) ---
+  # The adapter has no Python runtime dependency; this only keeps the docs build current.
+  # Dependabot picks up every *.txt in the directory that parses as a requirements file, so
+  # the non-standard file name is fine. tests/e2e/requirements.txt is not listed: its entries
+  # are open ranges (>=), which leaves Dependabot nothing to bump until they are pinned.
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Europe/Berlin"
+    open-pull-requests-limit: 5
+    # Same reasoning as for Maven above: without 'no-changelog' every Dependabot PR is born red.
+    labels:
+      - "dependencies"
+      - "python"
+      - "no-changelog"
+    commit-message:
+      prefix: "build"
+      include: "scope"
 
   # --- GitHub Actions used in .github/workflows ---
   - package-ecosystem: "github-actions"
