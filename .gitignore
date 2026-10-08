@@ -23,6 +23,8 @@
 # and the agents' own working directories do. If a shared .claude/ config is added later
 # (e.g. .claude/skills/), un-ignore it explicitly with a !-rule.
 .claude/
+.superpowers/
+.playwright-mcp/
 .cursor/
 .windsurf/
 .continue/
