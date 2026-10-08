@@ -26,6 +26,14 @@ Unit tests must pass **without** a running Kafka broker. Integration tests
 The CI `build` workflow uploads the unit-test JaCoCo report as an artifact so it
 can be downloaded from the Actions run.
 
+On an Apple Silicon Mac the `zstd-darwin-aarch64` Maven profile activates by itself (OS family
+`mac`, arch `aarch64`) and adds the `darwin_aarch64` native build of zstd-jni at **test** scope.
+The shipped bundle deliberately embeds only the `linux_amd64` build, because CPI runs on
+linux/amd64 and the other platforms would add several MB to the ESA; without the profile,
+`CompressionMatrixIT`'s zstd round trip fails locally with `UnsatisfiedLinkError`. The profile
+never changes the bundle or the ESA: test-scope dependencies are neither embedded nor staged.
+Keep the two `zstd-jni` versions in `pom.xml` identical; both read `${zstd-jni.version}`.
+
 Keep the `clean` in `mvn clean install`. On a `target/` that still holds the staging directory of a
 previous version, the ADK build goal aborts with *"Currently only one camel component is supported"* —
 which looks like a defect in the adapter but is only a stale build directory.
