@@ -304,6 +304,26 @@ public class AdapterTracingHelperTest {
     }
 
     /**
+     * The {@code retryable} field of {@code adapter.failure.reported} says whether the sender
+     * treats the failure as transient: a transient cause anywhere in the chain makes it true.
+     */
+    @Test
+    public void failureReportStatesWhetherTheFailureIsTransient() throws Exception {
+        org.apache.camel.Exchange exchange = new org.apache.camel.support.DefaultExchange(ctx);
+
+        String transientReport = failureReportedLine(() -> helper.reportFailure(exchange,
+                new IllegalStateException("route failed", new java.net.ConnectException("Connection refused")),
+                "CODE", null, false));
+        String permanentReport = failureReportedLine(() -> helper.reportFailure(exchange,
+                new IllegalStateException("mapping failed"), "CODE", null, false));
+        String nullReport = failureReportedLine(() -> helper.reportFailure(exchange, null, "CODE", null, false));
+
+        Assert.assertTrue(transientReport, transientReport.contains(" retryable=true"));
+        Assert.assertTrue(permanentReport, permanentReport.contains(" retryable=false"));
+        Assert.assertTrue(nullReport, nullReport.contains(" retryable=false"));
+    }
+
+    /**
      * Regression for defect #1 (traceError variant): traceError must not throw when called with
      * null context or null exception.
      */
@@ -477,5 +497,20 @@ public class AdapterTracingHelperTest {
         String errorCode = CpiKafkaPlusErrorCode.fromJsonSchemaValidationFailure(validationFail).code();
 
         Assert.assertEquals("KP-CFG-002", errorCode);
+    }
+
+    /** Runs {@code action} and returns the {@code adapter.failure.reported} line it logged. */
+    private static String failureReportedLine(Runnable action) throws Exception {
+        java.io.PrintStream original = System.err;
+        java.io.ByteArrayOutputStream captured = new java.io.ByteArrayOutputStream();
+        try {
+            System.setErr(new java.io.PrintStream(captured, true, "UTF-8"));
+            action.run();
+        } finally {
+            System.setErr(original);
+        }
+        return captured.toString("UTF-8").lines()
+                .filter(line -> line.contains("adapter.failure.reported"))
+                .findFirst().orElse("");
     }
 }

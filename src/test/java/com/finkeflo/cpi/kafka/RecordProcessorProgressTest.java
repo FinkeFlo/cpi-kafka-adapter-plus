@@ -70,6 +70,8 @@ public class RecordProcessorProgressTest {
     /** Offsets the route was invoked for, in order (partition-qualified as "p:offset"). */
     private final List<String> invoked = new ArrayList<>();
     private final Set<String> failing = new HashSet<>();
+    /** Like {@link #failing}, but the failure has a transient cause (the backend is unreachable). */
+    private final Set<String> failingTransiently = new HashSet<>();
     private final AtomicBoolean stopAfterFirstRecord = new AtomicBoolean();
     private final OffsetCommitTracker tracker = new OffsetCommitTracker();
 
@@ -209,6 +211,46 @@ public class RecordProcessorProgressTest {
         Assert.assertTrue("an interrupted retry is a shutdown, not a poison record", dlq.history().isEmpty());
         Assert.assertTrue(progress.isStopped());
         Assert.assertEquals(0L, consumer.position(P0));
+    }
+
+    // --- retryOnlyTransientErrors (on by default): only a transient failure is retried ---
+
+    @Test
+    public void transientFailureIsRetriedBeforeItIsDeadLettered() throws Exception {
+        failingTransiently.add("0:0");
+        MockConsumer<byte[], byte[]> consumer = consumerWith(P0, "a", "b");
+        CpiKafkaPlusEndpoint endpoint = endpoint(true, null);
+        endpoint.setDlqMaxRetries(2);
+        Assert.assertTrue("precondition: on by default", endpoint.isRetryOnlyTransientErrors());
+        MockProducer<byte[], byte[]> dlq = okDlqProducer();
+        RecordProcessor processor = processor(endpoint, dlqHelper(dlq), null);
+
+        processSingle(processor, consumer);
+
+        Assert.assertEquals(Arrays.asList("0:0", "0:0", "0:0", "0:1"), invoked);
+        Assert.assertEquals(1, dlq.history().size());
+        Assert.assertEquals("TRANSIENT", header(dlq.history().get(0), "CpiKafkaPlusDlqErrorType"));
+        Assert.assertEquals("2", header(dlq.history().get(0), "CpiKafkaPlusDlqRetryCount"));
+        Assert.assertEquals(2L, committed(consumer, P0));
+    }
+
+    @Test
+    public void permanentFailureSkipsTheRetriesAndIsDeadLetteredAtOnce() throws Exception {
+        failing.add("0:0");
+        MockConsumer<byte[], byte[]> consumer = consumerWith(P0, "a", "b");
+        CpiKafkaPlusEndpoint endpoint = endpoint(true, null);
+        endpoint.setDlqMaxRetries(2);
+        Assert.assertTrue("precondition: on by default", endpoint.isRetryOnlyTransientErrors());
+        MockProducer<byte[], byte[]> dlq = okDlqProducer();
+        RecordProcessor processor = processor(endpoint, dlqHelper(dlq), null);
+
+        processSingle(processor, consumer);
+
+        Assert.assertEquals(Arrays.asList("0:0", "0:1"), invoked);
+        Assert.assertEquals(1, dlq.history().size());
+        Assert.assertEquals("PERMANENT", header(dlq.history().get(0), "CpiKafkaPlusDlqErrorType"));
+        Assert.assertEquals("0", header(dlq.history().get(0), "CpiKafkaPlusDlqRetryCount"));
+        Assert.assertEquals(2L, committed(consumer, P0));
     }
 
     @Test
@@ -562,6 +604,10 @@ public class RecordProcessorProgressTest {
                         if (failing.contains(id)) {
                             throw new IllegalStateException("backend rejected " + id);
                         }
+                        if (failingTransiently.contains(id)) {
+                            throw new IllegalStateException("backend unreachable " + id,
+                                    new java.net.ConnectException("Connection refused"));
+                        }
                     }
 
                     @Override
@@ -633,6 +679,11 @@ public class RecordProcessorProgressTest {
     private static long committed(MockConsumer<byte[], byte[]> consumer, TopicPartition tp) {
         OffsetAndMetadata committed = consumer.committed(Collections.singleton(tp)).get(tp);
         return committed != null ? committed.offset() : -1L;
+    }
+
+    private static String header(ProducerRecord<byte[], byte[]> record, String key) {
+        org.apache.kafka.common.header.Header header = record.headers().lastHeader(key);
+        return header != null ? new String(header.value(), StandardCharsets.UTF_8) : null;
     }
 
     private static MockProducer<byte[], byte[]> okDlqProducer() {
