@@ -463,138 +463,6 @@ public class CpiKafkaPlusConsumerTest {
         Assert.assertTrue(ex.getMessage().contains("group='group-a'"));
     }
 
-    @Test
-    public void testIsRetryableWithConnectException() {
-        Assert.assertTrue(KafkaErrorHelper.isRetryable(
-                new java.net.ConnectException("Connection refused")));
-    }
-
-    @Test
-    public void testIsRetryableWithSocketTimeoutException() {
-        Assert.assertTrue(KafkaErrorHelper.isRetryable(
-                new java.net.SocketTimeoutException("Read timed out")));
-    }
-
-    @Test
-    public void testIsRetryableWithTimeoutException() {
-        Assert.assertTrue(KafkaErrorHelper.isRetryable(
-                new java.util.concurrent.TimeoutException("Timed out")));
-    }
-
-    @Test
-    public void testIsRetryableWithSocketException() {
-        Assert.assertTrue(KafkaErrorHelper.isRetryable(
-                new java.net.SocketException("Connection reset")));
-    }
-
-    @Test
-    public void testIsRetryableWithUnknownHostException() {
-        Assert.assertTrue(KafkaErrorHelper.isRetryable(
-                new java.net.UnknownHostException("unknown.host")));
-    }
-
-    @Test
-    public void testIsRetryableWithWrappedConnectException() {
-        Assert.assertTrue(KafkaErrorHelper.isRetryable(
-                new RuntimeException("Wrapped",
-                        new java.net.ConnectException("Connection refused"))));
-    }
-
-    @Test
-    public void testIsNotRetryableWithNullPointerException() {
-        Assert.assertFalse(KafkaErrorHelper.isRetryable(
-                new NullPointerException("null")));
-    }
-
-    @Test
-    public void testIsNotRetryableWithIllegalArgumentException() {
-        Assert.assertFalse(KafkaErrorHelper.isRetryable(
-                new IllegalArgumentException("bad arg")));
-    }
-
-    @Test
-    public void testIsNotRetryableWithFileNotFoundException() {
-        Assert.assertFalse(KafkaErrorHelper.isRetryable(
-                new RuntimeException("Wrapped",
-                        new java.io.FileNotFoundException("not found"))));
-    }
-
-    @Test
-    public void testIsNotRetryableWithClassCastException() {
-        Assert.assertFalse(KafkaErrorHelper.isRetryable(
-                new ClassCastException("bad cast")));
-    }
-
-    @Test
-    public void testIsRetryableWithKafkaRetriableException() {
-        Assert.assertTrue(KafkaErrorHelper.isRetryable(
-                new TimeoutException("Expiring 1 record(s) for orders-0")));
-    }
-
-    @Test
-    public void testIsRetryableWithIndirectKafkaRetriableSubclass() {
-        // NetworkException -> InvalidMetadataException -> RefreshRetriableException -> RetriableException
-        Assert.assertTrue(KafkaErrorHelper.isRetryable(
-                new org.apache.kafka.common.errors.NetworkException("connection lost")));
-    }
-
-    @Test
-    public void testIsRetryableWithWrappedKafkaRetriableException() {
-        Assert.assertTrue(KafkaErrorHelper.isRetryable(
-                new RuntimeException("route failed",
-                        new org.apache.kafka.common.KafkaException("send failed",
-                                new org.apache.kafka.common.errors.DisconnectException("broker gone")))));
-    }
-
-    @Test
-    public void testIsNotRetryableWithNonRetriableKafkaExceptions() {
-        // Only Kafka's RetriableException marker counts, not every KafkaException.
-        Assert.assertFalse(KafkaErrorHelper.isRetryable(
-                new org.apache.kafka.common.KafkaException("generic")));
-        Assert.assertFalse(KafkaErrorHelper.isRetryable(
-                new SaslAuthenticationException("Authentication failed")));
-        Assert.assertFalse(KafkaErrorHelper.isRetryable(
-                new TopicAuthorizationException("Not authorized to access topics: [orders]")));
-        Assert.assertFalse(KafkaErrorHelper.isRetryable(
-                new org.apache.kafka.common.errors.RecordTooLargeException("record too large")));
-        Assert.assertFalse(KafkaErrorHelper.isRetryable(
-                new org.apache.kafka.common.errors.SerializationException("bad bytes")));
-    }
-
-    @Test
-    public void testIsRetryableFindsATransientCauseBeyondTenLevels() {
-        // No depth limit, unlike KafkaErrorHelper.classify, which stops after ten causes.
-        Exception e = new java.net.SocketTimeoutException("Read timed out");
-        for (int i = 0; i < 12; i++) {
-            e = new RuntimeException("wrapper " + i, e);
-        }
-        Assert.assertTrue(KafkaErrorHelper.isRetryable(e));
-    }
-
-    @Test
-    public void testIsNotRetryableWithNull() {
-        Assert.assertFalse(KafkaErrorHelper.isRetryable(null));
-    }
-
-    /**
-     * The sender re-runs its route for a record whose failure has a transient cause anywhere in
-     * the chain. {@link KafkaErrorHelper#classify} judges a failed Kafka producer send (retry it,
-     * rebuild the client, or reject the record). The two answer different questions.
-     */
-    @Test
-    public void testIsRetryableIsNotTheProducerClassification() {
-        java.net.ConnectException refused = new java.net.ConnectException("Connection refused");
-        Assert.assertTrue(KafkaErrorHelper.isRetryable(refused));
-        Assert.assertEquals(KafkaErrorHelper.Classification.UNKNOWN_FATAL,
-                KafkaErrorHelper.classify(refused));
-
-        Exception dataErrorWithTransientCause = new org.apache.kafka.common.errors.SerializationException(
-                "schema lookup failed", new java.net.SocketTimeoutException("Read timed out"));
-        Assert.assertTrue(KafkaErrorHelper.isRetryable(dataErrorWithTransientCause));
-        Assert.assertEquals(KafkaErrorHelper.Classification.FATAL_DATA_ERROR,
-                KafkaErrorHelper.classify(dataErrorWithTransientCause));
-    }
-
     // --- Issue #45: max.poll.interval.ms scaling ---
 
     @Test
@@ -907,17 +775,17 @@ public class CpiKafkaPlusConsumerTest {
             Exchange swallowed = new DefaultExchange(ctx);
             swallowed.setProperty(Exchange.EXCEPTION_CAUGHT, new IllegalStateException("mapping failed"));
             Assert.assertFalse("a deterministic swallowed error goes to the DLQ without retries",
-                    KafkaErrorHelper.isRetryable(CpiKafkaPlusConsumer.buildHandledFailureException(swallowed)));
+                    KafkaErrorHelper.isTransientForRedelivery(CpiKafkaPlusConsumer.buildHandledFailureException(swallowed)));
 
             Exchange withoutCause = new DefaultExchange(ctx);
-            Assert.assertFalse(KafkaErrorHelper.isRetryable(
+            Assert.assertFalse(KafkaErrorHelper.isTransientForRedelivery(
                     CpiKafkaPlusConsumer.buildHandledFailureException(withoutCause)));
 
             Exchange unreachable = new DefaultExchange(ctx);
             unreachable.setProperty(Exchange.EXCEPTION_CAUGHT,
                     new java.net.ConnectException("Connection refused"));
             Assert.assertTrue("the chained cause is classified, not only the wrapper",
-                    KafkaErrorHelper.isRetryable(CpiKafkaPlusConsumer.buildHandledFailureException(unreachable)));
+                    KafkaErrorHelper.isTransientForRedelivery(CpiKafkaPlusConsumer.buildHandledFailureException(unreachable)));
         }
     }
 

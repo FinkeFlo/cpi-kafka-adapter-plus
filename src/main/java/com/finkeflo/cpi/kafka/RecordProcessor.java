@@ -486,7 +486,8 @@ final class RecordProcessor {
             } catch (Exception e) {
                 lastError = e;
 
-                if (endpoint.isRetryOnlyTransientErrors() && !KafkaErrorHelper.isRetryable(e)) {
+                if (endpoint.isRetryOnlyTransientErrors()
+                        && !KafkaErrorHelper.isTransientForRedelivery(e)) {
                     LOG.info("[CPI-KAFKA-PLUS-DIAG] Permanent error detected, "
                             + "skipping {} remaining retries -> DLQ: offset={} partition={} error='{}'",
                             maxRetries - attempt, record.offset(), record.partition(), e.getMessage());

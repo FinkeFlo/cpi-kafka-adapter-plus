@@ -214,4 +214,140 @@ public class KafkaErrorHelperTest {
         Assert.assertTrue(hint, hint.contains("SASL_SSL"));
         Assert.assertNotNull(KafkaErrorHelper.tlsMismatchHint("PLAINTEXT"));
     }
+
+    // ------------------------------------------------------------------
+    //  isTransientForRedelivery
+    // ------------------------------------------------------------------
+
+    @Test
+    public void testIsTransientForRedeliveryWithConnectException() {
+        Assert.assertTrue(KafkaErrorHelper.isTransientForRedelivery(
+                new java.net.ConnectException("Connection refused")));
+    }
+
+    @Test
+    public void testIsTransientForRedeliveryWithSocketTimeoutException() {
+        Assert.assertTrue(KafkaErrorHelper.isTransientForRedelivery(
+                new java.net.SocketTimeoutException("Read timed out")));
+    }
+
+    @Test
+    public void testIsTransientForRedeliveryWithTimeoutException() {
+        Assert.assertTrue(KafkaErrorHelper.isTransientForRedelivery(
+                new java.util.concurrent.TimeoutException("Timed out")));
+    }
+
+    @Test
+    public void testIsTransientForRedeliveryWithSocketException() {
+        Assert.assertTrue(KafkaErrorHelper.isTransientForRedelivery(
+                new java.net.SocketException("Connection reset")));
+    }
+
+    @Test
+    public void testIsTransientForRedeliveryWithUnknownHostException() {
+        Assert.assertTrue(KafkaErrorHelper.isTransientForRedelivery(
+                new java.net.UnknownHostException("unknown.host")));
+    }
+
+    @Test
+    public void testIsTransientForRedeliveryWithWrappedConnectException() {
+        Assert.assertTrue(KafkaErrorHelper.isTransientForRedelivery(
+                new RuntimeException("Wrapped",
+                        new java.net.ConnectException("Connection refused"))));
+    }
+
+    @Test
+    public void testIsNotTransientForRedeliveryWithNullPointerException() {
+        Assert.assertFalse(KafkaErrorHelper.isTransientForRedelivery(
+                new NullPointerException("null")));
+    }
+
+    @Test
+    public void testIsNotTransientForRedeliveryWithIllegalArgumentException() {
+        Assert.assertFalse(KafkaErrorHelper.isTransientForRedelivery(
+                new IllegalArgumentException("bad arg")));
+    }
+
+    @Test
+    public void testIsNotTransientForRedeliveryWithFileNotFoundException() {
+        Assert.assertFalse(KafkaErrorHelper.isTransientForRedelivery(
+                new RuntimeException("Wrapped",
+                        new java.io.FileNotFoundException("not found"))));
+    }
+
+    @Test
+    public void testIsNotTransientForRedeliveryWithClassCastException() {
+        Assert.assertFalse(KafkaErrorHelper.isTransientForRedelivery(
+                new ClassCastException("bad cast")));
+    }
+
+    @Test
+    public void testIsTransientForRedeliveryWithKafkaRetriableException() {
+        Assert.assertTrue(KafkaErrorHelper.isTransientForRedelivery(
+                new TimeoutException("Expiring 1 record(s) for orders-0")));
+    }
+
+    @Test
+    public void testIsTransientForRedeliveryWithIndirectKafkaRetriableSubclass() {
+        // NetworkException -> InvalidMetadataException -> RefreshRetriableException -> RetriableException
+        Assert.assertTrue(KafkaErrorHelper.isTransientForRedelivery(
+                new org.apache.kafka.common.errors.NetworkException("connection lost")));
+    }
+
+    @Test
+    public void testIsTransientForRedeliveryWithWrappedKafkaRetriableException() {
+        Assert.assertTrue(KafkaErrorHelper.isTransientForRedelivery(
+                new RuntimeException("route failed",
+                        new org.apache.kafka.common.KafkaException("send failed",
+                                new org.apache.kafka.common.errors.DisconnectException("broker gone")))));
+    }
+
+    @Test
+    public void testIsNotTransientForRedeliveryWithNonRetriableKafkaExceptions() {
+        // Only Kafka's RetriableException marker counts, not every KafkaException.
+        Assert.assertFalse(KafkaErrorHelper.isTransientForRedelivery(
+                new org.apache.kafka.common.KafkaException("generic")));
+        Assert.assertFalse(KafkaErrorHelper.isTransientForRedelivery(
+                new SaslAuthenticationException("Authentication failed")));
+        Assert.assertFalse(KafkaErrorHelper.isTransientForRedelivery(
+                new TopicAuthorizationException("Not authorized to access topics: [orders]")));
+        Assert.assertFalse(KafkaErrorHelper.isTransientForRedelivery(
+                new org.apache.kafka.common.errors.RecordTooLargeException("record too large")));
+        Assert.assertFalse(KafkaErrorHelper.isTransientForRedelivery(
+                new org.apache.kafka.common.errors.SerializationException("bad bytes")));
+    }
+
+    @Test
+    public void testIsTransientForRedeliveryFindsATransientCauseBeyondTenLevels() {
+        // No depth limit, unlike KafkaErrorHelper.classify, which stops after ten causes.
+        Exception e = new java.net.SocketTimeoutException("Read timed out");
+        for (int i = 0; i < 12; i++) {
+            e = new RuntimeException("wrapper " + i, e);
+        }
+        Assert.assertTrue(KafkaErrorHelper.isTransientForRedelivery(e));
+    }
+
+    @Test
+    public void testIsNotTransientForRedeliveryWithNull() {
+        Assert.assertFalse(KafkaErrorHelper.isTransientForRedelivery(null));
+    }
+
+    /**
+     * The sender re-runs its route for a record whose failure has a transient cause anywhere in
+     * the chain. {@link KafkaErrorHelper#classify} judges a failed Kafka producer send (retry it,
+     * rebuild the client, or reject the record). The two answer different questions.
+     */
+    @Test
+    public void testIsTransientForRedeliveryIsNotTheProducerClassification() {
+        java.net.ConnectException refused = new java.net.ConnectException("Connection refused");
+        Assert.assertTrue(KafkaErrorHelper.isTransientForRedelivery(refused));
+        Assert.assertEquals(KafkaErrorHelper.Classification.UNKNOWN_FATAL,
+                KafkaErrorHelper.classify(refused));
+
+        Exception dataErrorWithTransientCause = new org.apache.kafka.common.errors.SerializationException(
+                "schema lookup failed", new java.net.SocketTimeoutException("Read timed out"));
+        Assert.assertTrue(KafkaErrorHelper.isTransientForRedelivery(dataErrorWithTransientCause));
+        Assert.assertEquals(KafkaErrorHelper.Classification.FATAL_DATA_ERROR,
+                KafkaErrorHelper.classify(dataErrorWithTransientCause));
+    }
 }
