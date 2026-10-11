@@ -263,7 +263,7 @@ public class CpiKafkaPlusConsumerTest {
             CpiKafkaPlusConsumer consumer = new CpiKafkaPlusConsumer(endpoint, null);
 
             Properties props = consumer.buildConsumerProperties();
-            String suffix = CpiKafkaPlusConsumer.resolveStaticMemberSuffix();
+            String suffix = NodeIdentity.memberSuffix();
 
             if (suffix != null) {
                 Assert.assertEquals("group.instance.id should combine groupId with the resolved suffix",
@@ -278,10 +278,10 @@ public class CpiKafkaPlusConsumerTest {
     }
 
     @Test
-    public void testResolveStaticMemberSuffixPrefersCfInstanceIndex() {
+    public void testMemberSuffixPrefersCfInstanceIndex() {
         // The helper just reads env vars; whatever the test JVM has is fine,
         // we only assert the contract: non-empty -> returned, empty -> null fallback.
-        String result = CpiKafkaPlusConsumer.resolveStaticMemberSuffix();
+        String result = NodeIdentity.memberSuffix();
         if (result != null) {
             Assert.assertFalse("returned suffix must not be empty", result.isEmpty());
         }

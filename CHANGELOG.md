@@ -10,6 +10,7 @@ iFlow compatibility.
 ## [Unreleased]
 ### Changed
 - Internal refactoring, no change in behaviour, configuration or log output: the receiver's node-fault escalation (`producer.node.fault.escalation`, with JVM state and the thread dump at diagnostics level FULL) moved from `CpiKafkaPlusProducer` into its own class `NodeFaultEscalation`. The event still logs under the `CpiKafkaPlusProducer` logger category.
+- Internal refactoring, no change in behaviour, configuration or log output: the member suffix from `CF_INSTANCE_INDEX` or `HOSTNAME` (used in the sender's `group.instance.id` and the receiver's `transactional.id`) and the topic hash in `transactional.id` now come from one class, `NodeIdentity`, instead of `CpiKafkaPlusConsumer` and `CpiKafkaPlusProducer`. The ids stay the same.
 
 ### Fixed
 - Sender with **Auto-Pause on Errors**: records could be skipped after an auto-pause. While the channel is paused, a keep-alive poll keeps it in the consumer group; when a rebalance assigned a partition during that poll, the poll returned the partition's records and the consumer moved past them without processing them. They are now rewound, as the regular keep-alive poll already did, so the next poll after the pause reads them. Both keep-alive polls now share one implementation (`KeepAlive`). See issue #230 (N-D-1).

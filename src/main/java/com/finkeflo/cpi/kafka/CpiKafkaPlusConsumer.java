@@ -1622,7 +1622,7 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
         // (e.g. local Camel test). If neither is available, static membership is
         // skipped and the consumer falls back to dynamic membership (auto-UUID
         // member.id, every reconnect counts as a new member -> rebalance).
-        String memberSuffix = resolveStaticMemberSuffix();
+        String memberSuffix = NodeIdentity.memberSuffix();
         if (memberSuffix != null) {
             String groupInstanceId = endpoint.getGroupId() + "-" + memberSuffix;
             props.put(ConsumerConfig.GROUP_INSTANCE_ID_CONFIG, groupInstanceId);
@@ -1650,31 +1650,6 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
 
         return props;
     }
-
-    /**
-     * Resolves a stable per-pod identifier for {@code group.instance.id} (KIP-345
-     * Static Membership). Returns the first non-empty value of:
-     * <ol>
-     *   <li>{@code CF_INSTANCE_INDEX} — Cloud Foundry instance number, stable
-     *       across restarts of the same slot (this is what runs in CPI BTP).</li>
-     *   <li>{@code HOSTNAME} — fallback for non-CF runtimes (local Camel test,
-     *       k8s where CF_INSTANCE_INDEX is unset).</li>
-     * </ol>
-     * Returns {@code null} if neither is available, in which case the consumer
-     * falls back to dynamic membership.
-     *
-     * <p>Package-private and static so unit tests can verify the call site
-     * behavior using whichever env vars are present in the test JVM.
-     */
-    static String resolveStaticMemberSuffix() {
-        String cfInstance = System.getenv("CF_INSTANCE_INDEX");
-        if (cfInstance != null && !cfInstance.isEmpty()) {
-            return cfInstance;
-        }
-        String hostname = System.getenv("HOSTNAME");
-        return (hostname != null && !hostname.isEmpty()) ? hostname : null;
-    }
-
 
     private void closeConsumerQuietly() {
         if (kafkaConsumer != null) {
