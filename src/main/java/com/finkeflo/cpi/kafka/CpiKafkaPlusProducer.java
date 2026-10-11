@@ -21,8 +21,6 @@
 package com.finkeflo.cpi.kafka;
 
 import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.util.Collections;
 import java.util.Map;
@@ -310,7 +308,7 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
             // transactional.id no longer being stable across restarts on the same node (so a
             // crashed producer's old transactional.id will not be actively fenced by the new one —
             // it will simply expire via transaction.timeout.ms).
-            resolvedMemberSuffix = CpiKafkaPlusConsumer.resolveStaticMemberSuffix();
+            resolvedMemberSuffix = NodeIdentity.resolveStaticMemberSuffix();
             if (resolvedMemberSuffix == null) {
                 resolvedMemberSuffix = "r" + java.util.UUID.randomUUID().toString().replace("-", "").substring(0, 12);
                 LOG.warn("[CPI-KAFKA-PLUS-DIAG] Could not determine a stable identifier for this worker node, "
@@ -323,7 +321,7 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
             // producers configured with the same transactionalIdPrefix but different target topics
             // (a common copy-paste pattern) never share an id. Shared ids cause constant mutual
             // fencing: each new producer bumps the epoch and invalidates all concurrent ones.
-            topicHash = computeTopicHash(endpoint.getEffectiveTopic());
+            topicHash = NodeIdentity.computeTopicHash(endpoint.getEffectiveTopic());
 
             // Validate that the resulting id fits within a safe length budget before any producer
             // is created. Prefix + hash + memberSuffix + slotId + separators must stay short enough
@@ -1675,29 +1673,6 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
         MISSING,
         /** No usable answer (no Describe permission, broker unreachable, unsupported API, ...). */
         INCONCLUSIVE
-    }
-
-    /**
-     * Returns the first 8 hex characters of the SHA-256 digest of the given topic name.
-     * Used as a stable, short segment in {@code transactional.id} to ensure that two producers
-     * with the same {@code transactionalIdPrefix} but different target topics never share an id.
-     *
-     * <p>SHA-256 is used rather than {@link String#hashCode()} because the latter is not
-     * guaranteed to be stable across JVM versions or implementations.
-     */
-    static String computeTopicHash(String topic) {
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] hash = digest.digest(topic.getBytes(StandardCharsets.UTF_8));
-            StringBuilder sb = new StringBuilder(8);
-            for (int i = 0; i < 4; i++) {
-                sb.append(String.format("%02x", hash[i]));
-            }
-            return sb.toString();
-        } catch (NoSuchAlgorithmException e) {
-            // SHA-256 is mandated by the Java SE spec — this branch is unreachable in practice.
-            throw new IllegalStateException("SHA-256 not available", e);
-        }
     }
 
     /**

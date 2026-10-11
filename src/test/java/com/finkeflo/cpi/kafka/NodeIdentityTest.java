@@ -49,60 +49,60 @@ public class NodeIdentityTest {
 
     @Test
     public void cfInstanceIndexWinsOverHostname() {
-        assertEquals("3", CpiKafkaPlusConsumer.resolveStaticMemberSuffix(
+        assertEquals("3", NodeIdentity.resolveStaticMemberSuffix(
                 env("CF_INSTANCE_INDEX", "3", "HOSTNAME", "worker-a")));
     }
 
     @Test
     public void instanceIndexZeroIsASuffix() {
-        assertEquals("0", CpiKafkaPlusConsumer.resolveStaticMemberSuffix(env("CF_INSTANCE_INDEX", "0")));
+        assertEquals("0", NodeIdentity.resolveStaticMemberSuffix(env("CF_INSTANCE_INDEX", "0")));
     }
 
     @Test
     public void hostnameIsUsedWithoutCfInstanceIndex() {
-        assertEquals("worker-a", CpiKafkaPlusConsumer.resolveStaticMemberSuffix(env("HOSTNAME", "worker-a")));
+        assertEquals("worker-a", NodeIdentity.resolveStaticMemberSuffix(env("HOSTNAME", "worker-a")));
     }
 
     @Test
     public void emptyCfInstanceIndexFallsBackToHostname() {
-        assertEquals("worker-a", CpiKafkaPlusConsumer.resolveStaticMemberSuffix(
+        assertEquals("worker-a", NodeIdentity.resolveStaticMemberSuffix(
                 env("CF_INSTANCE_INDEX", "", "HOSTNAME", "worker-a")));
     }
 
     @Test
     public void noSuffixWithoutEitherVariable() {
-        assertNull(CpiKafkaPlusConsumer.resolveStaticMemberSuffix(env()));
+        assertNull(NodeIdentity.resolveStaticMemberSuffix(env()));
     }
 
     @Test
     public void emptyValuesCountAsMissing() {
-        assertNull(CpiKafkaPlusConsumer.resolveStaticMemberSuffix(env("CF_INSTANCE_INDEX", "", "HOSTNAME", "")));
+        assertNull(NodeIdentity.resolveStaticMemberSuffix(env("CF_INSTANCE_INDEX", "", "HOSTNAME", "")));
     }
 
     @Test
     public void valuesAreUsedVerbatim() {
         // Only an empty value counts as missing: a blank one is neither trimmed nor skipped.
-        assertEquals(" ", CpiKafkaPlusConsumer.resolveStaticMemberSuffix(
+        assertEquals(" ", NodeIdentity.resolveStaticMemberSuffix(
                 env("CF_INSTANCE_INDEX", " ", "HOSTNAME", "worker-a")));
-        assertEquals("Worker-A.example", CpiKafkaPlusConsumer.resolveStaticMemberSuffix(
+        assertEquals("Worker-A.example", NodeIdentity.resolveStaticMemberSuffix(
                 env("HOSTNAME", "Worker-A.example")));
     }
 
     @Test
     public void withoutArgumentTheProcessEnvironmentIsRead() {
-        assertEquals(CpiKafkaPlusConsumer.resolveStaticMemberSuffix(System::getenv),
-                CpiKafkaPlusConsumer.resolveStaticMemberSuffix());
+        assertEquals(NodeIdentity.resolveStaticMemberSuffix(System::getenv),
+                NodeIdentity.resolveStaticMemberSuffix());
     }
 
     @Test
     public void topicHashIsTheFirstFourBytesOfSha256InLowerCaseHex() {
-        assertEquals("c6fb053c", CpiKafkaPlusProducer.computeTopicHash("test-topic"));
+        assertEquals("c6fb053c", NodeIdentity.computeTopicHash("test-topic"));
     }
 
     @Test
     public void topicHashKeepsLeadingZeros() {
-        assertEquals("0c4102c8", CpiKafkaPlusProducer.computeTopicHash("topic-123"));
-        assertEquals("0027707d", CpiKafkaPlusProducer.computeTopicHash("topic-518"));
+        assertEquals("0c4102c8", NodeIdentity.computeTopicHash("topic-123"));
+        assertEquals("0027707d", NodeIdentity.computeTopicHash("topic-518"));
     }
 
     @Test
@@ -125,7 +125,7 @@ public class NodeIdentityTest {
                 String id = message.substring(start, message.indexOf('\'', start));
                 assertTrue(id, id.startsWith(prefix + "-c6fb053c-"));
                 assertTrue(id, id.endsWith("-0"));
-                String suffix = CpiKafkaPlusConsumer.resolveStaticMemberSuffix();
+                String suffix = NodeIdentity.resolveStaticMemberSuffix();
                 if (suffix != null) {
                     assertEquals(prefix + "-c6fb053c-" + suffix + "-0", id);
                 }
