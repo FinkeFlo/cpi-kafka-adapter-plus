@@ -1622,7 +1622,7 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
         // (e.g. local Camel test). If neither is available, static membership is
         // skipped and the consumer falls back to dynamic membership (auto-UUID
         // member.id, every reconnect counts as a new member -> rebalance).
-        String memberSuffix = NodeIdentity.resolveStaticMemberSuffix();
+        String memberSuffix = NodeIdentity.memberSuffix();
         if (memberSuffix != null) {
             String groupInstanceId = endpoint.getGroupId() + "-" + memberSuffix;
             props.put(ConsumerConfig.GROUP_INSTANCE_ID_CONFIG, groupInstanceId);

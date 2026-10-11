@@ -30,10 +30,10 @@ import org.apache.camel.impl.DefaultCamelContext;
 import org.junit.Test;
 
 /**
- * Unit tests for the worker-node identity in {@code group.instance.id} (sender) and
- * {@code transactional.id} (receiver): which environment variable supplies the member suffix, and
- * the exact topic hash. The values are pinned because a different result gives every deployed
- * channel new ids. No Camel context and no broker, except for the test that checks how
+ * Unit tests for {@link NodeIdentity}, the worker-node identity in {@code group.instance.id}
+ * (sender) and {@code transactional.id} (receiver): which environment variable supplies the member
+ * suffix, and the exact topic hash. The values are pinned because a different result gives every
+ * deployed channel new ids. No Camel context and no broker, except for the test that checks how
  * {@link CpiKafkaPlusProducer} builds its {@code transactional.id} from them.
  */
 public class NodeIdentityTest {
@@ -49,49 +49,48 @@ public class NodeIdentityTest {
 
     @Test
     public void cfInstanceIndexWinsOverHostname() {
-        assertEquals("3", NodeIdentity.resolveStaticMemberSuffix(
+        assertEquals("3", NodeIdentity.memberSuffix(
                 env("CF_INSTANCE_INDEX", "3", "HOSTNAME", "worker-a")));
     }
 
     @Test
     public void instanceIndexZeroIsASuffix() {
-        assertEquals("0", NodeIdentity.resolveStaticMemberSuffix(env("CF_INSTANCE_INDEX", "0")));
+        assertEquals("0", NodeIdentity.memberSuffix(env("CF_INSTANCE_INDEX", "0")));
     }
 
     @Test
     public void hostnameIsUsedWithoutCfInstanceIndex() {
-        assertEquals("worker-a", NodeIdentity.resolveStaticMemberSuffix(env("HOSTNAME", "worker-a")));
+        assertEquals("worker-a", NodeIdentity.memberSuffix(env("HOSTNAME", "worker-a")));
     }
 
     @Test
     public void emptyCfInstanceIndexFallsBackToHostname() {
-        assertEquals("worker-a", NodeIdentity.resolveStaticMemberSuffix(
+        assertEquals("worker-a", NodeIdentity.memberSuffix(
                 env("CF_INSTANCE_INDEX", "", "HOSTNAME", "worker-a")));
     }
 
     @Test
     public void noSuffixWithoutEitherVariable() {
-        assertNull(NodeIdentity.resolveStaticMemberSuffix(env()));
+        assertNull(NodeIdentity.memberSuffix(env()));
     }
 
     @Test
     public void emptyValuesCountAsMissing() {
-        assertNull(NodeIdentity.resolveStaticMemberSuffix(env("CF_INSTANCE_INDEX", "", "HOSTNAME", "")));
+        assertNull(NodeIdentity.memberSuffix(env("CF_INSTANCE_INDEX", "", "HOSTNAME", "")));
     }
 
     @Test
     public void valuesAreUsedVerbatim() {
         // Only an empty value counts as missing: a blank one is neither trimmed nor skipped.
-        assertEquals(" ", NodeIdentity.resolveStaticMemberSuffix(
+        assertEquals(" ", NodeIdentity.memberSuffix(
                 env("CF_INSTANCE_INDEX", " ", "HOSTNAME", "worker-a")));
-        assertEquals("Worker-A.example", NodeIdentity.resolveStaticMemberSuffix(
+        assertEquals("Worker-A.example", NodeIdentity.memberSuffix(
                 env("HOSTNAME", "Worker-A.example")));
     }
 
     @Test
     public void withoutArgumentTheProcessEnvironmentIsRead() {
-        assertEquals(NodeIdentity.resolveStaticMemberSuffix(System::getenv),
-                NodeIdentity.resolveStaticMemberSuffix());
+        assertEquals(NodeIdentity.memberSuffix(System::getenv), NodeIdentity.memberSuffix());
     }
 
     @Test
@@ -125,7 +124,7 @@ public class NodeIdentityTest {
                 String id = message.substring(start, message.indexOf('\'', start));
                 assertTrue(id, id.startsWith(prefix + "-c6fb053c-"));
                 assertTrue(id, id.endsWith("-0"));
-                String suffix = NodeIdentity.resolveStaticMemberSuffix();
+                String suffix = NodeIdentity.memberSuffix();
                 if (suffix != null) {
                     assertEquals(prefix + "-c6fb053c-" + suffix + "-0", id);
                 }

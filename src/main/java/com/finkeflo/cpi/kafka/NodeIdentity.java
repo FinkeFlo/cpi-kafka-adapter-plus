@@ -39,7 +39,8 @@ final class NodeIdentity {
 
     /**
      * Resolves a stable per-pod identifier for {@code group.instance.id} (KIP-345
-     * Static Membership). Returns the first non-empty value of:
+     * Static Membership) on the sender and for {@code transactional.id} on the
+     * receiver. Returns the first non-empty value of:
      * <ol>
      *   <li>{@code CF_INSTANCE_INDEX} — Cloud Foundry instance number, stable
      *       across restarts of the same slot (this is what runs in CPI BTP).</li>
@@ -47,20 +48,17 @@ final class NodeIdentity {
      *       k8s where CF_INSTANCE_INDEX is unset).</li>
      * </ol>
      * Returns {@code null} if neither is available, in which case the consumer
-     * falls back to dynamic membership.
-     *
-     * <p>Package-private and static so unit tests can verify the call site
-     * behavior using whichever env vars are present in the test JVM.
+     * falls back to dynamic membership and the producer to a random suffix.
      */
-    static String resolveStaticMemberSuffix() {
-        return resolveStaticMemberSuffix(System::getenv);
+    static String memberSuffix() {
+        return memberSuffix(System::getenv);
     }
 
     /**
-     * As {@link #resolveStaticMemberSuffix()}, reading the variables through {@code env} so tests
-     * can supply them.
+     * As {@link #memberSuffix()}, reading the variables through {@code env} so tests can supply
+     * them.
      */
-    static String resolveStaticMemberSuffix(UnaryOperator<String> env) {
+    static String memberSuffix(UnaryOperator<String> env) {
         String cfInstance = env.apply("CF_INSTANCE_INDEX");
         if (cfInstance != null && !cfInstance.isEmpty()) {
             return cfInstance;

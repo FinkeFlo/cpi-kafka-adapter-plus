@@ -308,7 +308,7 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
             // transactional.id no longer being stable across restarts on the same node (so a
             // crashed producer's old transactional.id will not be actively fenced by the new one —
             // it will simply expire via transaction.timeout.ms).
-            resolvedMemberSuffix = NodeIdentity.resolveStaticMemberSuffix();
+            resolvedMemberSuffix = NodeIdentity.memberSuffix();
             if (resolvedMemberSuffix == null) {
                 resolvedMemberSuffix = "r" + java.util.UUID.randomUUID().toString().replace("-", "").substring(0, 12);
                 LOG.warn("[CPI-KAFKA-PLUS-DIAG] Could not determine a stable identifier for this worker node, "
