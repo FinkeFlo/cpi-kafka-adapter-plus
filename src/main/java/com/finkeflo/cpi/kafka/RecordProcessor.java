@@ -100,6 +100,7 @@ final class RecordProcessor {
     private final AvroDeserializerHelper avroHelper;
     private final ConsumerCallback callback;
     private final OffsetCommitTracker offsetTracker;
+    private final RecordFailurePolicy failurePolicy;
 
     RecordProcessor(CpiKafkaPlusEndpoint endpoint,
                     AdapterTracingHelper tracingHelper,
@@ -115,6 +116,8 @@ final class RecordProcessor {
         this.avroHelper = avroHelper;
         this.callback = callback;
         this.offsetTracker = offsetTracker;
+        this.failurePolicy = new RecordFailurePolicy(dlqHelper != null, endpoint::getDlqMaxRetries,
+                endpoint::isRetryOnlyTransientErrors, endpoint::isSkipFailedMessages);
     }
 
     // --- Public API ---
@@ -225,8 +228,9 @@ final class RecordProcessor {
                         if (endpoint.isJsonSchemaReportError()) {
                             reportValidationErrorToMpl(value, validationError, record);
                         }
+                        RecordFailurePolicy.Action action = failurePolicy.forSchemaViolation();
                         boolean dlqFailed = false;
-                        if (dlqHelper != null) {
+                        if (action == RecordFailurePolicy.Action.DEAD_LETTER) {
                             try {
                                 dlqHelper.sendToDlq(record, new RuntimeException(validationError), 0);
                                 dlqCount++;
@@ -246,7 +250,7 @@ final class RecordProcessor {
                         callback.handleException(
                                 "JSON Schema validation failed at offset " + record.offset(),
                                 errorExchange, new RuntimeException(validationError));
-                        if (dlqFailed) {
+                        if (dlqFailed || action == RecordFailurePolicy.Action.BLOCK) {
                             progress.blocked(tp, record.offset());
                             break;
                         }
@@ -352,18 +356,19 @@ final class RecordProcessor {
                     .with("errorCode", CpiKafkaPlusErrorCode.fromThrowable(t).code())
                     .with("partition", partition)
                     .with("batchSize", batch.size()), t);
-            if (dlqHelper != null) {
+            RecordFailurePolicy.Action action = failurePolicy.forBatchFormatFailure(t);
+            if (action == RecordFailurePolicy.Action.PROCESS_INDIVIDUALLY) {
                 LOG.info("[CPI-KAFKA-PLUS-DIAG] processOneBatch: formatBatch failed, retrying batch records individually for poison-pill isolation");
                 return processRecordsIndividually(kafkaConsumer, batch, commitAfterSuccess, progress);
             }
-            if (!(t instanceof Exception)) {
+            if (action == RecordFailurePolicy.Action.ESCAPE) {
                 throw new RuntimeException(t); // an Error is not a data problem; the poll rewinds it
             }
             progress.failed();
             callback.handleException(
                     "Could not format batch of " + batch.size() + " Kafka records from partition "
                             + batch.get(0).partition(), exchange, (Exception) t);
-            resolveBatchWithoutDlq(kafkaConsumer, batch, commitAfterSuccess, progress);
+            resolveBatchWithoutDlq(kafkaConsumer, batch, action, commitAfterSuccess, progress);
             return 0;
         }
 
@@ -383,7 +388,8 @@ final class RecordProcessor {
                     .with("errorCode", CpiKafkaPlusErrorCode.fromThrowable(e).code())
                     .with("partition", partition)
                     .with("batchSize", batch.size()), e);
-            if (dlqHelper != null) {
+            RecordFailurePolicy.Action action = failurePolicy.forBatchRouteFailure();
+            if (action == RecordFailurePolicy.Action.PROCESS_INDIVIDUALLY) {
                 LOG.info("[CPI-KAFKA-PLUS-DIAG] processOneBatch: DLQ enabled, retrying batch records individually");
                 return processRecordsIndividually(kafkaConsumer, batch, commitAfterSuccess, progress);
             }
@@ -391,7 +397,7 @@ final class RecordProcessor {
             callback.handleException(
                     "Error processing batch of " + batch.size() + " Kafka records from partition "
                             + batch.get(0).partition(), exchange, e);
-            resolveBatchWithoutDlq(kafkaConsumer, batch, commitAfterSuccess, progress);
+            resolveBatchWithoutDlq(kafkaConsumer, batch, action, commitAfterSuccess, progress);
             return 0;
         }
 
@@ -411,9 +417,10 @@ final class RecordProcessor {
     /** Batch counterpart of {@link #resolveWithoutDlq}. */
     private void resolveBatchWithoutDlq(Consumer<byte[], byte[]> kafkaConsumer,
                                         List<ConsumerRecord<byte[], byte[]>> batch,
+                                        RecordFailurePolicy.Action action,
                                         boolean commitAfterSuccess, PollProgress progress) {
         TopicPartition tp = partitionOf(batch.get(0));
-        if (!endpoint.isSkipFailedMessages()) {
+        if (action != RecordFailurePolicy.Action.SKIP) {
             progress.blocked(tp, batch.get(0).offset());
             return;
         }
@@ -445,7 +452,7 @@ final class RecordProcessor {
             return progress.isBlocked(tp) ? 0 : 1;
         }
 
-        int maxRetries = (dlqHelper != null) ? endpoint.getDlqMaxRetries() : 0;
+        int maxRetries = failurePolicy.maxRetries();
         Exception lastError = null;
         int actualRetries = 0;
         boolean permanentError = false;
@@ -486,8 +493,7 @@ final class RecordProcessor {
             } catch (Exception e) {
                 lastError = e;
 
-                if (endpoint.isRetryOnlyTransientErrors()
-                        && !KafkaErrorHelper.isTransientForRedelivery(e)) {
+                if (failurePolicy.skipsRetries(e)) {
                     LOG.info("[CPI-KAFKA-PLUS-DIAG] Permanent error detected, "
                             + "skipping {} remaining retries -> DLQ: offset={} partition={} error='{}'",
                             maxRetries - attempt, record.offset(), record.partition(), e.getMessage());
@@ -546,7 +552,8 @@ final class RecordProcessor {
             reportValidationErrorToMpl(value, validationError, record);
         }
         TopicPartition tp = partitionOf(record);
-        if (dlqHelper != null) {
+        RecordFailurePolicy.Action action = failurePolicy.forSchemaViolation();
+        if (action == RecordFailurePolicy.Action.DEAD_LETTER) {
             try {
                 dlqHelper.sendToDlq(record, new RuntimeException(validationError), 0);
             } catch (Exception dlqEx) {
@@ -561,12 +568,14 @@ final class RecordProcessor {
                 progress.blocked(tp, record.offset());
                 return true;
             }
+            progress.resolved(tp, record.offset());
+            if (commitAfterSuccess) {
+                commitProgress(kafkaConsumer, tp, progress);
+            }
+            return true;
         }
         // Without a DLQ an invalid record is dropped, as documented for JSON Schema validation.
-        progress.resolved(tp, record.offset());
-        if (commitAfterSuccess) {
-            commitProgress(kafkaConsumer, tp, progress);
-        }
+        resolveWithoutDlq(kafkaConsumer, record, action, commitAfterSuccess, progress);
         return true;
     }
 
@@ -577,7 +586,7 @@ final class RecordProcessor {
      */
     private boolean sleepWithBackoff(int attempt, ConsumerRecord<byte[], byte[]> record) {
         int delaySeconds = endpoint.getRetryDelaySeconds();
-        int maxRetries = (dlqHelper != null) ? endpoint.getDlqMaxRetries() : 0;
+        int maxRetries = failurePolicy.maxRetries();
 
         if (delaySeconds > 0) {
             int clampedAttempt = Math.min(attempt, 30);
@@ -616,10 +625,8 @@ final class RecordProcessor {
                                       boolean permanentError, boolean commitAfterSuccess,
                                       PollProgress progress) {
         TopicPartition tp = partitionOf(record);
-        String errorType = null;
-        if (endpoint.isRetryOnlyTransientErrors()) {
-            errorType = permanentError ? "PERMANENT" : "TRANSIENT";
-        }
+        RecordFailurePolicy.Decision decision = failurePolicy.afterRetries(permanentError);
+        String errorType = decision.errorType();
 
         java.util.Map<String, String> context = new java.util.LinkedHashMap<>();
         context.put("topic", record.topic());
@@ -629,7 +636,7 @@ final class RecordProcessor {
         context.put("errorType", errorType != null ? errorType : "UNKNOWN");
         String errorCode = CpiKafkaPlusErrorCode.fromThrowable(lastError).code();
 
-        if (dlqHelper != null) {
+        if (decision.action() == RecordFailurePolicy.Action.DEAD_LETTER) {
             try {
                 dlqHelper.sendToDlq(record, lastError, actualRetries, errorType);
                 java.util.Map<String, String> dlqContext = new java.util.LinkedHashMap<>(context);
@@ -670,7 +677,7 @@ final class RecordProcessor {
             Exchange traceExchange = callback.createExchange();
             tracingHelper.traceError(traceExchange, lastError, context, true);
             tracingHelper.reportFailure(traceExchange, lastError, errorCode, context, true);
-            resolveWithoutDlq(kafkaConsumer, record, commitAfterSuccess, progress);
+            resolveWithoutDlq(kafkaConsumer, record, decision.action(), commitAfterSuccess, progress);
         }
 
         Exchange errorExchange = callback.createExchange();
@@ -686,9 +693,10 @@ final class RecordProcessor {
      */
     private void resolveWithoutDlq(Consumer<byte[], byte[]> kafkaConsumer,
                                    ConsumerRecord<byte[], byte[]> record,
+                                   RecordFailurePolicy.Action action,
                                    boolean commitAfterSuccess, PollProgress progress) {
         TopicPartition tp = partitionOf(record);
-        if (!endpoint.isSkipFailedMessages()) {
+        if (action != RecordFailurePolicy.Action.SKIP) {
             progress.blocked(tp, record.offset());
             return;
         }
@@ -743,8 +751,9 @@ final class RecordProcessor {
         progress.failed();
 
         TopicPartition tp = partitionOf(record);
-        if (dlqHelper == null) {
-            resolveWithoutDlq(kafkaConsumer, record, commitAfterSuccess, progress);
+        RecordFailurePolicy.Action action = failurePolicy.forDeserializationFailure();
+        if (action != RecordFailurePolicy.Action.DEAD_LETTER) {
+            resolveWithoutDlq(kafkaConsumer, record, action, commitAfterSuccess, progress);
             callback.handleException("Could not deserialize Kafka record at offset " + record.offset(),
                     callback.createExchange(), cause);
             return 0;
