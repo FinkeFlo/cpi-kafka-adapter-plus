@@ -11,6 +11,9 @@ iFlow compatibility.
 ### Changed
 - Internal refactoring, no change in behaviour, configuration or log output: the receiver's node-fault escalation (`producer.node.fault.escalation`, with JVM state and the thread dump at diagnostics level FULL) moved from `CpiKafkaPlusProducer` into its own class `NodeFaultEscalation`. The event still logs under the `CpiKafkaPlusProducer` logger category.
 
+### Fixed
+- Sender with **Auto-Pause on Errors**: records could be skipped after an auto-pause. While the channel is paused, a keep-alive poll keeps it in the consumer group; when a rebalance assigned a partition during that poll, the poll returned the partition's records and the consumer moved past them without processing them. They are now rewound, as the regular keep-alive poll already did, so the next poll after the pause reads them. Both keep-alive polls now share one implementation (`KeepAlive`). See issue #230 (N-D-1).
+
 ## [1.4.1] - 2026-10-06
 ### Fixed
 - The receiver's single-message retry (`producerRetryMaxAttempts > 1`, no batch mode) could write a record twice. It repeated a send whose record was already in the producer's buffer — after a delivery timeout or a dropped connection the record may already be on the broker, and the broker only deduplicates the client's own retries of the same batch, not a new send. A send is now only repeated when the record provably never reached the buffer (metadata wait, full buffer, the KAFKA-10902 monitor fault); otherwise the message fails with `stopReason=OUTCOME_UNKNOWN`. Single-message retries therefore recover fewer failures than before, as the tooltip always promised. See issue #184.

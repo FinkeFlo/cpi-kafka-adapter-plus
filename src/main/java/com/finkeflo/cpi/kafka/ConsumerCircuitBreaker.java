@@ -23,7 +23,7 @@ package com.finkeflo.cpi.kafka;
 import java.time.Duration;
 import java.util.Set;
 
-import org.apache.kafka.clients.consumer.KafkaConsumer;
+import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.errors.WakeupException;
 import org.slf4j.Logger;
@@ -63,18 +63,19 @@ final class ConsumerCircuitBreaker {
      * @param kafkaConsumer the Kafka consumer instance
      * @return {@code true} if the consumer is still paused and poll() should return 0
      */
-    boolean handlePausedState(KafkaConsumer<byte[], byte[]> kafkaConsumer) {
+    boolean handlePausedState(Consumer<byte[], byte[]> kafkaConsumer) {
         if (!endpoint.isAutoPauseEnabled() || pausedUntil <= 0) {
             return false;
         }
 
         long now = System.currentTimeMillis();
         if (now < pausedUntil) {
-            // Still in cooldown — pause partitions and poll for keepalive
-            setPartitionsPaused(kafkaConsumer, true);
+            // Still in cooldown — pause partitions and poll for keepalive. Records of a partition
+            // assigned during the poll are rewound (N-D-1). No reportConnectionHealthy() here: it
+            // would overwrite the ERROR status set by triggerAutoPause().
             try {
                 BundleBackedClassLoader.withBundleClassLoader(getClass(),
-                        () -> kafkaConsumer.poll(Duration.ofMillis(100)));
+                        () -> KeepAlive.pollPausedAndRewind(kafkaConsumer, Duration.ofMillis(100)));
             } catch (WakeupException e) {
                 LOG.info("[CPI-KAFKA-PLUS-DIAG] poll: received wakeup signal during auto-pause");
             } catch (Exception e) {
@@ -170,7 +171,7 @@ final class ConsumerCircuitBreaker {
                 new RuntimeException("Auto-paused after " + consecutiveProcessingFailures + " consecutive processing failures"));
     }
 
-    private void setPartitionsPaused(KafkaConsumer<byte[], byte[]> kafkaConsumer, boolean paused) {
+    private void setPartitionsPaused(Consumer<byte[], byte[]> kafkaConsumer, boolean paused) {
         try {
             Set<TopicPartition> assignment = kafkaConsumer.assignment();
             if (!assignment.isEmpty()) {
