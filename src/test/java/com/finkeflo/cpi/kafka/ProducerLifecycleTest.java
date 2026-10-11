@@ -248,7 +248,7 @@ public class ProducerLifecycleTest {
 
     @SuppressWarnings("unchecked")
     private static Set<String> verifiedTopics(CpiKafkaPlusProducer producer) throws Exception {
-        return (Set<String>) getField(producer, "verifiedTopics");
+        return (Set<String>) getField(producer.topicChecker, "verifiedTopics");
     }
 
     private static Object invoke(Object target, String name) throws Exception {
