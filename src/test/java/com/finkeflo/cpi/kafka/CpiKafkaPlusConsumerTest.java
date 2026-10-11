@@ -549,35 +549,35 @@ public class CpiKafkaPlusConsumerTest {
 
     @Test(expected = IllegalArgumentException.class)
     public void validatePollingIntervalSeconds_zero_throws() {
-        CpiKafkaPlusConsumer.validatePollingIntervalSeconds(0);
+        SenderConfigValidator.validatePollingIntervalSeconds(0);
     }
 
     @Test(expected = IllegalArgumentException.class)
     public void validatePollingIntervalSeconds_negative_throws() {
-        CpiKafkaPlusConsumer.validatePollingIntervalSeconds(-1);
+        SenderConfigValidator.validatePollingIntervalSeconds(-1);
     }
 
     @Test(expected = IllegalArgumentException.class)
     public void validatePollingIntervalSeconds_above21600_throws() {
-        CpiKafkaPlusConsumer.validatePollingIntervalSeconds(21601);
+        SenderConfigValidator.validatePollingIntervalSeconds(21601);
     }
 
     @Test
     public void validatePollingIntervalSeconds_21600_doesNotThrow() {
         // 21600 (6 h) is the inclusive upper bound — must not throw.
-        CpiKafkaPlusConsumer.validatePollingIntervalSeconds(21600);
+        SenderConfigValidator.validatePollingIntervalSeconds(21600);
     }
 
     @Test
     public void validatePollingIntervalSeconds_3600_doesNotThrow() {
         // 60 min must still be accepted (was previously the upper bound).
-        CpiKafkaPlusConsumer.validatePollingIntervalSeconds(3600);
+        SenderConfigValidator.validatePollingIntervalSeconds(3600);
     }
 
     @Test
     public void validatePollingIntervalSeconds_5_doesNotThrow() {
         // Default value, must not throw.
-        CpiKafkaPlusConsumer.validatePollingIntervalSeconds(5);
+        SenderConfigValidator.validatePollingIntervalSeconds(5);
     }
 
     @Test
