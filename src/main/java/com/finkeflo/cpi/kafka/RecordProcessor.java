@@ -368,7 +368,7 @@ final class RecordProcessor {
             callback.handleException(
                     "Could not format batch of " + batch.size() + " Kafka records from partition "
                             + batch.get(0).partition(), exchange, (Exception) t);
-            resolveBatchWithoutDlq(kafkaConsumer, batch, action, commitAfterSuccess, progress);
+            blockOrSkip(kafkaConsumer, batch, action, commitAfterSuccess, progress);
             return 0;
         }
 
@@ -397,7 +397,7 @@ final class RecordProcessor {
             callback.handleException(
                     "Error processing batch of " + batch.size() + " Kafka records from partition "
                             + batch.get(0).partition(), exchange, e);
-            resolveBatchWithoutDlq(kafkaConsumer, batch, action, commitAfterSuccess, progress);
+            blockOrSkip(kafkaConsumer, batch, action, commitAfterSuccess, progress);
             return 0;
         }
 
@@ -412,24 +412,6 @@ final class RecordProcessor {
             LOG.debug("[CPI-KAFKA-PLUS-DIAG] processOneBatch: offsets committed for partition {}", tp);
         }
         return batch.size();
-    }
-
-    /** Batch counterpart of {@link #resolveWithoutDlq}. */
-    private void resolveBatchWithoutDlq(Consumer<byte[], byte[]> kafkaConsumer,
-                                        List<ConsumerRecord<byte[], byte[]>> batch,
-                                        RecordFailurePolicy.Action action,
-                                        boolean commitAfterSuccess, PollProgress progress) {
-        TopicPartition tp = partitionOf(batch.get(0));
-        if (action != RecordFailurePolicy.Action.SKIP) {
-            progress.blocked(tp, batch.get(0).offset());
-            return;
-        }
-        for (ConsumerRecord<byte[], byte[]> record : batch) {
-            progress.resolved(tp, record.offset());
-        }
-        if (commitAfterSuccess) {
-            commitProgress(kafkaConsumer, tp, progress);
-        }
     }
 
     private int processRecordWithRetry(Consumer<byte[], byte[]> kafkaConsumer,
@@ -575,7 +557,7 @@ final class RecordProcessor {
             return true;
         }
         // Without a DLQ an invalid record is dropped, as documented for JSON Schema validation.
-        resolveWithoutDlq(kafkaConsumer, record, action, commitAfterSuccess, progress);
+        blockOrSkip(kafkaConsumer, record, action, commitAfterSuccess, progress);
         return true;
     }
 
@@ -677,7 +659,7 @@ final class RecordProcessor {
             Exchange traceExchange = callback.createExchange();
             tracingHelper.traceError(traceExchange, lastError, context, true);
             tracingHelper.reportFailure(traceExchange, lastError, errorCode, context, true);
-            resolveWithoutDlq(kafkaConsumer, record, decision.action(), commitAfterSuccess, progress);
+            blockOrSkip(kafkaConsumer, record, decision.action(), commitAfterSuccess, progress);
         }
 
         Exchange errorExchange = callback.createExchange();
@@ -687,20 +669,29 @@ final class RecordProcessor {
     }
 
     /**
-     * What happens to a failed record when there is no DLQ, as chosen by {@code errorHandling}:
-     * Retry Failed Message (default) blocks the partition at the record so it is retried after a
-     * backoff; Skip Failed Message resolves it (at-most-once), so the next commit may pass it.
+     * Carries out the policy's decision for a failed record without a DLQ write: a skip resolves it
+     * (at-most-once), so the next commit may pass it; anything else blocks the partition at the
+     * record, so it is retried after a backoff.
      */
-    private void resolveWithoutDlq(Consumer<byte[], byte[]> kafkaConsumer,
-                                   ConsumerRecord<byte[], byte[]> record,
-                                   RecordFailurePolicy.Action action,
-                                   boolean commitAfterSuccess, PollProgress progress) {
-        TopicPartition tp = partitionOf(record);
+    private void blockOrSkip(Consumer<byte[], byte[]> kafkaConsumer, ConsumerRecord<byte[], byte[]> record,
+                             RecordFailurePolicy.Action action, boolean commitAfterSuccess,
+                             PollProgress progress) {
+        blockOrSkip(kafkaConsumer, java.util.Collections.singletonList(record), action, commitAfterSuccess,
+                progress);
+    }
+
+    /** The same for a failed batch: a skip resolves all its records, a block stops at the first. */
+    private void blockOrSkip(Consumer<byte[], byte[]> kafkaConsumer, List<ConsumerRecord<byte[], byte[]>> records,
+                             RecordFailurePolicy.Action action, boolean commitAfterSuccess,
+                             PollProgress progress) {
+        TopicPartition tp = partitionOf(records.get(0));
         if (action != RecordFailurePolicy.Action.SKIP) {
-            progress.blocked(tp, record.offset());
+            progress.blocked(tp, records.get(0).offset());
             return;
         }
-        progress.resolved(tp, record.offset());
+        for (ConsumerRecord<byte[], byte[]> record : records) {
+            progress.resolved(tp, record.offset());
+        }
         if (commitAfterSuccess) {
             commitProgress(kafkaConsumer, tp, progress);
         }
@@ -753,7 +744,7 @@ final class RecordProcessor {
         TopicPartition tp = partitionOf(record);
         RecordFailurePolicy.Action action = failurePolicy.forDeserializationFailure();
         if (action != RecordFailurePolicy.Action.DEAD_LETTER) {
-            resolveWithoutDlq(kafkaConsumer, record, action, commitAfterSuccess, progress);
+            blockOrSkip(kafkaConsumer, record, action, commitAfterSuccess, progress);
             callback.handleException("Could not deserialize Kafka record at offset " + record.offset(),
                     callback.createExchange(), cause);
             return 0;
