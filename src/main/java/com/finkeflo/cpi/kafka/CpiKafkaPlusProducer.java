@@ -58,7 +58,6 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
     /** Rate limit for {@code send.bundle-wiring-invalid}: every failing exchange hits it until the iFlow is redeployed. */
     private static final long CLASS_SPACE_GONE_LOG_INTERVAL_MS = 60_000L;
     private volatile long lastClassSpaceGoneLogMs;
-    private static final Duration TXN_PRODUCER_CLOSE_TIMEOUT = Duration.ofSeconds(5);
     /**
      * Upper bound for {@code deliveryTimeoutSeconds} on a transactional channel. The adapter derives
      * {@code transaction.timeout.ms} from the delivery timeout (see
@@ -145,21 +144,17 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
      * and the shared Testcontainers Kafka instance rules out stopping the broker itself.
      */
     java.util.function.Function<Properties, KafkaProducer<byte[], byte[]>> txnProducerFactory =
-            this::createTransactionalProducer;
+            TransactionalProducerPool::createTransactionalProducer;
     private AvroSerializerHelper avroHelper;
     private AdapterTracingHelper tracingHelper;
     private JsonSchemaValidator jsonSchemaValidator;
 
-    private java.util.concurrent.Semaphore txnSlotSemaphore;
-    private boolean[] txnSlotInUse;
-    private String resolvedMemberSuffix;
     /**
-     * Short (8 hex-char) SHA-256 digest of the target topic name. Included in every
-     * {@code transactional.id} so that two producers with the same
-     * {@code transactionalIdPrefix} but different target topics never share an id —
-     * which would cause them to fence each other on every call.
+     * The transaction slots and the {@code transactional.id} they stand for, built in
+     * {@code doStart()} when transactional batching is on. Package-private so a test can supply
+     * one without a start.
      */
-    private String topicHash;
+    TransactionalProducerPool txnPool;
 
     private volatile boolean initialized = false;
     private volatile boolean helpersInitialized = false;
@@ -299,47 +294,8 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
                         + ") — with transactional batching enabled, a value below 1 would leave the "
                         + "adapter unable to send anything");
             }
-            // Resolved once at startup and reused for every transactional.id below — avoids
-            // re-reading env vars per exchange and prevents a literal "null" segment in the
-            // transactional.id, which would cause fencing collisions between worker nodes that both
-            // fail to resolve a suffix. If neither CF_INSTANCE_INDEX nor HOSTNAME is available, fall
-            // back to a random-but-unique suffix rather than hard-failing startup: this keeps the
-            // adapter usable in environments without those env vars, at the cost of the
-            // transactional.id no longer being stable across restarts on the same node (so a
-            // crashed producer's old transactional.id will not be actively fenced by the new one —
-            // it will simply expire via transaction.timeout.ms).
-            resolvedMemberSuffix = NodeIdentity.memberSuffix();
-            if (resolvedMemberSuffix == null) {
-                resolvedMemberSuffix = "r" + java.util.UUID.randomUUID().toString().replace("-", "").substring(0, 12);
-                LOG.warn("[CPI-KAFKA-PLUS-DIAG] Could not determine a stable identifier for this worker node, "
-                        + "so a random one ('{}') will be used instead. This is safe, but note that it will "
-                        + "change on every restart.",
-                        resolvedMemberSuffix);
-            }
-
-            // A short hash of the target topic is included in every transactional.id so that two
-            // producers configured with the same transactionalIdPrefix but different target topics
-            // (a common copy-paste pattern) never share an id. Shared ids cause constant mutual
-            // fencing: each new producer bumps the epoch and invalidates all concurrent ones.
-            topicHash = NodeIdentity.computeTopicHash(endpoint.getEffectiveTopic());
-
-            // Validate that the resulting id fits within a safe length budget before any producer
-            // is created. Prefix + hash + memberSuffix + slotId + separators must stay short enough
-            // to be handled by all Kafka broker versions without truncation.
-            String exampleId = endpoint.getTransactionalIdPrefix() + "-" + topicHash
-                    + "-" + resolvedMemberSuffix + "-0";
-            if (exampleId.length() > 249) {
-                throw new IllegalArgumentException(
-                        "The computed transactional.id '" + exampleId + "' is " + exampleId.length()
-                        + " characters long. Please shorten transactionalIdPrefix to keep it under 249 characters.");
-            }
-
-            txnSlotSemaphore = new java.util.concurrent.Semaphore(slots, true);
-            txnSlotInUse = new boolean[slots];
-            LOG.info("[CPI-KAFKA-PLUS-DIAG] Transactional batching enabled with max {} concurrent transactions. "
-                    + "Prefix: {}, topicHash: {}, memberSuffix: {}, example transactional.id: {}",
-                    slots, endpoint.getTransactionalIdPrefix(), topicHash, resolvedMemberSuffix,
-                    exampleId);
+            txnPool = TransactionalProducerPool.start(endpoint::getTransactionalIdPrefix,
+                    endpoint.getEffectiveTopic(), slots);
         }
 
         validateRetryConfiguration();
@@ -414,7 +370,7 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
         int deliveryTimeoutSeconds = endpoint.getDeliveryTimeoutSeconds();
 
         long worstCase = ProducerRetryPolicy.worstCaseSeconds(maxAttempts, deliveryTimeoutSeconds,
-                delaySeconds, (int) TXN_PRODUCER_CLOSE_TIMEOUT.getSeconds(), transactional);
+                delaySeconds, (int) TransactionalProducerPool.TXN_PRODUCER_CLOSE_TIMEOUT.getSeconds(), transactional);
         if (worstCase > budgetSeconds) {
             throw new IllegalArgumentException(
                     "Producer retry is configured with a worst case of " + worstCase
@@ -722,33 +678,15 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
 
         int slotId = -1;
         String transactionalId = null;
-        try {
-            txnSlotSemaphore.acquire();
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new RuntimeException("Interrupted while waiting for a transaction slot", e);
-        }
+        txnPool.acquire();
 
         try {
-            synchronized (txnSlotInUse) {
-                for (int i = 0; i < txnSlotInUse.length; i++) {
-                    if (!txnSlotInUse[i]) {
-                        txnSlotInUse[i] = true;
-                        slotId = i;
-                        break;
-                    }
-                }
-            }
-            if (slotId == -1) {
-                throw new IllegalStateException("Acquired semaphore but no slot was free. This is a bug.");
-            }
+            slotId = txnPool.claimFreeSlot();
 
-            // resolvedMemberSuffix and topicHash are resolved once (fail-fast) in doStart() — never null here.
             // The id is computed once, outside the retry loop, so every attempt of this message uses
             // the same transactional.id. That is what lets the successor producer fence the epoch of
             // the failed one and have the broker clean up its dangling transaction.
-            transactionalId = endpoint.getTransactionalIdPrefix() + "-" + topicHash
-                    + "-" + resolvedMemberSuffix + "-" + slotId;
+            transactionalId = txnPool.transactionalId(slotId);
 
             java.util.Properties props = ProducerConfigFactory.buildProducerProperties(endpoint);
             props.put(org.apache.kafka.clients.producer.ProducerConfig.TRANSACTIONAL_ID_CONFIG, transactionalId);
@@ -756,12 +694,7 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
             runTransactionalAttempts(in, topic, batchMode, records, fallbackKey, partition, timestamp,
                     valueSerializer, props, transactionalId, slotId);
         } finally {
-            if (slotId != -1) {
-                synchronized (txnSlotInUse) {
-                    txnSlotInUse[slotId] = false;
-                }
-            }
-            txnSlotSemaphore.release();
+            txnPool.release(slotId);
         }
     }
 
@@ -837,7 +770,7 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
                 logRetryAttempt(attempt, maxAttempts, phase, e, topic, transactionalId, slotId,
                         budgetDeadlineMs);
             } finally {
-                closeTxnProducerQuietly(txnProducer, slotId);
+                TransactionalProducerPool.closeTxnProducerQuietly(txnProducer, slotId);
             }
 
             if (!sleepBetweenAttempts(delayMs)) {
@@ -860,6 +793,7 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
         ctx.put("batchMode", batchMode);
         ctx.put("transactionalId", transactionalId != null ? transactionalId : "(not yet assigned)");
         ctx.put("slotId", String.valueOf(slotId));
+        String topicHash = txnPool.topicHash();
         ctx.put("topicHash", topicHash != null ? topicHash : "(not yet computed)");
         ctx.put("retryAttempts", String.valueOf(attemptsMade));
         ctx.put("txnPhase", String.valueOf(phase));
@@ -875,23 +809,6 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
         throw sendFailure("Failed to send transactional batch to", topic, lastError);
     }
 
-    /**
-     * Bounded close of a throw-away transactional producer. An unreachable broker must not hang
-     * here indefinitely, since the transaction slot is only released once every attempt has closed
-     * its producer. Without a timeout, a broker outage could permanently exhaust all txn slots.
-     */
-    private void closeTxnProducerQuietly(KafkaProducer<byte[], byte[]> txnProducer, int slotId) {
-        if (txnProducer == null) {
-            return;
-        }
-        try {
-            txnProducer.close(TXN_PRODUCER_CLOSE_TIMEOUT);
-        } catch (Exception closeEx) {
-            LOG.warn("[CPI-KAFKA-PLUS-DIAG] Failed to close transactional producer for slot {}: {}",
-                    slotId, closeEx.getMessage(), closeEx);
-        }
-    }
-
     /** @return false if the wait was interrupted, in which case no further attempt may be made */
     private boolean sleepBetweenAttempts(long delayMs) {
         if (delayMs <= 0) {
@@ -903,24 +820,6 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
         } catch (InterruptedException ie) {
             Thread.currentThread().interrupt();
             return false;
-        }
-    }
-
-    /** Default implementation behind {@link #txnProducerFactory}. */
-    private KafkaProducer<byte[], byte[]> createTransactionalProducer(Properties props) {
-        try {
-            return BundleBackedClassLoader.withBundleClassLoader(getClass(),
-                    () -> new KafkaProducer<>(props,
-                            new org.apache.kafka.common.serialization.ByteArraySerializer(),
-                            new org.apache.kafka.common.serialization.ByteArraySerializer()));
-        } catch (RuntimeException e) {
-            throw e;
-        } catch (Exception e) {
-            // The callable itself only throws unchecked exceptions; the checked signature comes
-            // from the class-loader wrapper. Wrapped rather than swallowed so the cause chain — and
-            // with it the retry classification — stays intact.
-            throw new org.apache.kafka.common.KafkaException(
-                    "Failed to create the transactional producer", e);
         }
     }
 
