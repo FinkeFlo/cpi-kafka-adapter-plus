@@ -371,25 +371,25 @@ public class CpiKafkaPlusConsumerTest {
 
     @Test
     public void testIsNonRetryablePollFailureWithSaslAuthenticationException() {
-        Assert.assertTrue(CpiKafkaPlusConsumer.isNonRetryablePollFailure(
+        Assert.assertTrue(PollFailureClassifier.isNonRetryablePollFailure(
                 new SaslAuthenticationException("bad credentials")));
     }
 
     @Test
     public void testIsNonRetryablePollFailureWithTopicAuthorizationException() {
-        Assert.assertTrue(CpiKafkaPlusConsumer.isNonRetryablePollFailure(
+        Assert.assertTrue(PollFailureClassifier.isNonRetryablePollFailure(
                 new TopicAuthorizationException(java.util.Collections.singleton("topic-a"))));
     }
 
     @Test
     public void testIsNonRetryablePollFailureWithSslHandshakeCause() {
-        Assert.assertTrue(CpiKafkaPlusConsumer.isNonRetryablePollFailure(
+        Assert.assertTrue(PollFailureClassifier.isNonRetryablePollFailure(
                 new RuntimeException("wrapped", new SSLHandshakeException("handshake failed"))));
     }
 
     @Test
     public void testIsNonRetryablePollFailureWithWrappedAuthenticationCause() {
-        Assert.assertTrue(CpiKafkaPlusConsumer.isNonRetryablePollFailure(
+        Assert.assertTrue(PollFailureClassifier.isNonRetryablePollFailure(
                 new RuntimeException("wrapped",
                         new IllegalStateException("mid",
                                 new SaslAuthenticationException("auth failed")))));
@@ -397,41 +397,41 @@ public class CpiKafkaPlusConsumerTest {
 
     @Test
     public void testIsNonRetryablePollFailureWithPlainAuthenticationException() {
-        Assert.assertTrue(CpiKafkaPlusConsumer.isNonRetryablePollFailure(
+        Assert.assertTrue(PollFailureClassifier.isNonRetryablePollFailure(
                 new AuthenticationException("authentication failed")));
     }
 
     @Test
     public void testIsNonRetryablePollFailureWithSslAuthenticationException() {
-        Assert.assertTrue(CpiKafkaPlusConsumer.isNonRetryablePollFailure(
+        Assert.assertTrue(PollFailureClassifier.isNonRetryablePollFailure(
                 new SslAuthenticationException("SSL handshake failed")));
     }
 
     @Test
     public void testIsNonRetryablePollFailureWithGroupAuthorizationException() {
-        Assert.assertTrue(CpiKafkaPlusConsumer.isNonRetryablePollFailure(
+        Assert.assertTrue(PollFailureClassifier.isNonRetryablePollFailure(
                 new GroupAuthorizationException("Not authorized to access group: group-a")));
     }
 
     @Test(timeout = 10_000)
     public void testIsNonRetryablePollFailureStopsAtASelfCausedThrowable() {
-        Assert.assertFalse(CpiKafkaPlusConsumer.isNonRetryablePollFailure(new SelfCausedException()));
+        Assert.assertFalse(PollFailureClassifier.isNonRetryablePollFailure(new SelfCausedException()));
     }
 
     @Test
     public void testIsNonRetryablePollFailureWithNull() {
-        Assert.assertFalse(CpiKafkaPlusConsumer.isNonRetryablePollFailure(null));
+        Assert.assertFalse(PollFailureClassifier.isNonRetryablePollFailure(null));
     }
 
     @Test
     public void testIsNonRetryablePollFailureWithTimeoutExceptionDefaultsToRetryable() {
-        Assert.assertFalse(CpiKafkaPlusConsumer.isNonRetryablePollFailure(
+        Assert.assertFalse(PollFailureClassifier.isNonRetryablePollFailure(
                 new TimeoutException("broker timeout")));
     }
 
     @Test
     public void testIsNonRetryablePollFailureWithUnknownExceptionDefaultsToRetryable() {
-        Assert.assertFalse(CpiKafkaPlusConsumer.isNonRetryablePollFailure(
+        Assert.assertFalse(PollFailureClassifier.isNonRetryablePollFailure(
                 new RuntimeException("unknown")));
     }
 
@@ -464,7 +464,7 @@ public class CpiKafkaPlusConsumerTest {
 
     @Test
     public void testIsFencedInstanceIdFailureWithDirectException() {
-        Assert.assertTrue(CpiKafkaPlusConsumer.isFencedInstanceIdFailure(
+        Assert.assertTrue(PollFailureClassifier.isFencedInstanceIdFailure(
                 new org.apache.kafka.common.errors.FencedInstanceIdException(
                         "The broker rejected this static consumer since another consumer with the same "
                                 + "group.instance.id has registered with a different member.id.")));
@@ -472,25 +472,25 @@ public class CpiKafkaPlusConsumerTest {
 
     @Test
     public void testIsFencedInstanceIdFailureWithWrappedCause() {
-        Assert.assertTrue(CpiKafkaPlusConsumer.isFencedInstanceIdFailure(
+        Assert.assertTrue(PollFailureClassifier.isFencedInstanceIdFailure(
                 new RuntimeException("wrapped",
                         new org.apache.kafka.common.errors.FencedInstanceIdException("fenced"))));
     }
 
     @Test
     public void testIsFencedInstanceIdFailureFalseForUnrelatedException() {
-        Assert.assertFalse(CpiKafkaPlusConsumer.isFencedInstanceIdFailure(
+        Assert.assertFalse(PollFailureClassifier.isFencedInstanceIdFailure(
                 new RuntimeException("unrelated")));
     }
 
     @Test(timeout = 10_000)
     public void testIsFencedInstanceIdFailureStopsAtASelfCausedThrowable() {
-        Assert.assertFalse(CpiKafkaPlusConsumer.isFencedInstanceIdFailure(new SelfCausedException()));
+        Assert.assertFalse(PollFailureClassifier.isFencedInstanceIdFailure(new SelfCausedException()));
     }
 
     @Test
     public void testIsFencedInstanceIdFailureWithNull() {
-        Assert.assertFalse(CpiKafkaPlusConsumer.isFencedInstanceIdFailure(null));
+        Assert.assertFalse(PollFailureClassifier.isFencedInstanceIdFailure(null));
     }
 
     @Test

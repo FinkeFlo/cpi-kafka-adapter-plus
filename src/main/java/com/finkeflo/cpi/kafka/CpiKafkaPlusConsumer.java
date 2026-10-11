@@ -36,19 +36,13 @@ import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.common.TopicPartition;
-import org.apache.kafka.common.errors.AuthenticationException;
-import org.apache.kafka.common.errors.AuthorizationException;
 import org.apache.kafka.common.errors.FencedInstanceIdException;
 import org.apache.kafka.common.errors.RecordDeserializationException;
-import org.apache.kafka.common.errors.SaslAuthenticationException;
-import org.apache.kafka.common.errors.SslAuthenticationException;
 import org.apache.kafka.common.errors.WakeupException;
 import org.apache.kafka.common.header.Headers;
 import org.apache.kafka.common.serialization.ByteArrayDeserializer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import javax.net.ssl.SSLHandshakeException;
 
 public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
 
@@ -876,11 +870,11 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
         } catch (WakeupException we) {
             LOG.info("[CPI-KAFKA-PLUS-DIAG] keepAlivePoll: received wakeup signal");
         } catch (Exception e) {
-            if (isNonRetryablePollFailure(e)) {
+            if (PollFailureClassifier.isNonRetryablePollFailure(e)) {
                 handleNonRetryablePollFailure(e);
-            } else if (isFencedInstanceIdFailure(e)) {
+            } else if (PollFailureClassifier.isFencedInstanceIdFailure(e)) {
                 handleFencedInstanceIdFailure(e);
-            } else if (isClassSpaceGoneFailure(e)) {
+            } else if (PollFailureClassifier.isClassSpaceGoneFailure(e, getClass())) {
                 handleBundleWiringInvalidFailure(e);
             } else {
                 LOG.warn("[CPI-KAFKA-PLUS-DIAG] keepAlivePoll: best-effort poll failed: {}", e.getMessage());
@@ -983,11 +977,11 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
                     t.getCause() != null ? t.getCause().getClass().getName() : "null",
                     t.getCause() != null ? t.getCause().getMessage() : "null",
                     describeTopStack(t, 6));
-            if (isNonRetryablePollFailure(t)) {
+            if (PollFailureClassifier.isNonRetryablePollFailure(t)) {
                 handleNonRetryablePollFailure(t);
-            } else if (isFencedInstanceIdFailure(t)) {
+            } else if (PollFailureClassifier.isFencedInstanceIdFailure(t)) {
                 handleFencedInstanceIdFailure(t);
-            } else if (isClassSpaceGoneFailure(t)) {
+            } else if (PollFailureClassifier.isClassSpaceGoneFailure(t, getClass())) {
                 handleBundleWiringInvalidFailure(t);
             } else {
                 // A client without TLS against a TLS-only listener never gets far enough to see a
@@ -1059,49 +1053,11 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
     }
 
     /**
-     * Returns {@code true} when the poll failure is caused by a permanent configuration or
-     * access problem that cannot heal via reconnects alone. Walks the full cause chain because
-     * Kafka often wraps the effective broker error inside transport/runtime exceptions.
-     * Unknown failures deliberately default to retryable to avoid false-positive permanent stops.
-     */
-    static boolean isNonRetryablePollFailure(Throwable failure) {
-        return findNonRetryablePollFailureCause(failure) != null;
-    }
-
-    /**
-     * Detects the class-space break of issue #148 on the poll path: either the OSGi
-     * "bundle wiring ... no longer valid" text, or a class/link/native-library fault while this
-     * route's loader belongs to a bundle revision an adapter update has already replaced.
-     */
-    private boolean isClassSpaceGoneFailure(Throwable failure) {
-        return ClassSpaceFaults.isOnStaleClassSpace(failure, getClass());
-    }
-
-    private static Throwable findNonRetryablePollFailureCause(Throwable failure) {
-        Throwable current = failure;
-        while (current != null) {
-            if (current instanceof SaslAuthenticationException
-                    || current instanceof AuthenticationException
-                    || current instanceof AuthorizationException
-                    || current instanceof SslAuthenticationException
-                    || current instanceof SSLHandshakeException) {
-                return current;
-            }
-            Throwable next = current.getCause();
-            if (next == current) {
-                break;
-            }
-            current = next;
-        }
-        return null;
-    }
-
-    /**
      * Builds a clear operator-facing error that explains why the consumer will not retry until
      * the integration flow is restarted with fixed credentials, permissions, or certificates.
      */
     static IllegalStateException buildStoppedByErrorPolicyException(String topic, String groupId, Throwable failure) {
-        Throwable effectiveCause = findNonRetryablePollFailureCause(failure);
+        Throwable effectiveCause = PollFailureClassifier.findNonRetryablePollFailureCause(failure);
         if (effectiveCause == null) {
             effectiveCause = failure;
         }
@@ -1125,26 +1081,6 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
         tracingHelper.publishConnectionStatus(false, policyError);
         lastStoppedByErrorReminderMs = 0L;
         logStoppedByErrorReminderIfDue();
-    }
-
-    /**
-     * Detects a {@link FencedInstanceIdException} anywhere in the cause chain — the broker
-     * rejecting a poll/rebalance because another member already holds this consumer's static
-     * {@code group.instance.id} (KIP-345 conflict, issue #146).
-     */
-    static boolean isFencedInstanceIdFailure(Throwable failure) {
-        Throwable current = failure;
-        while (current != null) {
-            if (current instanceof FencedInstanceIdException) {
-                return true;
-            }
-            Throwable next = current.getCause();
-            if (next == current) {
-                break;
-            }
-            current = next;
-        }
-        return false;
     }
 
     /**
