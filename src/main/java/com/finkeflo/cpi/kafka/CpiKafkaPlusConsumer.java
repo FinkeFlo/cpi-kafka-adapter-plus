@@ -27,6 +27,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Properties;
 import java.util.Set;
+import java.util.function.UnaryOperator;
 
 import org.apache.camel.CamelExchangeException;
 import org.apache.camel.Exchange;
@@ -1667,11 +1668,19 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
      * behavior using whichever env vars are present in the test JVM.
      */
     static String resolveStaticMemberSuffix() {
-        String cfInstance = System.getenv("CF_INSTANCE_INDEX");
+        return resolveStaticMemberSuffix(System::getenv);
+    }
+
+    /**
+     * As {@link #resolveStaticMemberSuffix()}, reading the variables through {@code env} so tests
+     * can supply them.
+     */
+    static String resolveStaticMemberSuffix(UnaryOperator<String> env) {
+        String cfInstance = env.apply("CF_INSTANCE_INDEX");
         if (cfInstance != null && !cfInstance.isEmpty()) {
             return cfInstance;
         }
-        String hostname = System.getenv("HOSTNAME");
+        String hostname = env.apply("HOSTNAME");
         return (hostname != null && !hostname.isEmpty()) ? hostname : null;
     }
 
