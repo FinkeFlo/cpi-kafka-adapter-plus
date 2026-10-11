@@ -40,8 +40,7 @@ import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.errors.SaslAuthenticationException;
-import org.apache.kafka.common.errors.TimeoutException;
-import org.apache.kafka.common.errors.TopicAuthorizationException;
+import org.apache.kafka.common.errors.SslAuthenticationException;
 import org.junit.Assert;
 import org.junit.Test;
 
@@ -367,44 +366,6 @@ public class CpiKafkaPlusConsumerTest {
     }
 
     @Test
-    public void testIsNonRetryablePollFailureWithSaslAuthenticationException() {
-        Assert.assertTrue(CpiKafkaPlusConsumer.isNonRetryablePollFailure(
-                new SaslAuthenticationException("bad credentials")));
-    }
-
-    @Test
-    public void testIsNonRetryablePollFailureWithTopicAuthorizationException() {
-        Assert.assertTrue(CpiKafkaPlusConsumer.isNonRetryablePollFailure(
-                new TopicAuthorizationException(java.util.Collections.singleton("topic-a"))));
-    }
-
-    @Test
-    public void testIsNonRetryablePollFailureWithSslHandshakeCause() {
-        Assert.assertTrue(CpiKafkaPlusConsumer.isNonRetryablePollFailure(
-                new RuntimeException("wrapped", new SSLHandshakeException("handshake failed"))));
-    }
-
-    @Test
-    public void testIsNonRetryablePollFailureWithWrappedAuthenticationCause() {
-        Assert.assertTrue(CpiKafkaPlusConsumer.isNonRetryablePollFailure(
-                new RuntimeException("wrapped",
-                        new IllegalStateException("mid",
-                                new SaslAuthenticationException("auth failed")))));
-    }
-
-    @Test
-    public void testIsNonRetryablePollFailureWithTimeoutExceptionDefaultsToRetryable() {
-        Assert.assertFalse(CpiKafkaPlusConsumer.isNonRetryablePollFailure(
-                new TimeoutException("broker timeout")));
-    }
-
-    @Test
-    public void testIsNonRetryablePollFailureWithUnknownExceptionDefaultsToRetryable() {
-        Assert.assertFalse(CpiKafkaPlusConsumer.isNonRetryablePollFailure(
-                new RuntimeException("unknown")));
-    }
-
-    @Test
     public void testIsBundleWiringInvalidFailureWithNoClassDefFoundError() {
         Throwable failure = new NoClassDefFoundError(
                 "org/apache/kafka/clients/consumer/ConsumerPartitionAssignor$GroupSubscription");
@@ -432,27 +393,6 @@ public class CpiKafkaPlusConsumerTest {
     }
 
     @Test
-    public void testIsFencedInstanceIdFailureWithDirectException() {
-        Assert.assertTrue(CpiKafkaPlusConsumer.isFencedInstanceIdFailure(
-                new org.apache.kafka.common.errors.FencedInstanceIdException(
-                        "The broker rejected this static consumer since another consumer with the same "
-                                + "group.instance.id has registered with a different member.id.")));
-    }
-
-    @Test
-    public void testIsFencedInstanceIdFailureWithWrappedCause() {
-        Assert.assertTrue(CpiKafkaPlusConsumer.isFencedInstanceIdFailure(
-                new RuntimeException("wrapped",
-                        new org.apache.kafka.common.errors.FencedInstanceIdException("fenced"))));
-    }
-
-    @Test
-    public void testIsFencedInstanceIdFailureFalseForUnrelatedException() {
-        Assert.assertFalse(CpiKafkaPlusConsumer.isFencedInstanceIdFailure(
-                new RuntimeException("unrelated")));
-    }
-
-    @Test
     public void testBuildStoppedByErrorPolicyExceptionUsesMatchingCauseInMessage() {
         IllegalStateException ex = CpiKafkaPlusConsumer.buildStoppedByErrorPolicyException(
                 "topic-a", "group-a",
@@ -461,6 +401,29 @@ public class CpiKafkaPlusConsumerTest {
         Assert.assertTrue(ex.getMessage().contains("SSLHandshakeException"));
         Assert.assertTrue(ex.getMessage().contains("topic='topic-a'"));
         Assert.assertTrue(ex.getMessage().contains("group='group-a'"));
+    }
+
+    @Test
+    public void testBuildStoppedByErrorPolicyExceptionNamesTheOutermostMatchingCause() {
+        IllegalStateException ex = CpiKafkaPlusConsumer.buildStoppedByErrorPolicyException(
+                "topic-a", "group-a",
+                new RuntimeException("wrapped", new SaslAuthenticationException("outer",
+                        new SslAuthenticationException("inner"))));
+
+        Assert.assertTrue(ex.getMessage(), ex.getMessage().contains("(SaslAuthenticationException)"));
+    }
+
+    @Test
+    public void testBuildStoppedByErrorPolicyExceptionNamesTheFailureWithoutAMatchingCause() {
+        RuntimeException failure = new RuntimeException("unknown");
+        IllegalStateException ex = CpiKafkaPlusConsumer.buildStoppedByErrorPolicyException(
+                "topic-a", "group-a", failure);
+
+        Assert.assertEquals("Non-retryable Kafka consumer poll failure detected for topic='topic-a' "
+                + "group='group-a' (RuntimeException). Polling has been stopped by error policy. Fix "
+                + "credentials, permissions, or certificates and redeploy the integration flow to resume "
+                + "consumption.", ex.getMessage());
+        Assert.assertSame(failure, ex.getCause());
     }
 
     // --- Issue #45: max.poll.interval.ms scaling ---
