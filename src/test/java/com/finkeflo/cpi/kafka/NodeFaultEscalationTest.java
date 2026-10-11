@@ -26,82 +26,34 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.lang.reflect.Field;
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicLong;
 
 import org.apache.camel.impl.DefaultCamelContext;
-import org.junit.After;
-import org.junit.Before;
 import org.junit.Test;
 
 import com.finkeflo.cpi.kafka.KafkaErrorHelper.Classification;
 
 /**
- * Characterization tests for the node-fault escalation (e4b, c6, c6b): fault identity for causes
- * that are not an {@link Exception}, the classifications that are tracked, the window reset and the
- * content and logger category of the {@code producer.node.fault.escalation} diagnostic.
+ * Unit tests for {@link NodeFaultEscalation} (e4b, c6, c6b): fault identity for causes that are not
+ * an {@link Exception}, the classifications that are tracked, the window and the content and logger
+ * category of the {@code producer.node.fault.escalation} diagnostic. No Camel context and no broker,
+ * except for the one test that checks how {@link CpiKafkaPlusProducer} wires its endpoint in.
  */
 public class NodeFaultEscalationTest {
 
     private static final String ESCALATION = "producer.node.fault.escalation";
+    private static final long WINDOW_MS = 20 * 60 * 1000L;
 
-    private DefaultCamelContext camelContext;
+    /**
+     * Starts far from 0: the window start is initialised to 0, so the first fault only opens a
+     * window when {@code now} is more than one window past it, as it always is with the wall clock.
+     */
+    private final AtomicLong clock = new AtomicLong(1_000_000_000_000L);
 
-    @Before
-    public void setUp() throws Exception {
-        camelContext = new DefaultCamelContext();
-        camelContext.start();
-    }
-
-    @After
-    public void tearDown() throws Exception {
-        camelContext.stop();
-    }
-
-    private CpiKafkaPlusProducer newProducer(boolean diagnosticsFull) throws Exception {
-        CpiKafkaPlusEndpoint endpoint = new CpiKafkaPlusEndpoint();
-        endpoint.setCamelContext(camelContext);
-        endpoint.setBootstrapServers("broker-a:9092");
-        endpoint.setTopic("test-topic");
-        endpoint.setSecurityProtocol("PLAINTEXT");
-        if (diagnosticsFull) {
-            endpoint.setDiagnosticsLevel("FULL");
-        }
-        CpiKafkaPlusProducer producer = new CpiKafkaPlusProducer(endpoint);
-        Field clientId = CpiKafkaPlusProducer.class.getDeclaredField("resolvedClientId");
-        clientId.setAccessible(true);
-        clientId.set(producer, "client-1");
-        return producer;
-    }
-
-    private static void check(CpiKafkaPlusProducer producer, Classification classification,
-                              CpiKafkaPlusErrorCode errorCode, Throwable cause) throws Exception {
-        Method m = CpiKafkaPlusProducer.class.getDeclaredMethod(
-                "checkNodeFaultEscalation", Classification.class, CpiKafkaPlusErrorCode.class, Throwable.class);
-        m.setAccessible(true);
-        try {
-            m.invoke(producer, classification, errorCode, cause);
-        } catch (InvocationTargetException e) {
-            throw (Exception) e.getCause();
-        }
-    }
-
-    private static Throwable resolveCause(CpiKafkaPlusProducer producer, Throwable cause) throws Exception {
-        Method m = CpiKafkaPlusProducer.class.getDeclaredMethod("resolveNodeFaultIdentityCause", Throwable.class);
-        m.setAccessible(true);
-        return (Throwable) m.invoke(producer, cause);
-    }
-
-    private static Object field(CpiKafkaPlusProducer producer, String name) throws Exception {
-        Field f = CpiKafkaPlusProducer.class.getDeclaredField(name);
-        f.setAccessible(true);
-        return f.get(producer);
-    }
-
-    private static void setField(CpiKafkaPlusProducer producer, String name, Object value) throws Exception {
-        Field f = CpiKafkaPlusProducer.class.getDeclaredField(name);
-        f.setAccessible(true);
-        f.set(producer, value);
+    private NodeFaultEscalation newEscalation(boolean diagnosticsFull) {
+        return new NodeFaultEscalation(() -> "test-topic", () -> diagnosticsFull, () -> "client-1", clock::get);
     }
 
     private interface ThrowingRunnable {
@@ -128,34 +80,41 @@ public class NodeFaultEscalationTest {
         return logged.lines().filter(l -> l.contains(ESCALATION)).findFirst().orElse("");
     }
 
+    private static void sameFault(NodeFaultEscalation escalation, int times) {
+        for (int i = 0; i < times; i++) {
+            escalation.checkNodeFaultEscalation(Classification.FATAL_PRODUCER_UNUSABLE,
+                    CpiKafkaPlusErrorCode.KP_PROD_001, new RuntimeException("same"));
+        }
+    }
+
     // ─────────────────────────────────────────────────────────────────────────────
     // Fault identity for causes that are not an Exception
     // ─────────────────────────────────────────────────────────────────────────────
 
     @Test
-    public void nullCauseHasNoIdentityCause() throws Exception {
-        assertNull(resolveCause(newProducer(false), null));
+    public void nullCauseHasNoIdentityCause() {
+        assertNull(newEscalation(false).resolveNodeFaultIdentityCause(null));
     }
 
     @Test
-    public void errorCauseResolvesToTheRootOfItsChain() throws Exception {
+    public void errorCauseResolvesToTheRootOfItsChain() {
         IOException root = new IOException("root");
         Error error = new Error("outer", new IllegalStateException("middle", root));
-        assertSame(root, resolveCause(newProducer(false), error));
+        assertSame(root, newEscalation(false).resolveNodeFaultIdentityCause(error));
     }
 
     @Test
-    public void errorWithoutCauseResolvesToItself() throws Exception {
+    public void errorWithoutCauseResolvesToItself() {
         Error error = new OutOfMemoryError("no cause");
-        assertSame(error, resolveCause(newProducer(false), error));
+        assertSame(error, newEscalation(false).resolveNodeFaultIdentityCause(error));
     }
 
     @Test
     public void nullCauseEscalatesAsUnknownFaultClass() throws Exception {
-        CpiKafkaPlusProducer producer = newProducer(false);
+        NodeFaultEscalation escalation = newEscalation(false);
         String logged = captureStderr(() -> {
             for (int i = 0; i < 5; i++) {
-                check(producer, Classification.UNKNOWN_FATAL, CpiKafkaPlusErrorCode.KP_GEN_001, null);
+                escalation.checkNodeFaultEscalation(Classification.UNKNOWN_FATAL, CpiKafkaPlusErrorCode.KP_GEN_001, null);
             }
         });
         assertEquals(1, escalationLines(logged));
@@ -164,10 +123,11 @@ public class NodeFaultEscalationTest {
 
     @Test
     public void errorCauseEscalatesWithTheRootCauseClass() throws Exception {
-        CpiKafkaPlusProducer producer = newProducer(false);
+        NodeFaultEscalation escalation = newEscalation(false);
         String logged = captureStderr(() -> {
             for (int i = 0; i < 5; i++) {
-                check(producer, Classification.FATAL_PRODUCER_UNUSABLE, CpiKafkaPlusErrorCode.KP_PROD_001,
+                escalation.checkNodeFaultEscalation(Classification.FATAL_PRODUCER_UNUSABLE,
+                        CpiKafkaPlusErrorCode.KP_PROD_001,
                         new Error("wrapper " + i, new IllegalMonitorStateException("root")));
             }
         });
@@ -176,14 +136,16 @@ public class NodeFaultEscalationTest {
     }
 
     @Test
-    public void nullAndErrorCausesAreDifferentFaults() throws Exception {
-        CpiKafkaPlusProducer producer = newProducer(false);
+    public void nullAndErrorCausesAreDifferentFaults() {
+        NodeFaultEscalation escalation = newEscalation(false);
         for (int i = 0; i < 4; i++) {
-            check(producer, Classification.UNKNOWN_FATAL, CpiKafkaPlusErrorCode.KP_GEN_001, null);
+            escalation.checkNodeFaultEscalation(Classification.UNKNOWN_FATAL, CpiKafkaPlusErrorCode.KP_GEN_001, null);
         }
-        check(producer, Classification.UNKNOWN_FATAL, CpiKafkaPlusErrorCode.KP_GEN_001, new Error("other"));
-        assertFalse((boolean) field(producer, "nodeFaultEscalated"));
-        assertEquals(1, (int) field(producer, "nodeFaultCountInWindow"));
+        escalation.checkNodeFaultEscalation(Classification.UNKNOWN_FATAL, CpiKafkaPlusErrorCode.KP_GEN_001,
+                new Error("other"));
+        assertFalse(escalation.isEscalated());
+        assertEquals(1, escalation.countInWindow());
+        assertEquals("java.lang.Error:" + CpiKafkaPlusErrorCode.KP_GEN_001.code(), escalation.faultIdentity());
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
@@ -192,34 +154,52 @@ public class NodeFaultEscalationTest {
 
     @Test
     public void retriableAndDataErrorsAreNotTracked() throws Exception {
-        CpiKafkaPlusProducer producer = newProducer(false);
+        NodeFaultEscalation escalation = newEscalation(false);
         String logged = captureStderr(() -> {
             for (int i = 0; i < 10; i++) {
-                check(producer, Classification.RETRIABLE, CpiKafkaPlusErrorCode.KP_PROD_001,
+                escalation.checkNodeFaultEscalation(Classification.RETRIABLE, CpiKafkaPlusErrorCode.KP_PROD_001,
                         new RuntimeException("retriable"));
-                check(producer, Classification.FATAL_DATA_ERROR, CpiKafkaPlusErrorCode.KP_PROD_001,
+                escalation.checkNodeFaultEscalation(Classification.FATAL_DATA_ERROR, CpiKafkaPlusErrorCode.KP_PROD_001,
                         new RuntimeException("data"));
             }
         });
         assertEquals(0, escalationLines(logged));
-        assertEquals(0, (int) field(producer, "nodeFaultCountInWindow"));
-        assertNull(field(producer, "nodeFaultIdentity"));
+        assertEquals(0, escalation.countInWindow());
+        assertNull(escalation.faultIdentity());
     }
 
     @Test
-    public void expiredWindowRestartsTheCount() throws Exception {
-        CpiKafkaPlusProducer producer = newProducer(false);
-        for (int i = 0; i < 4; i++) {
-            check(producer, Classification.FATAL_PRODUCER_UNUSABLE, CpiKafkaPlusErrorCode.KP_PROD_001,
-                    new RuntimeException("same"));
-        }
-        // Move the window start just over 20 minutes into the past.
-        setField(producer, "nodeFaultWindowStartMs", System.currentTimeMillis() - 20 * 60 * 1000L - 1000L);
+    public void expiredWindowRestartsTheCount() {
+        NodeFaultEscalation escalation = newEscalation(false);
+        sameFault(escalation, 4);
+        // Just over 20 minutes later.
+        clock.addAndGet(WINDOW_MS + 1000L);
 
-        check(producer, Classification.FATAL_PRODUCER_UNUSABLE, CpiKafkaPlusErrorCode.KP_PROD_001,
-                new RuntimeException("same"));
-        assertEquals(1, (int) field(producer, "nodeFaultCountInWindow"));
-        assertFalse((boolean) field(producer, "nodeFaultEscalated"));
+        sameFault(escalation, 1);
+        assertEquals(1, escalation.countInWindow());
+        assertFalse(escalation.isEscalated());
+    }
+
+    @Test
+    public void windowIsStillOpenAtExactlyTwentyMinutes() {
+        NodeFaultEscalation escalation = newEscalation(false);
+        sameFault(escalation, 4);
+        clock.addAndGet(WINDOW_MS);
+
+        sameFault(escalation, 1);
+        assertEquals(5, escalation.countInWindow());
+        assertTrue(escalation.isEscalated());
+    }
+
+    @Test
+    public void escalatesAgainInTheNextWindow() throws Exception {
+        NodeFaultEscalation escalation = newEscalation(false);
+        String logged = captureStderr(() -> {
+            sameFault(escalation, 6);
+            clock.addAndGet(WINDOW_MS + 1L);
+            sameFault(escalation, 5);
+        });
+        assertEquals(2, escalationLines(logged));
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
@@ -228,10 +208,11 @@ public class NodeFaultEscalationTest {
 
     @Test
     public void escalationIsLoggedOnceUnderTheProducerCategoryWithJvmState() throws Exception {
-        CpiKafkaPlusProducer producer = newProducer(false);
+        NodeFaultEscalation escalation = newEscalation(false);
         String logged = captureStderr(() -> {
             for (int i = 0; i < 8; i++) {
-                check(producer, Classification.FATAL_PRODUCER_UNUSABLE, CpiKafkaPlusErrorCode.KP_PROD_001,
+                escalation.checkNodeFaultEscalation(Classification.FATAL_PRODUCER_UNUSABLE,
+                        CpiKafkaPlusErrorCode.KP_PROD_001,
                         new RuntimeException("wrapper", new IllegalStateException("root")));
             }
         });
@@ -255,13 +236,8 @@ public class NodeFaultEscalationTest {
 
     @Test
     public void escalationCarriesABoundedThreadDumpAtFullLevel() throws Exception {
-        CpiKafkaPlusProducer producer = newProducer(true);
-        String logged = captureStderr(() -> {
-            for (int i = 0; i < 5; i++) {
-                check(producer, Classification.FATAL_PRODUCER_UNUSABLE, CpiKafkaPlusErrorCode.KP_PROD_001,
-                        new RuntimeException("same"));
-            }
-        });
+        NodeFaultEscalation escalation = newEscalation(true);
+        String logged = captureStderr(() -> sameFault(escalation, 5));
         assertEquals(1, escalationLines(logged));
         String line = escalationLine(logged);
         assertTrue(line, line.contains("threadDump="));
@@ -269,5 +245,61 @@ public class NodeFaultEscalationTest {
         assertTrue(line, line.contains("threadDumpTruncated="));
         assertTrue(line, line.contains("threadDumpTotalThreads="));
         assertTrue(line, line.contains("threadDumpMonitorInfoSupported="));
+    }
+
+    @Test
+    public void failingTopicAndDiagnosticsLookupsDoNotSuppressTheEscalation() throws Exception {
+        NodeFaultEscalation escalation = new NodeFaultEscalation(
+                () -> { throw new IllegalStateException("topic"); },
+                () -> { throw new IllegalStateException("level"); },
+                () -> null, clock::get);
+        String logged = captureStderr(() -> sameFault(escalation, 5));
+        assertEquals(1, escalationLines(logged));
+        String line = escalationLine(logged);
+        assertTrue(line, line.contains("topic=<unavailable>"));
+        assertFalse(line, line.contains("clientId="));
+        assertFalse(line, line.contains("threadDump"));
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Wiring in CpiKafkaPlusProducer
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    @Test
+    public void producerFeedsSendFailuresWithEndpointTopicClientIdAndLevel() throws Exception {
+        try (DefaultCamelContext ctx = new DefaultCamelContext()) {
+            ctx.start();
+            CpiKafkaPlusEndpoint endpoint = new CpiKafkaPlusEndpoint();
+            endpoint.setCamelContext(ctx);
+            endpoint.setBootstrapServers("broker-a:9092");
+            endpoint.setTopic("test-topic");
+            endpoint.setSecurityProtocol("PLAINTEXT");
+            endpoint.setDiagnosticsLevel("FULL");
+            CpiKafkaPlusProducer producer = new CpiKafkaPlusProducer(endpoint);
+            setField(producer, "tracingHelper", new AdapterTracingHelper(endpoint));
+            setField(producer, "resolvedClientId", "client-1");
+
+            Map<String, String> context = new LinkedHashMap<>();
+            context.put("topic", "test-topic");
+            String logged = captureStderr(() -> {
+                for (int i = 0; i < 5; i++) {
+                    producer.handleSendFailure(new IllegalStateException("unclassified"), "producer.send", context);
+                }
+            });
+            assertEquals(1, escalationLines(logged));
+            String line = escalationLine(logged);
+            assertTrue(line, line.contains("ERROR " + CpiKafkaPlusProducer.class.getName() + " - "));
+            assertTrue(line, line.contains("classification=UNKNOWN_FATAL"));
+            assertTrue(line, line.contains("countInWindow=5"));
+            assertTrue(line, line.contains("clientId=client-1"));
+            assertTrue(line, line.contains("topic=test-topic"));
+            assertTrue(line, line.contains("threadDump="));
+        }
+    }
+
+    private static void setField(Object target, String name, Object value) throws Exception {
+        Field f = target.getClass().getDeclaredField(name);
+        f.setAccessible(true);
+        f.set(target, value);
     }
 }

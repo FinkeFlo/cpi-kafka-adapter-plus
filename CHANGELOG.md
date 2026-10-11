@@ -7,6 +7,10 @@ and the project follows [Semantic Versioning](https://semver.org/). See
 [VERSIONING.md](https://github.com/finkeflo/cpi-kafka-adapter-plus/blob/main/VERSIONING.md) for how the adapter version maps to SAP CPI
 iFlow compatibility.
 
+## [Unreleased]
+### Changed
+- Internal refactoring, no change in behaviour, configuration or log output: the receiver's node-fault escalation (`producer.node.fault.escalation`, with JVM state and the thread dump at diagnostics level FULL) moved from `CpiKafkaPlusProducer` into its own class `NodeFaultEscalation`. The event still logs under the `CpiKafkaPlusProducer` logger category.
+
 ## [1.4.1] - 2026-10-06
 ### Fixed
 - The receiver's single-message retry (`producerRetryMaxAttempts > 1`, no batch mode) could write a record twice. It repeated a send whose record was already in the producer's buffer — after a delivery timeout or a dropped connection the record may already be on the broker, and the broker only deduplicates the client's own retries of the same batch, not a new send. A send is now only repeated when the record provably never reached the buffer (metadata wait, full buffer, the KAFKA-10902 monitor fault); otherwise the message fails with `stopReason=OUTCOME_UNKNOWN`. Single-message retries therefore recover fewer failures than before, as the tooltip always promised. See issue #184.

@@ -54,9 +54,9 @@ final class NodeFaultEscalation {
     private static final long NODE_FAULT_ESCALATION_WINDOW_MS = 20 * 60 * 1000L;
     // c6b: Thread dump caps — AdapterDiagnostics truncates at 8K chars; stay well under.
     // Prefer BLOCKED/WAITING threads (informative for monitor issues) over RUNNABLE.
-    private static final int THREAD_DUMP_MAX_THREADS = 20;
-    private static final int THREAD_DUMP_MAX_FRAMES = 10;
-    private static final int THREAD_DUMP_MAX_CHARS = 5000;
+    static final int THREAD_DUMP_MAX_THREADS = 20;
+    static final int THREAD_DUMP_MAX_FRAMES = 10;
+    static final int THREAD_DUMP_MAX_CHARS = 5000;
     /** Lock for atomic escalation decisions. The incident involved 5 threads — volatile++ would race. */
     private final Object nodeFaultLock = new Object();
     /** Fault identity = exceptionClass + ":" + errorCode. Keyed to make "same fault" claim true. */
@@ -76,6 +76,27 @@ final class NodeFaultEscalation {
         this.diagnosticsFull = diagnosticsFull;
         this.clientId = clientId;
         this.clock = clock;
+    }
+
+    /** Visible for testing. */
+    int countInWindow() {
+        synchronized (nodeFaultLock) {
+            return nodeFaultCountInWindow;
+        }
+    }
+
+    /** Visible for testing. */
+    boolean isEscalated() {
+        synchronized (nodeFaultLock) {
+            return nodeFaultEscalated;
+        }
+    }
+
+    /** Visible for testing. */
+    String faultIdentity() {
+        synchronized (nodeFaultLock) {
+            return nodeFaultIdentity;
+        }
     }
 
     /**
@@ -142,7 +163,7 @@ final class NodeFaultEscalation {
      * Resolves the relevant cause for node-fault identity, skipping wrapper exceptions where
      * possible so that escalation groups by actual root cause.
      */
-    private Throwable resolveNodeFaultIdentityCause(Throwable cause) {
+    Throwable resolveNodeFaultIdentityCause(Throwable cause) {
         if (cause == null) {
             return null;
         }
@@ -165,7 +186,7 @@ final class NodeFaultEscalation {
      */
     private void emitNodeFaultEscalation(String exceptionClass, CpiKafkaPlusErrorCode errorCode,
                                           Classification classification, int count) {
-        // Guard against endpoint.getEffectiveTopic() throwing on failure path
+        // Guard against the topic lookup (endpoint.getEffectiveTopic()) throwing on failure path
         String topic;
         try {
             topic = this.topic.get();
