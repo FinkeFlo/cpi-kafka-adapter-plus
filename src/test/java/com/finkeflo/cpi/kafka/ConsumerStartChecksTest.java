@@ -20,6 +20,10 @@
  */
 package com.finkeflo.cpi.kafka;
 
+import java.io.ByteArrayOutputStream;
+import java.io.PrintStream;
+import java.nio.charset.StandardCharsets;
+
 import org.apache.camel.impl.DefaultCamelContext;
 import org.junit.After;
 import org.junit.Assert;
@@ -102,6 +106,21 @@ public class ConsumerStartChecksTest {
         CpiKafkaPlusEndpoint e = endpoint();
         e.setGroupId(" ");
         assertRejected(e, "groupId", "Consumer Group ID");
+    }
+
+    @Test
+    public void missingGroupIdModeAndErrorHandlingAreRejected() throws Exception {
+        // A sender channel saved without a group id leaves the field null, not empty.
+        CpiKafkaPlusEndpoint group = endpoint();
+        group.setGroupId(null);
+        assertRejected(group, "groupId", "Consumer Group ID");
+        CpiKafkaPlusEndpoint mode = endpoint();
+        mode.setConsumptionMode(null);
+        Assert.assertEquals("consumptionMode must be SCHEDULED or STREAMING, got: null", startFailure(mode));
+        CpiKafkaPlusEndpoint handling = endpoint();
+        handling.setErrorHandling(null);
+        Assert.assertEquals("errorHandling must be RETRY (Retry Failed Message) or SKIP (Skip Failed Message), "
+                + "got: null", startFailure(handling));
     }
 
     @Test
@@ -216,6 +235,39 @@ public class ConsumerStartChecksTest {
         assertStarts(e);
     }
 
+    @Test
+    public void fallbackLinesAreLoggedOnlyWhereTheValueIsInEffect() throws Exception {
+        CpiKafkaPlusEndpoint known = endpoint();
+        known.setSchemaRegistryEnabled(true);
+        known.setSchemaRegistryUrl("http://localhost:8081");
+        known.setAvroOutputFormat("xml");   // case-insensitive, like the conversion
+        known.setBatchOutputFormat("XML_LIST");
+        known.setAutoPauseEnabled(true);
+        known.setAutoPauseErrorThreshold(1);
+        known.setAutoPauseCooldownSeconds(1);
+        String knownLog = capture(() -> assertStarts(known));
+        Assert.assertFalse(knownLog, knownLog.contains("consumer.config."));
+
+        CpiKafkaPlusEndpoint notInEffect = endpoint();
+        notInEffect.setSchemaRegistryEnabled(true);
+        notInEffect.setSchemaRegistryUrl("http://localhost:8081");
+        notInEffect.setAvroValueDeserialization(false);
+        notInEffect.setAvroOutputFormat("CSV");
+        notInEffect.setBatchOutputFormat("SPLIT_EXCHANGES");   // legacy path, nothing is formatted
+        notInEffect.setAutoPauseEnabled(false);
+        notInEffect.setAutoPauseErrorThreshold(0);
+        String notInEffectLog = capture(() -> assertStarts(notInEffect));
+        Assert.assertFalse(notInEffectLog, notInEffectLog.contains("consumer.config."));
+
+        CpiKafkaPlusEndpoint cooldown = endpoint();
+        cooldown.setAutoPauseEnabled(true);
+        cooldown.setAutoPauseCooldownSeconds(0);
+        String cooldownLog = capture(() -> assertStarts(cooldown));
+        Assert.assertTrue(cooldownLog, cooldownLog.contains("ERROR " + CpiKafkaPlusConsumer.class.getName()
+                + " - [CPI-KAFKA-PLUS-DIAG] consumer.config.clamped autoPauseErrorThreshold=5 "
+                + "autoPauseCooldownSeconds=0 reason='values below 1 are used as 1'"));
+    }
+
     /** The message names both the UI label and the parameter, so it is findable from either side. */
     private void assertRejected(CpiKafkaPlusEndpoint endpoint, String field, String uiLabel) throws Exception {
         String message = startFailure(endpoint);
@@ -272,5 +324,21 @@ public class ConsumerStartChecksTest {
         } finally {
             consumer.doStop();
         }
+    }
+
+    private interface ThrowingRunnable {
+        void run() throws Exception;
+    }
+
+    private static String capture(ThrowingRunnable action) throws Exception {
+        PrintStream original = System.err;
+        ByteArrayOutputStream captured = new ByteArrayOutputStream();
+        System.setErr(new PrintStream(captured, true, "UTF-8"));
+        try {
+            action.run();
+        } finally {
+            System.setErr(original);
+        }
+        return new String(captured.toByteArray(), StandardCharsets.UTF_8);
     }
 }
