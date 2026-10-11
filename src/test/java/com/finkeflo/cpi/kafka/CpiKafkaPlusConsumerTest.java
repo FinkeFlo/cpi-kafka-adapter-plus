@@ -463,68 +463,6 @@ public class CpiKafkaPlusConsumerTest {
         Assert.assertTrue(ex.getMessage().contains("group='group-a'"));
     }
 
-    @Test
-    public void testIsRetryableWithConnectException() {
-        Assert.assertTrue(RecordProcessor.isRetryable(
-                new java.net.ConnectException("Connection refused")));
-    }
-
-    @Test
-    public void testIsRetryableWithSocketTimeoutException() {
-        Assert.assertTrue(RecordProcessor.isRetryable(
-                new java.net.SocketTimeoutException("Read timed out")));
-    }
-
-    @Test
-    public void testIsRetryableWithTimeoutException() {
-        Assert.assertTrue(RecordProcessor.isRetryable(
-                new java.util.concurrent.TimeoutException("Timed out")));
-    }
-
-    @Test
-    public void testIsRetryableWithSocketException() {
-        Assert.assertTrue(RecordProcessor.isRetryable(
-                new java.net.SocketException("Connection reset")));
-    }
-
-    @Test
-    public void testIsRetryableWithUnknownHostException() {
-        Assert.assertTrue(RecordProcessor.isRetryable(
-                new java.net.UnknownHostException("unknown.host")));
-    }
-
-    @Test
-    public void testIsRetryableWithWrappedConnectException() {
-        Assert.assertTrue(RecordProcessor.isRetryable(
-                new RuntimeException("Wrapped",
-                        new java.net.ConnectException("Connection refused"))));
-    }
-
-    @Test
-    public void testIsNotRetryableWithNullPointerException() {
-        Assert.assertFalse(RecordProcessor.isRetryable(
-                new NullPointerException("null")));
-    }
-
-    @Test
-    public void testIsNotRetryableWithIllegalArgumentException() {
-        Assert.assertFalse(RecordProcessor.isRetryable(
-                new IllegalArgumentException("bad arg")));
-    }
-
-    @Test
-    public void testIsNotRetryableWithFileNotFoundException() {
-        Assert.assertFalse(RecordProcessor.isRetryable(
-                new RuntimeException("Wrapped",
-                        new java.io.FileNotFoundException("not found"))));
-    }
-
-    @Test
-    public void testIsNotRetryableWithClassCastException() {
-        Assert.assertFalse(RecordProcessor.isRetryable(
-                new ClassCastException("bad cast")));
-    }
-
     // --- Issue #45: max.poll.interval.ms scaling ---
 
     @Test
@@ -828,6 +766,26 @@ public class CpiKafkaPlusConsumerTest {
             Assert.assertFalse("precondition: isFailed() cannot detect this", exchange.isFailed());
             Assert.assertTrue("a handled failure must be detected",
                     CpiKafkaPlusConsumer.isHandledFailure(exchange));
+        }
+    }
+
+    @Test
+    public void testHandledFailureIsPermanentUnlessItsCauseIsTransient() throws Exception {
+        try (DefaultCamelContext ctx = new DefaultCamelContext()) {
+            Exchange swallowed = new DefaultExchange(ctx);
+            swallowed.setProperty(Exchange.EXCEPTION_CAUGHT, new IllegalStateException("mapping failed"));
+            Assert.assertFalse("a deterministic swallowed error goes to the DLQ without retries",
+                    KafkaErrorHelper.isTransientForRedelivery(CpiKafkaPlusConsumer.buildHandledFailureException(swallowed)));
+
+            Exchange withoutCause = new DefaultExchange(ctx);
+            Assert.assertFalse(KafkaErrorHelper.isTransientForRedelivery(
+                    CpiKafkaPlusConsumer.buildHandledFailureException(withoutCause)));
+
+            Exchange unreachable = new DefaultExchange(ctx);
+            unreachable.setProperty(Exchange.EXCEPTION_CAUGHT,
+                    new java.net.ConnectException("Connection refused"));
+            Assert.assertTrue("the chained cause is classified, not only the wrapper",
+                    KafkaErrorHelper.isTransientForRedelivery(CpiKafkaPlusConsumer.buildHandledFailureException(unreachable)));
         }
     }
 

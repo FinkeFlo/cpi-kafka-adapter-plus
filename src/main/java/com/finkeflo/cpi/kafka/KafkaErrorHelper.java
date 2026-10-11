@@ -126,6 +126,48 @@ final class KafkaErrorHelper {
         return null;
     }
 
+    private static final Class<?> KAFKA_RETRIABLE_EXCEPTION = resolveKafkaRetriableException();
+
+    private static Class<?> resolveKafkaRetriableException() {
+        try {
+            return Class.forName("org.apache.kafka.common.errors.RetriableException");
+        } catch (ClassNotFoundException e) {
+            return null;
+        }
+    }
+
+    /**
+     * Walks the exception cause chain to determine if the error is transient, i.e. whether the
+     * sender should run its route again for the failed record. Returns true if any exception in
+     * the chain is a known network/connection exception type, a
+     * {@code java.util.concurrent.TimeoutException} or a Kafka {@code RetriableException}. Returns
+     * false for permanent errors (NPE, ClassCastException, FileNotFoundException, etc.) that
+     * would fail identically on retry.
+     *
+     * <p>Used for {@code retryOnlyTransientErrors} in the record processor and for the
+     * {@code retryable} field of {@code adapter.failure.reported}. Deliberately separate from
+     * {@link #classify(Throwable)}, which judges a failed producer send: a refused connection is
+     * transient here and {@link Classification#UNKNOWN_FATAL} there.
+     */
+    static boolean isTransientForRedelivery(Exception e) {
+        Throwable current = e;
+        while (current != null) {
+            if (current instanceof java.net.ConnectException
+                    || current instanceof java.net.SocketException
+                    || current instanceof java.net.SocketTimeoutException
+                    || current instanceof java.net.UnknownHostException
+                    || current instanceof java.util.concurrent.TimeoutException) {
+                return true;
+            }
+            if (KAFKA_RETRIABLE_EXCEPTION != null
+                    && KAFKA_RETRIABLE_EXCEPTION.isInstance(current)) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
+    }
+
     /**
      * Wraps a Throwable in an Exception if it is not already one.
      * Needed because Kafka can throw Errors (e.g. OutOfMemoryError)
