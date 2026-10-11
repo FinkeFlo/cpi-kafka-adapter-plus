@@ -109,6 +109,26 @@ public class ProducerStartChecksTest {
     }
 
     @Test
+    public void subjectNameStrategyIsIgnoredWhileAvroSerializationIsOff() throws Exception {
+        CpiKafkaPlusEndpoint e = endpoint();
+        e.setSchemaRegistryEnabled(true);
+        e.setSchemaRegistryUrl("http://localhost:8081");
+        e.setAvroValueSerialization(false);
+        e.setSubjectNameStrategy("RecordNameStrategy");
+        assertStarts(e);
+    }
+
+    @Test
+    public void noSubjectNameStrategyMeansTopicNameStrategy() throws Exception {
+        CpiKafkaPlusEndpoint e = endpoint();
+        e.setSchemaRegistryEnabled(true);
+        e.setSchemaRegistryUrl("http://localhost:8081");
+        e.setAvroValueSerialization(true);
+        e.setSubjectNameStrategy(null);
+        assertStarts(e);
+    }
+
+    @Test
     public void receiverWithoutGroupIdStarts() throws Exception {
         // groupId is a sender field; the endpoint() URI has none on purpose.
         assertStarts(endpoint());
