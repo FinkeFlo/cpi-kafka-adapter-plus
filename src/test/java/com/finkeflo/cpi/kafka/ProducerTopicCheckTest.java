@@ -66,7 +66,7 @@ import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 
-import com.finkeflo.cpi.kafka.CpiKafkaPlusProducer.TopicCheckResult;
+import com.finkeflo.cpi.kafka.TopicMetadataChecker.TopicCheckResult;
 
 /**
  * Pins the receiver's topic checks: the AdminClient probe on the send path (a missing topic, a
@@ -726,7 +726,7 @@ public class ProducerTopicCheckTest {
 
     private static ScriptedProbe script(CpiKafkaPlusProducer producer) {
         ScriptedProbe probe = new ScriptedProbe();
-        producer.topicProbe = probe;
+        producer.topicChecker.topicProbe = probe;
         return probe;
     }
 

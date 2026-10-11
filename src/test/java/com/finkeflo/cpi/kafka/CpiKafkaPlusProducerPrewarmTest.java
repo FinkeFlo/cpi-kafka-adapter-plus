@@ -21,7 +21,6 @@
 package com.finkeflo.cpi.kafka;
 
 import java.lang.reflect.Field;
-import java.lang.reflect.Method;
 import java.util.Collections;
 import java.util.Properties;
 import java.util.Set;
@@ -91,17 +90,14 @@ public class CpiKafkaPlusProducerPrewarmTest {
     }
 
     private static void invokePrewarm(CpiKafkaPlusProducer producer, String topic) throws Exception {
-        Method method = CpiKafkaPlusProducer.class.getDeclaredMethod("prewarmTopicMetadata",
-                String.class);
-        method.setAccessible(true);
-        method.invoke(producer, topic);
+        producer.topicChecker.prewarmTopicMetadata(topic);
     }
 
     private static Set<String> prewarmedTopics(CpiKafkaPlusProducer producer) throws Exception {
-        Field field = CpiKafkaPlusProducer.class.getDeclaredField("prewarmedTopics");
+        Field field = TopicMetadataChecker.class.getDeclaredField("prewarmedTopics");
         field.setAccessible(true);
         @SuppressWarnings("unchecked")
-        Set<String> topics = (Set<String>) field.get(producer);
+        Set<String> topics = (Set<String>) field.get(producer.topicChecker);
         return topics;
     }
 
