@@ -22,8 +22,6 @@ package com.finkeflo.cpi.kafka;
 
 import static org.junit.Assert.*;
 
-import java.lang.reflect.Field;
-import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
@@ -57,7 +55,7 @@ public class NodeFaultEscalationConcurrencyTest {
 
     private CamelContext camelContext;
     private CpiKafkaPlusEndpoint endpoint;
-    private CpiKafkaPlusProducer producer;
+    private NodeFaultEscalation escalation;
 
     @Before
     public void setUp() throws Exception {
@@ -70,7 +68,13 @@ public class NodeFaultEscalationConcurrencyTest {
         endpoint.setTopic("test-topic");
         endpoint.setSecurityProtocol("PLAINTEXT");
 
-        producer = new CpiKafkaPlusProducer(endpoint);
+        escalation = newEscalation(endpoint);
+    }
+
+    /** Wired from the endpoint the way {@link CpiKafkaPlusProducer} wires it. */
+    private static NodeFaultEscalation newEscalation(CpiKafkaPlusEndpoint endpoint) {
+        return new NodeFaultEscalation(endpoint::getEffectiveTopic, endpoint::isDiagnosticsLevelFull,
+                () -> null, System::currentTimeMillis);
     }
 
     @After
@@ -92,19 +96,6 @@ public class NodeFaultEscalationConcurrencyTest {
         final CountDownLatch done = new CountDownLatch(threadCount);
         final AtomicInteger escalationCount = new AtomicInteger(0);
 
-        // Get the method via reflection (it's private)
-        Method checkMethod = CpiKafkaPlusProducer.class.getDeclaredMethod(
-                "checkNodeFaultEscalation", Classification.class, CpiKafkaPlusErrorCode.class, Throwable.class);
-        checkMethod.setAccessible(true);
-
-        // Intercept LOG.error calls to count escalations
-        // We'll check the nodeFaultEscalated flag instead since LOG interception is complex
-        Field escalatedField = CpiKafkaPlusProducer.class.getDeclaredField("nodeFaultEscalated");
-        escalatedField.setAccessible(true);
-
-        Field countField = CpiKafkaPlusProducer.class.getDeclaredField("nodeFaultCountInWindow");
-        countField.setAccessible(true);
-
         ExecutorService executor = Executors.newFixedThreadPool(threadCount);
         List<Exception> exceptions = new ArrayList<>();
 
@@ -115,7 +106,7 @@ public class NodeFaultEscalationConcurrencyTest {
                     barrier.await(5, TimeUnit.SECONDS);
 
                     // Call with the same fault identity (same relevant root-cause class + error code)
-                    checkMethod.invoke(producer, Classification.FATAL_PRODUCER_UNUSABLE,
+                    escalation.checkNodeFaultEscalation(Classification.FATAL_PRODUCER_UNUSABLE,
                             CpiKafkaPlusErrorCode.KP_PROD_001,
                             new RuntimeException("simulated fault"));
                 } catch (Exception e) {
@@ -136,12 +127,12 @@ public class NodeFaultEscalationConcurrencyTest {
         assertTrue("Exceptions during concurrent access: " + exceptions, exceptions.isEmpty());
 
         // Verify the count is exact (no lost increments)
-        int finalCount = (int) countField.get(producer);
+        int finalCount = escalation.countInWindow();
         assertEquals("Counter should be exactly " + threadCount + " (no lost increments)",
                 threadCount, finalCount);
 
         // Verify escalation fired exactly once
-        boolean escalated = (boolean) escalatedField.get(producer);
+        boolean escalated = escalation.isEscalated();
         assertTrue("Escalation should have fired (count >= threshold)", escalated);
     }
 
@@ -152,30 +143,24 @@ public class NodeFaultEscalationConcurrencyTest {
      */
     @Test
     public void differentFaultsDoNotEscalate() throws Exception {
-        Method checkMethod = CpiKafkaPlusProducer.class.getDeclaredMethod(
-                "checkNodeFaultEscalation", Classification.class, CpiKafkaPlusErrorCode.class, Throwable.class);
-        checkMethod.setAccessible(true);
-
-        Field escalatedField = CpiKafkaPlusProducer.class.getDeclaredField("nodeFaultEscalated");
-        escalatedField.setAccessible(true);
 
         // Call 4 times with fault type A (one below threshold)
         for (int i = 0; i < 4; i++) {
-            checkMethod.invoke(producer, Classification.FATAL_PRODUCER_UNUSABLE,
+            escalation.checkNodeFaultEscalation(Classification.FATAL_PRODUCER_UNUSABLE,
                     CpiKafkaPlusErrorCode.KP_PROD_001,
                     new RuntimeException("fault A"));
         }
         assertFalse("Should not escalate yet (only 4 of same fault)",
-                (boolean) escalatedField.get(producer));
+                escalation.isEscalated());
 
         // Now switch to a different fault - counter should reset
         for (int i = 0; i < 4; i++) {
-            checkMethod.invoke(producer, Classification.UNKNOWN_FATAL,
+            escalation.checkNodeFaultEscalation(Classification.UNKNOWN_FATAL,
                     CpiKafkaPlusErrorCode.KP_GEN_001,
                     new IllegalStateException("fault B"));
         }
         assertFalse("Should not escalate (different fault resets counter)",
-                (boolean) escalatedField.get(producer));
+                escalation.isEscalated());
     }
 
     /**
@@ -184,28 +169,22 @@ public class NodeFaultEscalationConcurrencyTest {
      */
     @Test
     public void differentRootCauseUnderSameWrapperDoesNotEscalate() throws Exception {
-        Method checkMethod = CpiKafkaPlusProducer.class.getDeclaredMethod(
-                "checkNodeFaultEscalation", Classification.class, CpiKafkaPlusErrorCode.class, Throwable.class);
-        checkMethod.setAccessible(true);
-
-        Field escalatedField = CpiKafkaPlusProducer.class.getDeclaredField("nodeFaultEscalated");
-        escalatedField.setAccessible(true);
 
         for (int i = 0; i < 4; i++) {
-            checkMethod.invoke(producer, Classification.FATAL_PRODUCER_UNUSABLE,
+            escalation.checkNodeFaultEscalation(Classification.FATAL_PRODUCER_UNUSABLE,
                     CpiKafkaPlusErrorCode.KP_PROD_001,
                     new RuntimeException("wrapper", new IllegalStateException("root A")));
         }
         assertFalse("Should not escalate yet (only 4 of same root cause)",
-                (boolean) escalatedField.get(producer));
+                escalation.isEscalated());
 
         for (int i = 0; i < 4; i++) {
-            checkMethod.invoke(producer, Classification.FATAL_PRODUCER_UNUSABLE,
+            escalation.checkNodeFaultEscalation(Classification.FATAL_PRODUCER_UNUSABLE,
                     CpiKafkaPlusErrorCode.KP_PROD_001,
                     new RuntimeException("wrapper", new IllegalArgumentException("root B")));
         }
         assertFalse("Different root causes under same wrapper must not be merged into one fault",
-                (boolean) escalatedField.get(producer));
+                escalation.isEscalated());
     }
 
     /**
@@ -214,31 +193,25 @@ public class NodeFaultEscalationConcurrencyTest {
      */
     @Test
     public void sameRootCauseUnderDifferentWrappersEscalates() throws Exception {
-        Method checkMethod = CpiKafkaPlusProducer.class.getDeclaredMethod(
-                "checkNodeFaultEscalation", Classification.class, CpiKafkaPlusErrorCode.class, Throwable.class);
-        checkMethod.setAccessible(true);
 
-        Field escalatedField = CpiKafkaPlusProducer.class.getDeclaredField("nodeFaultEscalated");
-        escalatedField.setAccessible(true);
-
-        checkMethod.invoke(producer, Classification.FATAL_PRODUCER_UNUSABLE,
+        escalation.checkNodeFaultEscalation(Classification.FATAL_PRODUCER_UNUSABLE,
                 CpiKafkaPlusErrorCode.KP_PROD_001,
                 new RuntimeException("wrapper-1", new IllegalStateException("same root")));
-        checkMethod.invoke(producer, Classification.FATAL_PRODUCER_UNUSABLE,
+        escalation.checkNodeFaultEscalation(Classification.FATAL_PRODUCER_UNUSABLE,
                 CpiKafkaPlusErrorCode.KP_PROD_001,
                 new IllegalArgumentException("wrapper-2", new IllegalStateException("same root")));
-        checkMethod.invoke(producer, Classification.FATAL_PRODUCER_UNUSABLE,
+        escalation.checkNodeFaultEscalation(Classification.FATAL_PRODUCER_UNUSABLE,
                 CpiKafkaPlusErrorCode.KP_PROD_001,
                 new Exception("wrapper-3", new IllegalStateException("same root")));
-        checkMethod.invoke(producer, Classification.FATAL_PRODUCER_UNUSABLE,
+        escalation.checkNodeFaultEscalation(Classification.FATAL_PRODUCER_UNUSABLE,
                 CpiKafkaPlusErrorCode.KP_PROD_001,
                 new RuntimeException("wrapper-4", new IllegalStateException("same root")));
-        checkMethod.invoke(producer, Classification.FATAL_PRODUCER_UNUSABLE,
+        escalation.checkNodeFaultEscalation(Classification.FATAL_PRODUCER_UNUSABLE,
                 CpiKafkaPlusErrorCode.KP_PROD_001,
                 new Exception("wrapper-5", new IllegalStateException("same root")));
 
         assertTrue("Same root cause across wrappers should escalate at threshold",
-                (boolean) escalatedField.get(producer));
+                escalation.isEscalated());
     }
 
     /**
@@ -247,21 +220,15 @@ public class NodeFaultEscalationConcurrencyTest {
      */
     @Test
     public void sameFaultEscalatesAtThreshold() throws Exception {
-        Method checkMethod = CpiKafkaPlusProducer.class.getDeclaredMethod(
-                "checkNodeFaultEscalation", Classification.class, CpiKafkaPlusErrorCode.class, Throwable.class);
-        checkMethod.setAccessible(true);
-
-        Field escalatedField = CpiKafkaPlusProducer.class.getDeclaredField("nodeFaultEscalated");
-        escalatedField.setAccessible(true);
 
         // Call 5 times with the same fault
         for (int i = 0; i < 5; i++) {
-            checkMethod.invoke(producer, Classification.FATAL_PRODUCER_UNUSABLE,
+            escalation.checkNodeFaultEscalation(Classification.FATAL_PRODUCER_UNUSABLE,
                     CpiKafkaPlusErrorCode.KP_PROD_001,
                     new RuntimeException("same fault"));
         }
         assertTrue("Should escalate after 5 occurrences of same fault",
-                (boolean) escalatedField.get(producer));
+                escalation.isEscalated());
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
@@ -273,22 +240,17 @@ public class NodeFaultEscalationConcurrencyTest {
      */
     @Test
     public void jvmStateIsEmittedOnEscalation() throws Exception {
-        Method checkMethod = CpiKafkaPlusProducer.class.getDeclaredMethod(
-                "checkNodeFaultEscalation", Classification.class, CpiKafkaPlusErrorCode.class, Throwable.class);
-        checkMethod.setAccessible(true);
 
         // Call 5 times to trigger escalation
         for (int i = 0; i < 5; i++) {
-            checkMethod.invoke(producer, Classification.FATAL_PRODUCER_UNUSABLE,
+            escalation.checkNodeFaultEscalation(Classification.FATAL_PRODUCER_UNUSABLE,
                     CpiKafkaPlusErrorCode.KP_PROD_001,
                     new RuntimeException("test fault"));
         }
 
         // The escalation should have fired and emitted JVM state fields
         // We can't easily intercept the log, but we can verify the code path runs without error
-        Field escalatedField = CpiKafkaPlusProducer.class.getDeclaredField("nodeFaultEscalated");
-        escalatedField.setAccessible(true);
-        assertTrue("Escalation should have fired", (boolean) escalatedField.get(producer));
+        assertTrue("Escalation should have fired", escalation.isEscalated());
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
@@ -306,20 +268,15 @@ public class NodeFaultEscalationConcurrencyTest {
         assertFalse("Default should not be FULL level", endpoint.isDiagnosticsLevelFull());
 
         // The code path should complete without adding thread dump
-        Method checkMethod = CpiKafkaPlusProducer.class.getDeclaredMethod(
-                "checkNodeFaultEscalation", Classification.class, CpiKafkaPlusErrorCode.class, Throwable.class);
-        checkMethod.setAccessible(true);
 
         for (int i = 0; i < 5; i++) {
-            checkMethod.invoke(producer, Classification.FATAL_PRODUCER_UNUSABLE,
+            escalation.checkNodeFaultEscalation(Classification.FATAL_PRODUCER_UNUSABLE,
                     CpiKafkaPlusErrorCode.KP_PROD_001,
                     new RuntimeException("test fault"));
         }
 
         // Verify escalation fired (proves the code path ran)
-        Field escalatedField = CpiKafkaPlusProducer.class.getDeclaredField("nodeFaultEscalated");
-        escalatedField.setAccessible(true);
-        assertTrue((boolean) escalatedField.get(producer));
+        assertTrue(escalation.isEscalated());
     }
 
     /**
@@ -335,24 +292,18 @@ public class NodeFaultEscalationConcurrencyTest {
         fullEndpoint.setSecurityProtocol("PLAINTEXT");
         fullEndpoint.setDiagnosticsLevel("FULL");
 
-        CpiKafkaPlusProducer fullProducer = new CpiKafkaPlusProducer(fullEndpoint);
+        NodeFaultEscalation fullEscalation = newEscalation(fullEndpoint);
 
         assertTrue("Should be FULL level", fullEndpoint.isDiagnosticsLevelFull());
 
-        Method checkMethod = CpiKafkaPlusProducer.class.getDeclaredMethod(
-                "checkNodeFaultEscalation", Classification.class, CpiKafkaPlusErrorCode.class, Throwable.class);
-        checkMethod.setAccessible(true);
-
         for (int i = 0; i < 5; i++) {
-            checkMethod.invoke(fullProducer, Classification.FATAL_PRODUCER_UNUSABLE,
+            fullEscalation.checkNodeFaultEscalation(Classification.FATAL_PRODUCER_UNUSABLE,
                     CpiKafkaPlusErrorCode.KP_PROD_001,
                     new RuntimeException("test fault"));
         }
 
         // Verify escalation fired
-        Field escalatedField = CpiKafkaPlusProducer.class.getDeclaredField("nodeFaultEscalated");
-        escalatedField.setAccessible(true);
-        assertTrue("Escalation should fire at FULL level", (boolean) escalatedField.get(fullProducer));
+        assertTrue("Escalation should fire at FULL level", fullEscalation.isEscalated());
     }
 
     /**
@@ -368,27 +319,18 @@ public class NodeFaultEscalationConcurrencyTest {
         fullEndpoint.setSecurityProtocol("PLAINTEXT");
         fullEndpoint.setDiagnosticsLevel("FULL");
 
-        CpiKafkaPlusProducer fullProducer = new CpiKafkaPlusProducer(fullEndpoint);
-
-        Method checkMethod = CpiKafkaPlusProducer.class.getDeclaredMethod(
-                "checkNodeFaultEscalation", Classification.class, CpiKafkaPlusErrorCode.class, Throwable.class);
-        checkMethod.setAccessible(true);
+        NodeFaultEscalation fullEscalation = newEscalation(fullEndpoint);
 
         // Call 10 times (5 to escalate, 5 more after)
         for (int i = 0; i < 10; i++) {
-            checkMethod.invoke(fullProducer, Classification.FATAL_PRODUCER_UNUSABLE,
+            fullEscalation.checkNodeFaultEscalation(Classification.FATAL_PRODUCER_UNUSABLE,
                     CpiKafkaPlusErrorCode.KP_PROD_001,
                     new RuntimeException("test fault"));
         }
 
         // Verify escalation fired once (nodeFaultEscalated stays true, counter keeps going)
-        Field escalatedField = CpiKafkaPlusProducer.class.getDeclaredField("nodeFaultEscalated");
-        escalatedField.setAccessible(true);
-        assertTrue((boolean) escalatedField.get(fullProducer));
-
-        Field countField = CpiKafkaPlusProducer.class.getDeclaredField("nodeFaultCountInWindow");
-        countField.setAccessible(true);
-        assertEquals("Count should be 10", 10, (int) countField.get(fullProducer));
+        assertTrue(fullEscalation.isEscalated());
+        assertEquals("Count should be 10", 10, fullEscalation.countInWindow());
     }
 
     /**
@@ -397,17 +339,11 @@ public class NodeFaultEscalationConcurrencyTest {
     @Test
     public void threadDumpTruncationCapsAreReasonable() throws Exception {
         // Verify the caps are set to reasonable values
-        Field maxThreadsField = CpiKafkaPlusProducer.class.getDeclaredField("THREAD_DUMP_MAX_THREADS");
-        maxThreadsField.setAccessible(true);
-        int maxThreads = (int) maxThreadsField.get(null);
+        int maxThreads = NodeFaultEscalation.THREAD_DUMP_MAX_THREADS;
 
-        Field maxFramesField = CpiKafkaPlusProducer.class.getDeclaredField("THREAD_DUMP_MAX_FRAMES");
-        maxFramesField.setAccessible(true);
-        int maxFrames = (int) maxFramesField.get(null);
+        int maxFrames = NodeFaultEscalation.THREAD_DUMP_MAX_FRAMES;
 
-        Field maxCharsField = CpiKafkaPlusProducer.class.getDeclaredField("THREAD_DUMP_MAX_CHARS");
-        maxCharsField.setAccessible(true);
-        int maxChars = (int) maxCharsField.get(null);
+        int maxChars = NodeFaultEscalation.THREAD_DUMP_MAX_CHARS;
 
         assertTrue("Max threads should be reasonable (10-50)", maxThreads >= 10 && maxThreads <= 50);
         assertTrue("Max frames should be reasonable (5-20)", maxFrames >= 5 && maxFrames <= 20);
