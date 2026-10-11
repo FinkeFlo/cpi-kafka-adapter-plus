@@ -295,7 +295,7 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
                         + "adapter unable to send anything");
             }
             txnPool = TransactionalProducerPool.start(endpoint::getTransactionalIdPrefix,
-                    endpoint.getEffectiveTopic(), slots);
+                    endpoint.getEffectiveTopic(), NodeIdentity::memberSuffix, slots);
         }
 
         validateRetryConfiguration();
@@ -370,7 +370,8 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
         int deliveryTimeoutSeconds = endpoint.getDeliveryTimeoutSeconds();
 
         long worstCase = ProducerRetryPolicy.worstCaseSeconds(maxAttempts, deliveryTimeoutSeconds,
-                delaySeconds, (int) TransactionalProducerPool.TXN_PRODUCER_CLOSE_TIMEOUT.getSeconds(), transactional);
+                delaySeconds, (int) TransactionalProducerPool.TXN_PRODUCER_CLOSE_TIMEOUT.getSeconds(),
+                transactional);
         if (worstCase > budgetSeconds) {
             throw new IllegalArgumentException(
                     "Producer retry is configured with a worst case of " + worstCase
@@ -694,6 +695,8 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
             runTransactionalAttempts(in, topic, batchMode, records, fallbackKey, partition, timestamp,
                     valueSerializer, props, transactionalId, slotId);
         } finally {
+            // Read from the field again, not from a local: after a stop/start the slot goes back to
+            // the new pool. Issue #204 is about changing that; ProducerTransactionSlotTest pins it.
             txnPool.release(slotId);
         }
     }

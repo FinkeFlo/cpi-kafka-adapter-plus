@@ -34,6 +34,9 @@ import org.slf4j.LoggerFactory;
  * Also creates and closes the throw-away producer of a transactional attempt. Moved out of
  * {@link CpiKafkaPlusProducer}; it logs under the producer's logger category, so log levels and
  * trace filters set for the producer still apply.
+ *
+ * <p>A message takes a slot with {@link #acquire()} and {@link #claimFreeSlot()} and gives it back
+ * with {@link #release(int)} in a {@code finally}. Package-private.
  */
 final class TransactionalProducerPool {
 
@@ -53,6 +56,10 @@ final class TransactionalProducerPool {
      */
     private final String topicHash;
 
+    /**
+     * A pool with {@code slots} free slots. {@link #start} resolves the topic hash and the member
+     * suffix first; tests pass them directly.
+     */
     TransactionalProducerPool(Supplier<String> transactionalIdPrefix, String topicHash,
                               String resolvedMemberSuffix, int slots) {
         this.transactionalIdPrefix = transactionalIdPrefix;
@@ -62,7 +69,17 @@ final class TransactionalProducerPool {
         txnSlotInUse = new boolean[slots];
     }
 
-    static TransactionalProducerPool start(Supplier<String> transactionalIdPrefix, String topic, int slots) {
+    /**
+     * The pool of a starting receiver: resolves the member suffix and the topic hash once, checks
+     * the length of the resulting {@code transactional.id} and logs the start-up line.
+     *
+     * @param transactionalIdPrefix read again for every id
+     * @param memberSuffix {@link NodeIdentity#memberSuffix()} outside tests; {@code null} from it
+     *        means a random suffix and a WARN
+     * @throws IllegalArgumentException if the id would be longer than 249 characters
+     */
+    static TransactionalProducerPool start(Supplier<String> transactionalIdPrefix, String topic,
+                                           Supplier<String> memberSuffix, int slots) {
         // Resolved once at startup and reused for every transactional.id below — avoids
         // re-reading env vars per exchange and prevents a literal "null" segment in the
         // transactional.id, which would cause fencing collisions between worker nodes that both
@@ -72,7 +89,7 @@ final class TransactionalProducerPool {
         // transactional.id no longer being stable across restarts on the same node (so a
         // crashed producer's old transactional.id will not be actively fenced by the new one —
         // it will simply expire via transaction.timeout.ms).
-        String resolvedMemberSuffix = NodeIdentity.memberSuffix();
+        String resolvedMemberSuffix = memberSuffix.get();
         if (resolvedMemberSuffix == null) {
             resolvedMemberSuffix = "r" + java.util.UUID.randomUUID().toString().replace("-", "").substring(0, 12);
             LOG.warn("[CPI-KAFKA-PLUS-DIAG] Could not determine a stable identifier for this worker node, "
@@ -90,8 +107,8 @@ final class TransactionalProducerPool {
         // Validate that the resulting id fits within a safe length budget before any producer
         // is created. Prefix + hash + memberSuffix + slotId + separators must stay short enough
         // to be handled by all Kafka broker versions without truncation.
-        String exampleId = transactionalIdPrefix.get() + "-" + topicHash
-                + "-" + resolvedMemberSuffix + "-0";
+        String exampleId = formatTransactionalId(transactionalIdPrefix.get(), topicHash,
+                resolvedMemberSuffix, 0);
         if (exampleId.length() > 249) {
             throw new IllegalArgumentException(
                     "The computed transactional.id '" + exampleId + "' is " + exampleId.length()
@@ -107,6 +124,12 @@ final class TransactionalProducerPool {
         return pool;
     }
 
+    /**
+     * Waits for a free slot: in arrival order (fair semaphore) and without a timeout (#204).
+     *
+     * @throws RuntimeException if the wait is interrupted; the interrupt flag is set again and no
+     *         permit was taken, so there is nothing to {@link #release(int)}
+     */
     void acquire() {
         try {
             txnSlotSemaphore.acquire();
@@ -116,6 +139,12 @@ final class TransactionalProducerPool {
         }
     }
 
+    /**
+     * Marks the lowest free slot as in use and returns it. Only after {@link #acquire()}, whose
+     * permit guarantees a free slot.
+     *
+     * @throws IllegalStateException if no slot is free, which is a bug
+     */
     int claimFreeSlot() {
         int slotId = -1;
         synchronized (txnSlotInUse) {
@@ -133,6 +162,10 @@ final class TransactionalProducerPool {
         return slotId;
     }
 
+    /**
+     * Frees {@code slotId} and returns the permit; once per successful {@link #acquire()}. With
+     * {@code slotId} -1, when the claim failed, it only returns the permit.
+     */
     void release(int slotId) {
         if (slotId != -1) {
             synchronized (txnSlotInUse) {
@@ -142,12 +175,22 @@ final class TransactionalProducerPool {
         txnSlotSemaphore.release();
     }
 
+    /**
+     * The {@code transactional.id} of {@code slotId}, with the prefix read on every call. The
+     * caller computes it once per message, so every attempt of the message uses the same id.
+     */
     String transactionalId(int slotId) {
-        // resolvedMemberSuffix and topicHash are resolved once (fail-fast) in doStart() — never null here.
-        return transactionalIdPrefix.get() + "-" + topicHash
-                + "-" + resolvedMemberSuffix + "-" + slotId;
+        // resolvedMemberSuffix and topicHash are resolved once (fail-fast) in start() — never null here.
+        return formatTransactionalId(transactionalIdPrefix.get(), topicHash, resolvedMemberSuffix, slotId);
     }
 
+    /** The layout of every {@code transactional.id}; the start-up length check uses it too. */
+    private static String formatTransactionalId(String prefix, String topicHash, String memberSuffix,
+                                                int slotId) {
+        return prefix + "-" + topicHash + "-" + memberSuffix + "-" + slotId;
+    }
+
+    /** For the context of a failed transactional send. */
     String topicHash() {
         return topicHash;
     }
