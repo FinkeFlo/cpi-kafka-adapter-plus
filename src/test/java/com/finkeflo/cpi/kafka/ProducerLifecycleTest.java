@@ -30,7 +30,6 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Future;
-import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -127,10 +126,8 @@ public class ProducerLifecycleTest {
             throw new IllegalStateException("Secure Store unavailable");
         });
         CpiKafkaPlusProducer producer = newProducer(endpoint);
-        setField(producer, "txnSlotSemaphore", new Semaphore(1, true));
-        setField(producer, "txnSlotInUse", new boolean[1]);
-        setField(producer, "topicHash", "0000abcd");
-        setField(producer, "resolvedMemberSuffix", "test");
+        producer.txnPool = new TransactionalProducerPool(endpoint::getTransactionalIdPrefix,
+                "0000abcd", "test", 1);
         verifiedTopics(producer).add("orders");
         AtomicInteger transactionalProducers = new AtomicInteger();
         producer.txnProducerFactory = props -> {

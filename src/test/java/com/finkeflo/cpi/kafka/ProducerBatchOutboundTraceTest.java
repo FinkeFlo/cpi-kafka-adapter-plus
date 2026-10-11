@@ -154,10 +154,8 @@ public class ProducerBatchOutboundTraceTest {
             CpiKafkaPlusProducer producer = new CpiKafkaPlusProducer(endpoint);
             RecordingTracingHelper tracing = new RecordingTracingHelper(endpoint);
             setField(producer, "tracingHelper", tracing);
-            setField(producer, "txnSlotSemaphore", new java.util.concurrent.Semaphore(1, true));
-            setField(producer, "txnSlotInUse", new boolean[1]);
-            setField(producer, "topicHash", "0000abcd");
-            setField(producer, "resolvedMemberSuffix", "test");
+            producer.txnPool = new TransactionalProducerPool(endpoint::getTransactionalIdPrefix,
+                    "0000abcd", "test", 1);
 
             // The first attempt fails in the SEND phase with a retriable error, the second succeeds.
             AtomicInteger attempts = new AtomicInteger();
