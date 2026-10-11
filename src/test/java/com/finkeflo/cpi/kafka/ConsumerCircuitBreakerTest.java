@@ -20,7 +20,15 @@
  */
 package com.finkeflo.cpi.kafka;
 
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
+
 import org.apache.camel.impl.DefaultCamelContext;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.apache.kafka.clients.consumer.MockConsumer;
+import org.apache.kafka.common.TopicPartition;
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
@@ -126,6 +134,36 @@ public class ConsumerCircuitBreakerTest {
     public void aThresholdBelowOneIsClampedToOne() throws Exception {
         Assert.assertEquals(1, createCircuitBreaker(-5, 10).effectiveThreshold());
         Assert.assertEquals(1L, createCircuitBreaker(1, -3).effectiveCooldownSeconds());
+    }
+
+    /**
+     * N-D-1 (#230): a partition assigned while the auto-pause keep-alive polls is not paused yet, so
+     * the poll returns its records. They must be rewound, otherwise the position is already past them
+     * and the next emit poll never reads them.
+     */
+    @Test
+    public void autoPauseKeepAliveRewindsRecordsOfAPartitionAssignedDuringThePoll() throws Exception {
+        ConsumerCircuitBreaker cb = createCircuitBreaker(1, 60);
+        Assert.assertTrue(cb.recordFailure());
+
+        TopicPartition p0 = new TopicPartition("test-topic", 0);
+        TopicPartition p1 = new TopicPartition("test-topic", 1);
+        MockConsumer<byte[], byte[]> consumer = new MockConsumer<>("earliest");
+        consumer.subscribe(Collections.singleton("test-topic"));
+        consumer.rebalance(Collections.singleton(p0));
+        Map<TopicPartition, Long> beginning = new HashMap<>();
+        beginning.put(p0, 0L);
+        beginning.put(p1, 0L);
+        consumer.updateBeginningOffsets(beginning);
+        consumer.schedulePollTask(() -> {
+            consumer.rebalance(Arrays.asList(p0, p1));
+            consumer.addRecord(new ConsumerRecord<>("test-topic", 1, 0L, null, "a".getBytes()));
+            consumer.addRecord(new ConsumerRecord<>("test-topic", 1, 1L, null, "b".getBytes()));
+        });
+
+        Assert.assertTrue("still in cooldown", cb.handlePausedState(consumer));
+        Assert.assertEquals("the records of the new partition must be read again after the pause",
+                0L, consumer.position(p1));
     }
 
     private ConsumerCircuitBreaker createCircuitBreaker(int threshold, int cooldown) throws Exception {

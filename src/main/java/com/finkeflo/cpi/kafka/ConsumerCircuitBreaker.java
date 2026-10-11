@@ -23,7 +23,7 @@ package com.finkeflo.cpi.kafka;
 import java.time.Duration;
 import java.util.Set;
 
-import org.apache.kafka.clients.consumer.KafkaConsumer;
+import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.errors.WakeupException;
 import org.slf4j.Logger;
@@ -63,7 +63,7 @@ final class ConsumerCircuitBreaker {
      * @param kafkaConsumer the Kafka consumer instance
      * @return {@code true} if the consumer is still paused and poll() should return 0
      */
-    boolean handlePausedState(KafkaConsumer<byte[], byte[]> kafkaConsumer) {
+    boolean handlePausedState(Consumer<byte[], byte[]> kafkaConsumer) {
         if (!endpoint.isAutoPauseEnabled() || pausedUntil <= 0) {
             return false;
         }
@@ -170,7 +170,7 @@ final class ConsumerCircuitBreaker {
                 new RuntimeException("Auto-paused after " + consecutiveProcessingFailures + " consecutive processing failures"));
     }
 
-    private void setPartitionsPaused(KafkaConsumer<byte[], byte[]> kafkaConsumer, boolean paused) {
+    private void setPartitionsPaused(Consumer<byte[], byte[]> kafkaConsumer, boolean paused) {
         try {
             Set<TopicPartition> assignment = kafkaConsumer.assignment();
             if (!assignment.isEmpty()) {
