@@ -145,6 +145,12 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
      */
     java.util.function.Function<Properties, KafkaProducer<byte[], byte[]>> txnProducerFactory =
             TransactionalProducerPool::createTransactionalProducer;
+    /**
+     * Asks the broker whether a topic exists; {@link #checkTopicExists(String)} outside tests. A
+     * field rather than a direct call, like {@link #txnProducerFactory}: it is the seam through which
+     * a test scripts the probe's verdict without a broker.
+     */
+    java.util.function.Function<String, TopicCheckResult> topicProbe = this::checkTopicExists;
     private AvroSerializerHelper avroHelper;
     private AdapterTracingHelper tracingHelper;
     private JsonSchemaValidator jsonSchemaValidator;
@@ -1582,10 +1588,10 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
      * an inconclusive probe caused by a rejected TLS handshake is a configuration error worth
      * reporting straight away, while the same verdict caused by a timeout may just be a hiccup.
      */
-    private static final class TopicCheckResult {
+    static final class TopicCheckResult {
 
-        private static final TopicCheckResult EXISTS = new TopicCheckResult(TopicCheck.EXISTS, null);
-        private static final TopicCheckResult MISSING = new TopicCheckResult(TopicCheck.MISSING, null);
+        static final TopicCheckResult EXISTS = new TopicCheckResult(TopicCheck.EXISTS, null);
+        static final TopicCheckResult MISSING = new TopicCheckResult(TopicCheck.MISSING, null);
 
         private final TopicCheck state;
         /** Only set for {@link TopicCheck#INCONCLUSIVE}; may still be {@code null} there. */
@@ -1626,7 +1632,7 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
         if (topic == null || topic.isEmpty() || verifiedTopics.contains(topic)) {
             return;
         }
-        TopicCheckResult result = checkTopicExists(topic);
+        TopicCheckResult result = topicProbe.apply(topic);
         for (int attempt = 0; result.state == TopicCheck.MISSING
                 && attempt < TOPIC_RECHECK_ATTEMPTS; attempt++) {
             if (!sleepQuietly(TOPIC_RECHECK_DELAY_MS)) {
@@ -1634,7 +1640,7 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
             }
             LOG.debug("[CPI-KAFKA-PLUS-DIAG] Topic '{}' reported as missing, re-checking ({}/{})",
                     topic, attempt + 1, TOPIC_RECHECK_ATTEMPTS);
-            result = checkTopicExists(topic);
+            result = topicProbe.apply(topic);
         }
         if (result.state == TopicCheck.MISSING) {
             throw new IllegalArgumentException(
@@ -1705,7 +1711,7 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
     }
 
     private void warnIfTopicMissing(String topic) {
-        TopicCheckResult result = checkTopicExists(topic);
+        TopicCheckResult result = topicProbe.apply(topic);
         if (result.state == TopicCheck.MISSING) {
             // ERROR, not WARN: nothing below ERROR reaches the tenant trace, so this deployment-time
             // finding was invisible exactly where it is needed. Runs once per start (#177).
