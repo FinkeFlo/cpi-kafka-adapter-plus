@@ -475,7 +475,7 @@ final class TopicMetadataChecker {
     }
 
     /** Bootstrap and security settings for the topic probe, derived from the producer config. */
-    // Package-private for CpiKafkaPlusProducer and ProducerTopicProbeConfigTest.
+    // Package-private for CpiKafkaPlusProducer and TopicMetadataCheckerTest.
     Properties buildTopicCheckProperties() {
         Properties producerProps = producerProperties.get();
         Properties adminProps = new Properties();
