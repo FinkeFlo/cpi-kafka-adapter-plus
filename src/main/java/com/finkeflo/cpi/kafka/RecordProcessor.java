@@ -65,16 +65,6 @@ final class RecordProcessor {
      */
     static final Duration REVOKE_COMMIT_TIMEOUT = Duration.ofSeconds(5);
 
-    private static final Class<?> KAFKA_RETRIABLE_EXCEPTION = resolveKafkaRetriableException();
-
-    private static Class<?> resolveKafkaRetriableException() {
-        try {
-            return Class.forName("org.apache.kafka.common.errors.RetriableException");
-        } catch (ClassNotFoundException e) {
-            return null;
-        }
-    }
-
     /**
      * Callback interface to decouple RecordProcessor from the Camel Consumer.
      */
@@ -318,33 +308,6 @@ final class RecordProcessor {
         return new TopicPartition(record.topic(), record.partition());
     }
 
-    // --- Error classification (package-private for testability) ---
-
-    /**
-     * Walks the exception cause chain to determine if the error is transient.
-     * Returns true if any exception in the chain is a known network/connection
-     * exception type. Returns false for permanent errors (NPE, ClassCastException,
-     * FileNotFoundException, etc.) that would fail identically on retry.
-     */
-    static boolean isRetryable(Exception e) {
-        Throwable current = e;
-        while (current != null) {
-            if (current instanceof java.net.ConnectException
-                    || current instanceof java.net.SocketException
-                    || current instanceof java.net.SocketTimeoutException
-                    || current instanceof java.net.UnknownHostException
-                    || current instanceof java.util.concurrent.TimeoutException) {
-                return true;
-            }
-            if (KAFKA_RETRIABLE_EXCEPTION != null
-                    && KAFKA_RETRIABLE_EXCEPTION.isInstance(current)) {
-                return true;
-            }
-            current = current.getCause();
-        }
-        return false;
-    }
-
     /**
      * Group records by TopicPartition, preserving offset order within each partition.
      * Package-private for testability.
@@ -523,7 +486,7 @@ final class RecordProcessor {
             } catch (Exception e) {
                 lastError = e;
 
-                if (endpoint.isRetryOnlyTransientErrors() && !isRetryable(e)) {
+                if (endpoint.isRetryOnlyTransientErrors() && !KafkaErrorHelper.isRetryable(e)) {
                     LOG.info("[CPI-KAFKA-PLUS-DIAG] Permanent error detected, "
                             + "skipping {} remaining retries -> DLQ: offset={} partition={} error='{}'",
                             maxRetries - attempt, record.offset(), record.partition(), e.getMessage());

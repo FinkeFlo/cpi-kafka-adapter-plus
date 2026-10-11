@@ -496,12 +496,12 @@ public class AdapterTracingHelper {
         sb.append(')');
     }
 
-    /** Null-safe wrapper for RecordProcessor.isRetryable. */    private boolean isRetryableSafe(Exception e) {
+    /** Null-safe wrapper for KafkaErrorHelper.isRetryable. */    private boolean isRetryableSafe(Exception e) {
         if (e == null) {
             return false;
         }
         try {
-            return RecordProcessor.isRetryable(e);
+            return KafkaErrorHelper.isRetryable(e);
         } catch (Exception ignored) {
             return false;
         }

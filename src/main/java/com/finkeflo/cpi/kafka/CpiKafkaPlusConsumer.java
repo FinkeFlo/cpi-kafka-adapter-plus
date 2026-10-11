@@ -1179,7 +1179,7 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
      * DLQ record and the MPL entry still show the real root cause instead of a synthetic message.
      *
      * <p>Deliberately not a transient exception type: a swallowed sub-iFlow error is
-     * deterministic and would fail identically on retry, so {@link RecordProcessor#isRetryable}
+     * deterministic and would fail identically on retry, so {@link KafkaErrorHelper#isRetryable}
      * classifies it as permanent and (with the default {@code retryOnlyTransientErrors=true}) it
      * goes straight to the DLQ instead of burning {@code dlqMaxRetries} attempts.
      *
