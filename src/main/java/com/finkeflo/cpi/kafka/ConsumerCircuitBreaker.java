@@ -70,11 +70,12 @@ final class ConsumerCircuitBreaker {
 
         long now = System.currentTimeMillis();
         if (now < pausedUntil) {
-            // Still in cooldown — pause partitions and poll for keepalive
-            setPartitionsPaused(kafkaConsumer, true);
+            // Still in cooldown — pause partitions and poll for keepalive. Records of a partition
+            // assigned during the poll are rewound (N-D-1). No reportConnectionHealthy() here: it
+            // would overwrite the ERROR status set by triggerAutoPause().
             try {
                 BundleBackedClassLoader.withBundleClassLoader(getClass(),
-                        () -> kafkaConsumer.poll(Duration.ofMillis(100)));
+                        () -> KeepAlive.pollPausedAndRewind(kafkaConsumer, Duration.ofMillis(100)));
             } catch (WakeupException e) {
                 LOG.info("[CPI-KAFKA-PLUS-DIAG] poll: received wakeup signal during auto-pause");
             } catch (Exception e) {

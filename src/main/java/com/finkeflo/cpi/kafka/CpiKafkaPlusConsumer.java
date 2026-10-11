@@ -23,10 +23,8 @@ package com.finkeflo.cpi.kafka;
 import java.nio.ByteBuffer;
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
 
@@ -35,7 +33,6 @@ import org.apache.camel.Exchange;
 import org.apache.camel.Processor;
 import org.apache.camel.support.ScheduledPollConsumer;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
-import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.common.TopicPartition;
@@ -898,21 +895,9 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
      * rebalance, because {@code consumer.position()} has already advanced past them.
      */
     private void seekBackToFirstOffsets(ConsumerRecords<byte[], byte[]> records) {
-        Map<TopicPartition, Long> firstOffsets = new HashMap<>();
-        for (ConsumerRecord<byte[], byte[]> rec : records) {
-            TopicPartition tp = new TopicPartition(rec.topic(), rec.partition());
-            Long current = firstOffsets.get(tp);
-            if (current == null || rec.offset() < current) {
-                firstOffsets.put(tp, rec.offset());
-            }
-        }
         try {
-            BundleBackedClassLoader.withBundleClassLoader(getClass(), () -> {
-                for (Map.Entry<TopicPartition, Long> e : firstOffsets.entrySet()) {
-                    kafkaConsumer.seek(e.getKey(), e.getValue());
-                }
-                return null;
-            });
+            BundleBackedClassLoader.runWithBundleClassLoader(getClass(),
+                    () -> KeepAlive.seekToFirstOffsets(kafkaConsumer, records));
         } catch (Exception e) {
             LOG.warn("[CPI-KAFKA-PLUS-DIAG] drain: failed to seek back to first offsets, "
                     + "records may be re-polled on next cycle anyway: exClass={} exMsg='{}'",
@@ -1019,16 +1004,11 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
     private void keepAlivePoll() {
         try {
             BundleBackedClassLoader.runWithBundleClassLoader(getClass(), () -> {
-                Set<TopicPartition> assigned = kafkaConsumer.assignment();
-                kafkaConsumer.pause(assigned);
-                ConsumerRecords<byte[], byte[]> records =
-                        kafkaConsumer.poll(Duration.ofMillis(KEEP_ALIVE_POLL_TIMEOUT_MS));
-                if (records != null && !records.isEmpty()) {
-                    // Defensive: eine Partition wurde mitten im poll() neu zugeteilt
-                    // und war daher nicht pausiert -> Records zurueckspulen, damit
-                    // der naechste Emit-Zyklus sie liest. Keep-Alive committet nie.
-                    seekBackToFirstOffsets(records);
-                }
+                // Records einer mitten im poll() neu zugeteilten (daher nicht pausierten)
+                // Partition werden zurueckgespult, damit der naechste Emit-Zyklus sie
+                // liest. Keep-Alive committet nie.
+                KeepAlive.pollPausedAndRewind(kafkaConsumer,
+                        Duration.ofMillis(KEEP_ALIVE_POLL_TIMEOUT_MS), this::seekBackToFirstOffsets);
                 kafkaConsumer.resume(kafkaConsumer.assignment());
             });
             // A keep-alive poll that returns without throwing is also a genuine broker round-trip.
