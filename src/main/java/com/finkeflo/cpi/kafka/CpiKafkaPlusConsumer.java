@@ -870,14 +870,19 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
         } catch (WakeupException we) {
             LOG.info("[CPI-KAFKA-PLUS-DIAG] keepAlivePoll: received wakeup signal");
         } catch (Exception e) {
-            if (PollFailureClassifier.isNonRetryablePollFailure(e)) {
-                handleNonRetryablePollFailure(e);
-            } else if (PollFailureClassifier.isFencedInstanceIdFailure(e)) {
-                handleFencedInstanceIdFailure(e);
-            } else if (PollFailureClassifier.isClassSpaceGoneFailure(e, getClass())) {
-                handleBundleWiringInvalidFailure(e);
-            } else {
-                LOG.warn("[CPI-KAFKA-PLUS-DIAG] keepAlivePoll: best-effort poll failed: {}", e.getMessage());
+            switch (PollFailureClassifier.classify(e, getClass())) {
+                case NON_RETRYABLE:
+                    handleNonRetryablePollFailure(e);
+                    break;
+                case FENCED:
+                    handleFencedInstanceIdFailure(e);
+                    break;
+                case CLASS_SPACE_GONE:
+                    handleBundleWiringInvalidFailure(e);
+                    break;
+                default:
+                    LOG.warn("[CPI-KAFKA-PLUS-DIAG] keepAlivePoll: best-effort poll failed: {}", e.getMessage());
+                    break;
             }
         }
     }
@@ -977,22 +982,27 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
                     t.getCause() != null ? t.getCause().getClass().getName() : "null",
                     t.getCause() != null ? t.getCause().getMessage() : "null",
                     describeTopStack(t, 6));
-            if (PollFailureClassifier.isNonRetryablePollFailure(t)) {
-                handleNonRetryablePollFailure(t);
-            } else if (PollFailureClassifier.isFencedInstanceIdFailure(t)) {
-                handleFencedInstanceIdFailure(t);
-            } else if (PollFailureClassifier.isClassSpaceGoneFailure(t, getClass())) {
-                handleBundleWiringInvalidFailure(t);
-            } else {
-                // A client without TLS against a TLS-only listener never gets far enough to see a
-                // handshake error — the broker just drops it, so the poll only ever times out. Name
-                // the most likely cause instead of leaving the operator with a bare timeout.
-                String hint = KafkaErrorHelper.tlsMismatchHint(endpoint.getSecurityProtocol());
-                if (hint != null) {
-                    LOG.warn("[CPI-KAFKA-PLUS-DIAG] poll: {}", hint);
-                }
-                reportConnectionError(t);
-                maybeReconnectAfterPollFailure();
+            switch (PollFailureClassifier.classify(t, getClass())) {
+                case NON_RETRYABLE:
+                    handleNonRetryablePollFailure(t);
+                    break;
+                case FENCED:
+                    handleFencedInstanceIdFailure(t);
+                    break;
+                case CLASS_SPACE_GONE:
+                    handleBundleWiringInvalidFailure(t);
+                    break;
+                default:
+                    // A client without TLS against a TLS-only listener never gets far enough to see a
+                    // handshake error — the broker just drops it, so the poll only ever times out. Name
+                    // the most likely cause instead of leaving the operator with a bare timeout.
+                    String hint = KafkaErrorHelper.tlsMismatchHint(endpoint.getSecurityProtocol());
+                    if (hint != null) {
+                        LOG.warn("[CPI-KAFKA-PLUS-DIAG] poll: {}", hint);
+                    }
+                    reportConnectionError(t);
+                    maybeReconnectAfterPollFailure();
+                    break;
             }
             if (t instanceof Exception) {
                 throw (Exception) t;

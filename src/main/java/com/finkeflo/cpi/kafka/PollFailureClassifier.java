@@ -29,11 +29,50 @@ import org.apache.kafka.common.errors.SaslAuthenticationException;
 import org.apache.kafka.common.errors.SslAuthenticationException;
 
 /**
- * Decides which kind of failure a failed poll of the sender's Kafka consumer is. Package-private.
+ * Sorts a failed poll of the sender's Kafka consumer ({@link CpiKafkaPlusConsumer}) into the
+ * {@link Kind} that decides how the consumer reacts. Moved out of the consumer, whose emit poll and
+ * keep-alive poll both switch on {@link #classify}; the handler of each kind, and what each poll
+ * does with {@link Kind#OTHER}, stay in the consumer. The emit poll passes every {@link Throwable},
+ * the keep-alive poll only {@link Exception}s. Does not log. Package-private.
  */
 final class PollFailureClassifier {
 
+    /** What a failed poll is. The consumer has one handler for each kind except {@link #OTHER}. */
+    enum Kind {
+        /** Rejected credentials, permissions or certificates: polling stops until a redeploy. */
+        NON_RETRYABLE,
+        /** Another member holds this consumer's static {@code group.instance.id}: polling cools down. */
+        FENCED,
+        /** An adapter update replaced the class space of the route (issue #148): polling stops. */
+        CLASS_SPACE_GONE,
+        /** Anything else; the emit poll and the keep-alive poll each handle it their own way. */
+        OTHER
+    }
+
     private PollFailureClassifier() {
+    }
+
+    /**
+     * The kind of a failed poll: {@link Kind#NON_RETRYABLE}, then {@link Kind#FENCED}, then
+     * {@link Kind#CLASS_SPACE_GONE} are checked, and the first match wins. A failure whose cause
+     * chain holds both rejected credentials and a fenced member is therefore
+     * {@link Kind#NON_RETRYABLE}.
+     *
+     * @param routeClass a class of the running route; its loader tells whether an adapter update
+     *                   has replaced the route's bundle revision
+     *                   (see {@link ClassSpaceFaults#isOnStaleClassSpace})
+     */
+    static Kind classify(Throwable failure, Class<?> routeClass) {
+        if (isNonRetryablePollFailure(failure)) {
+            return Kind.NON_RETRYABLE;
+        }
+        if (isFencedInstanceIdFailure(failure)) {
+            return Kind.FENCED;
+        }
+        if (isClassSpaceGoneFailure(failure, routeClass)) {
+            return Kind.CLASS_SPACE_GONE;
+        }
+        return Kind.OTHER;
     }
 
     /**
@@ -51,10 +90,15 @@ final class PollFailureClassifier {
      * "bundle wiring ... no longer valid" text, or a class/link/native-library fault while this
      * route's loader belongs to a bundle revision an adapter update has already replaced.
      */
-    static boolean isClassSpaceGoneFailure(Throwable failure, Class<?> routeClass) {
+    private static boolean isClassSpaceGoneFailure(Throwable failure, Class<?> routeClass) {
         return ClassSpaceFaults.isOnStaleClassSpace(failure, routeClass);
     }
 
+    /**
+     * The first link of the cause chain, from the outside in, that makes the failure
+     * non-retryable, or {@code null} when there is none. The consumer names its class in the
+     * message of the policy error ({@link CpiKafkaPlusConsumer#buildStoppedByErrorPolicyException}).
+     */
     static Throwable findNonRetryablePollFailureCause(Throwable failure) {
         Throwable current = failure;
         while (current != null) {

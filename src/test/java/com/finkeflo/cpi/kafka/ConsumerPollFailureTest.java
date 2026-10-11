@@ -321,6 +321,7 @@ public class ConsumerPollFailureTest {
 
     /** Stopped by error policy: closed, reported, and nothing counted towards a reconnect. */
     private static Throwable assertStopped(Tick tick, String policyMessage) throws Exception {
+        assertNoOtherBranch(tick);
         Assert.assertEquals(Boolean.TRUE, tick.field("stoppedByErrorPolicy"));
         Throwable policyError = (Throwable) tick.field("stoppedByError");
         Assert.assertTrue(String.valueOf(policyError), policyError instanceof IllegalStateException);
@@ -337,6 +338,7 @@ public class ConsumerPollFailureTest {
 
     /** Fenced: closed, reported, and a cooldown of 40 s plus up to 10 s jitter before the rebuild. */
     private static void assertFencedCooldown(Tick tick) throws Exception {
+        assertNoOtherBranch(tick);
         Assert.assertEquals(Boolean.FALSE, tick.field("stoppedByErrorPolicy"));
         Assert.assertNull(tick.field("stoppedByError"));
         assertClientClosed(tick);
@@ -359,6 +361,14 @@ public class ConsumerPollFailureTest {
         Assert.assertTrue(text, m.find());
         long cooldownMs = Long.parseLong(m.group(1));
         Assert.assertTrue(text, cooldownMs >= 40_000L && cooldownMs < 50_000L);
+    }
+
+    /**
+     * The keep-alive poll's "anything else" branch did not run as well. The emit poll's would show
+     * in the reconnect counters, which the callers of this check expect at zero.
+     */
+    private static void assertNoOtherBranch(Tick tick) {
+        assertNotLogged(tick, "keepAlivePoll: best-effort poll failed");
     }
 
     private static void assertClientClosed(Tick tick) throws Exception {

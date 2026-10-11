@@ -39,12 +39,8 @@ import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.common.TopicPartition;
-import org.apache.kafka.common.errors.AuthenticationException;
-import org.apache.kafka.common.errors.GroupAuthorizationException;
 import org.apache.kafka.common.errors.SaslAuthenticationException;
 import org.apache.kafka.common.errors.SslAuthenticationException;
-import org.apache.kafka.common.errors.TimeoutException;
-import org.apache.kafka.common.errors.TopicAuthorizationException;
 import org.junit.Assert;
 import org.junit.Test;
 
@@ -370,72 +366,6 @@ public class CpiKafkaPlusConsumerTest {
     }
 
     @Test
-    public void testIsNonRetryablePollFailureWithSaslAuthenticationException() {
-        Assert.assertTrue(PollFailureClassifier.isNonRetryablePollFailure(
-                new SaslAuthenticationException("bad credentials")));
-    }
-
-    @Test
-    public void testIsNonRetryablePollFailureWithTopicAuthorizationException() {
-        Assert.assertTrue(PollFailureClassifier.isNonRetryablePollFailure(
-                new TopicAuthorizationException(java.util.Collections.singleton("topic-a"))));
-    }
-
-    @Test
-    public void testIsNonRetryablePollFailureWithSslHandshakeCause() {
-        Assert.assertTrue(PollFailureClassifier.isNonRetryablePollFailure(
-                new RuntimeException("wrapped", new SSLHandshakeException("handshake failed"))));
-    }
-
-    @Test
-    public void testIsNonRetryablePollFailureWithWrappedAuthenticationCause() {
-        Assert.assertTrue(PollFailureClassifier.isNonRetryablePollFailure(
-                new RuntimeException("wrapped",
-                        new IllegalStateException("mid",
-                                new SaslAuthenticationException("auth failed")))));
-    }
-
-    @Test
-    public void testIsNonRetryablePollFailureWithPlainAuthenticationException() {
-        Assert.assertTrue(PollFailureClassifier.isNonRetryablePollFailure(
-                new AuthenticationException("authentication failed")));
-    }
-
-    @Test
-    public void testIsNonRetryablePollFailureWithSslAuthenticationException() {
-        Assert.assertTrue(PollFailureClassifier.isNonRetryablePollFailure(
-                new SslAuthenticationException("SSL handshake failed")));
-    }
-
-    @Test
-    public void testIsNonRetryablePollFailureWithGroupAuthorizationException() {
-        Assert.assertTrue(PollFailureClassifier.isNonRetryablePollFailure(
-                new GroupAuthorizationException("Not authorized to access group: group-a")));
-    }
-
-    @Test(timeout = 10_000)
-    public void testIsNonRetryablePollFailureStopsAtASelfCausedThrowable() {
-        Assert.assertFalse(PollFailureClassifier.isNonRetryablePollFailure(new SelfCausedException()));
-    }
-
-    @Test
-    public void testIsNonRetryablePollFailureWithNull() {
-        Assert.assertFalse(PollFailureClassifier.isNonRetryablePollFailure(null));
-    }
-
-    @Test
-    public void testIsNonRetryablePollFailureWithTimeoutExceptionDefaultsToRetryable() {
-        Assert.assertFalse(PollFailureClassifier.isNonRetryablePollFailure(
-                new TimeoutException("broker timeout")));
-    }
-
-    @Test
-    public void testIsNonRetryablePollFailureWithUnknownExceptionDefaultsToRetryable() {
-        Assert.assertFalse(PollFailureClassifier.isNonRetryablePollFailure(
-                new RuntimeException("unknown")));
-    }
-
-    @Test
     public void testIsBundleWiringInvalidFailureWithNoClassDefFoundError() {
         Throwable failure = new NoClassDefFoundError(
                 "org/apache/kafka/clients/consumer/ConsumerPartitionAssignor$GroupSubscription");
@@ -460,37 +390,6 @@ public class CpiKafkaPlusConsumerTest {
     public void testIsBundleWiringInvalidFailureFalseForRegularClassNotFound() {
         Assert.assertFalse(ClassSpaceFaults.isWiringInvalid(
                 new ClassNotFoundException("org.example.DoesNotExist")));
-    }
-
-    @Test
-    public void testIsFencedInstanceIdFailureWithDirectException() {
-        Assert.assertTrue(PollFailureClassifier.isFencedInstanceIdFailure(
-                new org.apache.kafka.common.errors.FencedInstanceIdException(
-                        "The broker rejected this static consumer since another consumer with the same "
-                                + "group.instance.id has registered with a different member.id.")));
-    }
-
-    @Test
-    public void testIsFencedInstanceIdFailureWithWrappedCause() {
-        Assert.assertTrue(PollFailureClassifier.isFencedInstanceIdFailure(
-                new RuntimeException("wrapped",
-                        new org.apache.kafka.common.errors.FencedInstanceIdException("fenced"))));
-    }
-
-    @Test
-    public void testIsFencedInstanceIdFailureFalseForUnrelatedException() {
-        Assert.assertFalse(PollFailureClassifier.isFencedInstanceIdFailure(
-                new RuntimeException("unrelated")));
-    }
-
-    @Test(timeout = 10_000)
-    public void testIsFencedInstanceIdFailureStopsAtASelfCausedThrowable() {
-        Assert.assertFalse(PollFailureClassifier.isFencedInstanceIdFailure(new SelfCausedException()));
-    }
-
-    @Test
-    public void testIsFencedInstanceIdFailureWithNull() {
-        Assert.assertFalse(PollFailureClassifier.isFencedInstanceIdFailure(null));
     }
 
     @Test
@@ -525,18 +424,6 @@ public class CpiKafkaPlusConsumerTest {
                 + "credentials, permissions, or certificates and redeploy the integration flow to resume "
                 + "consumption.", ex.getMessage());
         Assert.assertSame(failure, ex.getCause());
-    }
-
-    /** Reports itself as its own cause; a walk along the cause chain has to stop there. */
-    private static final class SelfCausedException extends RuntimeException {
-        SelfCausedException() {
-            super("self-caused");
-        }
-
-        @Override
-        public synchronized Throwable getCause() {
-            return this;
-        }
     }
 
     // --- Issue #45: max.poll.interval.ms scaling ---
