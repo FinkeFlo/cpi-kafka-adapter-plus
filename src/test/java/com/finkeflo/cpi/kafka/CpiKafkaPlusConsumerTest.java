@@ -39,7 +39,10 @@ import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.errors.AuthenticationException;
+import org.apache.kafka.common.errors.GroupAuthorizationException;
 import org.apache.kafka.common.errors.SaslAuthenticationException;
+import org.apache.kafka.common.errors.SslAuthenticationException;
 import org.apache.kafka.common.errors.TimeoutException;
 import org.apache.kafka.common.errors.TopicAuthorizationException;
 import org.junit.Assert;
@@ -393,6 +396,34 @@ public class CpiKafkaPlusConsumerTest {
     }
 
     @Test
+    public void testIsNonRetryablePollFailureWithPlainAuthenticationException() {
+        Assert.assertTrue(CpiKafkaPlusConsumer.isNonRetryablePollFailure(
+                new AuthenticationException("authentication failed")));
+    }
+
+    @Test
+    public void testIsNonRetryablePollFailureWithSslAuthenticationException() {
+        Assert.assertTrue(CpiKafkaPlusConsumer.isNonRetryablePollFailure(
+                new SslAuthenticationException("SSL handshake failed")));
+    }
+
+    @Test
+    public void testIsNonRetryablePollFailureWithGroupAuthorizationException() {
+        Assert.assertTrue(CpiKafkaPlusConsumer.isNonRetryablePollFailure(
+                new GroupAuthorizationException("Not authorized to access group: group-a")));
+    }
+
+    @Test(timeout = 10_000)
+    public void testIsNonRetryablePollFailureStopsAtASelfCausedThrowable() {
+        Assert.assertFalse(CpiKafkaPlusConsumer.isNonRetryablePollFailure(new SelfCausedException()));
+    }
+
+    @Test
+    public void testIsNonRetryablePollFailureWithNull() {
+        Assert.assertFalse(CpiKafkaPlusConsumer.isNonRetryablePollFailure(null));
+    }
+
+    @Test
     public void testIsNonRetryablePollFailureWithTimeoutExceptionDefaultsToRetryable() {
         Assert.assertFalse(CpiKafkaPlusConsumer.isNonRetryablePollFailure(
                 new TimeoutException("broker timeout")));
@@ -452,6 +483,16 @@ public class CpiKafkaPlusConsumerTest {
                 new RuntimeException("unrelated")));
     }
 
+    @Test(timeout = 10_000)
+    public void testIsFencedInstanceIdFailureStopsAtASelfCausedThrowable() {
+        Assert.assertFalse(CpiKafkaPlusConsumer.isFencedInstanceIdFailure(new SelfCausedException()));
+    }
+
+    @Test
+    public void testIsFencedInstanceIdFailureWithNull() {
+        Assert.assertFalse(CpiKafkaPlusConsumer.isFencedInstanceIdFailure(null));
+    }
+
     @Test
     public void testBuildStoppedByErrorPolicyExceptionUsesMatchingCauseInMessage() {
         IllegalStateException ex = CpiKafkaPlusConsumer.buildStoppedByErrorPolicyException(
@@ -461,6 +502,41 @@ public class CpiKafkaPlusConsumerTest {
         Assert.assertTrue(ex.getMessage().contains("SSLHandshakeException"));
         Assert.assertTrue(ex.getMessage().contains("topic='topic-a'"));
         Assert.assertTrue(ex.getMessage().contains("group='group-a'"));
+    }
+
+    @Test
+    public void testBuildStoppedByErrorPolicyExceptionNamesTheOutermostMatchingCause() {
+        IllegalStateException ex = CpiKafkaPlusConsumer.buildStoppedByErrorPolicyException(
+                "topic-a", "group-a",
+                new RuntimeException("wrapped", new SaslAuthenticationException("outer",
+                        new SslAuthenticationException("inner"))));
+
+        Assert.assertTrue(ex.getMessage(), ex.getMessage().contains("(SaslAuthenticationException)"));
+    }
+
+    @Test
+    public void testBuildStoppedByErrorPolicyExceptionNamesTheFailureWithoutAMatchingCause() {
+        RuntimeException failure = new RuntimeException("unknown");
+        IllegalStateException ex = CpiKafkaPlusConsumer.buildStoppedByErrorPolicyException(
+                "topic-a", "group-a", failure);
+
+        Assert.assertEquals("Non-retryable Kafka consumer poll failure detected for topic='topic-a' "
+                + "group='group-a' (RuntimeException). Polling has been stopped by error policy. Fix "
+                + "credentials, permissions, or certificates and redeploy the integration flow to resume "
+                + "consumption.", ex.getMessage());
+        Assert.assertSame(failure, ex.getCause());
+    }
+
+    /** Reports itself as its own cause; a walk along the cause chain has to stop there. */
+    private static final class SelfCausedException extends RuntimeException {
+        SelfCausedException() {
+            super("self-caused");
+        }
+
+        @Override
+        public synchronized Throwable getCause() {
+            return this;
+        }
     }
 
     // --- Issue #45: max.poll.interval.ms scaling ---
