@@ -49,16 +49,19 @@ import org.junit.Test;
 
 /**
  * What one scheduler tick of the sender does when the Kafka client's {@code poll()} fails, for each
- * kind of failure and for both polls that can fail: the emit poll that fetches records and the
- * keep-alive poll between two emit cycles. Both first decide which kind of failure it is (credentials,
- * permissions or certificates rejected; the static member fenced; the adapter's class space replaced;
- * anything else) and run that kind's handler. Only "anything else" is handled differently by the two.
+ * kind of failure and for each poll that can fail: the emit poll that fetches records, the keep-alive
+ * poll between two emit cycles and the keep-alive poll during an auto-pause. All first decide which
+ * kind of failure it is (credentials, permissions or certificates rejected; the static member fenced;
+ * the adapter's class space replaced; anything else) and run that kind's handler. Only "anything
+ * else" is handled differently: the emit poll counts it towards a reconnect, the keep-alive polls only
+ * warn about it, unless it is an {@link Error}.
  *
  * <p>No broker: the Kafka client is a real {@link KafkaConsumer} whose {@code poll()} throws.
  */
 public class ConsumerPollFailureTest {
 
     private static final String CONSUMER = CpiKafkaPlusConsumer.class.getName();
+    private static final String CIRCUIT_BREAKER = ConsumerCircuitBreaker.class.getName();
 
     /** The text OSGi puts into a class load over the purged revision of an updated adapter. */
     private static final String WIRING_GONE = "Unable to load class "
@@ -79,7 +82,9 @@ public class ConsumerPollFailureTest {
         /** The first tick after the start: an emit cycle, whose poll fetches records. */
         EMIT,
         /** A tick between two emit cycles: the keep-alive poll, which only drives the group protocol. */
-        KEEP_ALIVE
+        KEEP_ALIVE,
+        /** A tick during an auto-pause: the circuit breaker's keep-alive poll. */
+        AUTO_PAUSE
     }
 
     private DefaultCamelContext ctx;
@@ -179,25 +184,71 @@ public class ConsumerPollFailureTest {
     }
 
     /**
-     * The keep-alive poll catches {@code Exception} only, so an {@code Error} such as a
-     * {@code NoClassDefFoundError} leaves it without being classified (finding N1 of the
-     * refactoring plan, open). Fixing that is a change in behaviour and changes this test.
+     * An {@code Error} such as the {@code NoClassDefFoundError} of a purged class space is classified
+     * by the keep-alive poll as well (#243). Before, it escaped unclassified, and in SCHEDULED mode
+     * only the next emit cycle, up to hours later, stopped polling.
      */
     @Test
-    public void anErrorLeavesTheKeepAlivePollUnclassified() throws Exception {
+    public void aGoneClassSpaceStopsTheKeepAlivePollOnAnErrorToo() throws Exception {
         NoClassDefFoundError failure = new NoClassDefFoundError(
                 "org/apache/kafka/clients/consumer/internals/ConsumerCoordinator$3");
         failure.initCause(new ClassNotFoundException(WIRING_GONE));
         Tick tick = tick(Path.KEEP_ALIVE, failure);
 
-        Assert.assertSame(failure, tick.thrown);
-        assertUntouched(tick);
-        Assert.assertTrue(tick.tracing.published.isEmpty());
-        assertNotLogged(tick, "poll.bundle-wiring-invalid");
-        assertNotLogged(tick, "keepAlivePoll:");
+        assertSwallowed(tick);
+        assertStoppedByClassSpace(tick);
+        assertNotLogged(tick, "keepAlivePoll: FAILED");
+        assertNextTickDoesNotPoll(tick);
     }
 
-    // --- anything else: the emit poll counts it towards a reconnect, the keep-alive only warns ---
+    // --- the keep-alive poll during an auto-pause: the same handlers (#243) ---
+
+    @Test
+    public void rejectedCredentialsStopTheAutoPauseKeepAlivePoll() throws Exception {
+        SaslAuthenticationException failure = new SaslAuthenticationException("bad credentials");
+        Tick tick = tick(Path.AUTO_PAUSE, failure);
+
+        assertSwallowed(tick);
+        assertStoppedByErrorPolicy(tick, String.format(STOPPED_BY_CREDENTIALS, "SaslAuthenticationException"));
+        assertNotLogged(tick, "keepalive poll failed during auto-pause");
+        assertNextTickDoesNotPoll(tick);
+    }
+
+    @Test
+    public void aFencedInstanceCoolsDownTheAutoPauseKeepAlivePoll() throws Exception {
+        FencedInstanceIdException failure = new FencedInstanceIdException("fenced");
+        Tick tick = tick(Path.AUTO_PAUSE, failure);
+
+        assertSwallowed(tick);
+        assertFencedCooldown(tick);
+        assertNotLogged(tick, "keepalive poll failed during auto-pause");
+        assertNextTickDoesNotPoll(tick);
+    }
+
+    @Test
+    public void aGoneClassSpaceStopsTheAutoPauseKeepAlivePoll() throws Exception {
+        NoClassDefFoundError failure = new NoClassDefFoundError(
+                "org/apache/kafka/clients/consumer/internals/ConsumerCoordinator$3");
+        failure.initCause(new ClassNotFoundException(WIRING_GONE));
+        Tick tick = tick(Path.AUTO_PAUSE, failure);
+
+        assertSwallowed(tick);
+        assertStoppedByClassSpace(tick);
+        assertNextTickDoesNotPoll(tick);
+    }
+
+    @Test
+    public void aWakeupEndsTheAutoPauseKeepAlivePollWithoutAFailure() throws Exception {
+        Tick tick = tick(Path.AUTO_PAUSE, new WakeupException());
+
+        assertSwallowed(tick);
+        assertUntouched(tick);
+        Assert.assertTrue(tick.tracing.published.isEmpty());
+        assertLogged(tick, "INFO " + CIRCUIT_BREAKER + " - [CPI-KAFKA-PLUS-DIAG] poll: received wakeup signal "
+                + "during auto-pause");
+    }
+
+    // --- anything else: the emit poll counts it towards a reconnect, the keep-alive polls only warn ---
 
     @Test
     public void anyOtherFailureCountsTowardsAReconnectOnTheEmitPoll() throws Exception {
@@ -243,6 +294,56 @@ public class ConsumerPollFailureTest {
                 + "failed: broker timeout");
         assertNotLogged(tick, "poll: FAILED");
         assertNotLogged(tick, "does not use TLS");
+    }
+
+    @Test
+    public void anyOtherFailureIsWarnedAboutOnceAMinuteDuringAnAutoPause() throws Exception {
+        TimeoutException failure = new TimeoutException("broker timeout");
+        Tick tick = tick(Path.AUTO_PAUSE, failure);
+
+        assertSwallowed(tick);
+        assertUntouched(tick);
+        Assert.assertTrue(tick.tracing.published.isEmpty());
+        String warning = "WARN " + CONSUMER + " - [CPI-KAFKA-PLUS-DIAG] poll: keepalive poll failed during "
+                + "auto-pause: broker timeout";
+        assertLogged(tick, warning);
+
+        // In STREAMING mode the next tick follows about a second later.
+        List<String> next = new ArrayList<>();
+        runTick(tick, next);
+        Assert.assertEquals(2, tick.client.polls);
+        Assert.assertNull(tick.thrown);
+        Assert.assertEquals("no second WARN within a minute", -1, indexOf(next, warning));
+
+        tick.set("lastAutoPauseKeepAliveWarnMs", System.currentTimeMillis() - 60_000L);
+        List<String> later = new ArrayList<>();
+        runTick(tick, later);
+        Assert.assertTrue("a WARN again after a minute: " + later, indexOf(later, warning) >= 0);
+    }
+
+    /** An {@code Error} is no best-effort matter: it counts as it does on the emit poll (#243). */
+    @Test
+    public void anyOtherErrorCountsTowardsAReconnectOnTheKeepAlivePolls() throws Exception {
+        for (Path path : new Path[] {Path.KEEP_ALIVE, Path.AUTO_PAUSE}) {
+            String poll = path == Path.KEEP_ALIVE ? "keepAlivePoll" : "autoPauseKeepAlivePoll";
+            OutOfMemoryError failure = new OutOfMemoryError("Java heap space");
+            Tick tick = tick(path, failure);
+
+            Assert.assertTrue(String.valueOf(tick.thrown), tick.thrown instanceof RuntimeException);
+            Assert.assertEquals("Non-Exception Throwable from " + poll + ": java.lang.OutOfMemoryError",
+                    tick.thrown.getMessage());
+            Assert.assertSame(failure, tick.thrown.getCause());
+            Assert.assertEquals(Boolean.FALSE, tick.field("stoppedByErrorPolicy"));
+            Assert.assertEquals(0L, tick.field("fencedCooldownUntilMs"));
+            Assert.assertEquals(1, tick.field("consecutivePollFailures"));
+            assertClientKept(tick);
+            assertPublishedOnce(tick, failure);
+            assertLogged(tick, "ERROR " + CONSUMER + " - [CPI-KAFKA-PLUS-DIAG] " + poll + ": FAILED topic='orders' "
+                    + "group='g' exClass=java.lang.OutOfMemoryError exMsg='Java heap space' causeClass=null "
+                    + "causeMsg='null' topStack=");
+            assertNotLogged(tick, "best-effort poll failed");
+            assertNotLogged(tick, "keepalive poll failed during auto-pause");
+        }
     }
 
     // --- a failure of more than one kind: the first kind in the order above wins, in both polls ---
@@ -369,6 +470,7 @@ public class ConsumerPollFailureTest {
      */
     private static void assertNoOtherBranch(Tick tick) {
         assertNotLogged(tick, "keepAlivePoll: best-effort poll failed");
+        assertNotLogged(tick, "keepalive poll failed during auto-pause");
     }
 
     private static void assertClientClosed(Tick tick) throws Exception {
@@ -436,7 +538,9 @@ public class ConsumerPollFailureTest {
     private Tick tick(Path path, Throwable failure, String securityProtocol) throws Exception {
         CpiKafkaPlusEndpoint endpoint = (CpiKafkaPlusEndpoint) ctx.getEndpoint("cpi-kafka-plus:orders"
                 + "?bootstrapServers=localhost:9092&groupId=g&pollingIntervalSeconds=600"
-                + "&securityProtocol=" + securityProtocol);
+                + "&securityProtocol=" + securityProtocol
+                + (path == Path.AUTO_PAUSE
+                        ? "&autoPauseEnabled=true&autoPauseErrorThreshold=1&autoPauseCooldownSeconds=60" : ""));
         CpiKafkaPlusConsumer consumer = new CpiKafkaPlusConsumer(endpoint, exchange -> { });
         Tick tick = new Tick(consumer, client(failure), new RecordingTracingHelper(endpoint), failure);
         tick.set("kafkaConsumer", tick.client);
@@ -446,28 +550,45 @@ public class ConsumerPollFailureTest {
             // The last emit cycle just ended, so the next one is not due for pollingIntervalSeconds.
             tick.set("lastEmitTimeMs", System.currentTimeMillis());
         }
+        if (path == Path.AUTO_PAUSE) {
+            // Paused by the failures of an earlier poll; its own status report is not this tick's.
+            ConsumerCircuitBreaker circuitBreaker = new ConsumerCircuitBreaker(endpoint,
+                    new RecordingTracingHelper(endpoint));
+            Assert.assertTrue(circuitBreaker.recordFailure());
+            tick.set("circuitBreaker", circuitBreaker);
+        }
 
+        tick.startedMs = System.currentTimeMillis();
+        runTick(tick, tick.lines);
+        tick.endedMs = System.currentTimeMillis();
+        Assert.assertEquals("the tick must have polled the client once", 1, tick.client.polls);
+        return tick;
+    }
+
+    /**
+     * Runs one scheduler tick of the tick's consumer, keeps what it returned or threw, and adds the
+     * lines it logged to {@code lines}.
+     */
+    private static void runTick(Tick tick, List<String> lines) throws Exception {
         PrintStream original = System.err;
         ByteArrayOutputStream captured = new ByteArrayOutputStream();
         System.setErr(new PrintStream(captured, true, "UTF-8"));
-        tick.startedMs = System.currentTimeMillis();
+        tick.returned = -1;
+        tick.thrown = null;
         try {
-            tick.returned = consumer.poll();
+            tick.returned = tick.consumer.poll();
         } catch (Throwable t) {
             tick.thrown = t;
         } finally {
-            tick.endedMs = System.currentTimeMillis();
             System.setErr(original);
         }
         // Kafka clients left behind by other tests keep logging on their own threads.
         String own = "[" + Thread.currentThread().getName() + "] ";
         for (String line : new String(captured.toByteArray(), StandardCharsets.UTF_8).split("\\R")) {
             if (line.startsWith(own)) {
-                tick.lines.add(line.substring(own.length()));
+                lines.add(line.substring(own.length()));
             }
         }
-        Assert.assertEquals("the tick must have polled the client once", 1, tick.client.polls);
-        return tick;
     }
 
     private FailingKafkaConsumer client(Throwable failure) {
@@ -485,8 +606,12 @@ public class ConsumerPollFailureTest {
     }
 
     private static int indexOf(Tick tick, String linePrefix) {
-        for (int i = 0; i < tick.lines.size(); i++) {
-            if (tick.lines.get(i).startsWith(linePrefix)) {
+        return indexOf(tick.lines, linePrefix);
+    }
+
+    private static int indexOf(List<String> lines, String linePrefix) {
+        for (int i = 0; i < lines.size(); i++) {
+            if (lines.get(i).startsWith(linePrefix)) {
                 return i;
             }
         }

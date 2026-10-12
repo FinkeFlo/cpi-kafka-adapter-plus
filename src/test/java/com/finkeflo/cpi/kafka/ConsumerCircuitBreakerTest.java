@@ -20,21 +20,28 @@
  */
 package com.finkeflo.cpi.kafka;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import org.apache.camel.impl.DefaultCamelContext;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.MockConsumer;
 import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.errors.SaslAuthenticationException;
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 
 public class ConsumerCircuitBreakerTest {
+
+    private static final java.util.function.Consumer<Throwable> NO_FAILURE = failure -> {
+        throw new AssertionError("unexpected keep-alive failure", failure);
+    };
 
     private DefaultCamelContext ctx;
 
@@ -117,7 +124,7 @@ public class ConsumerCircuitBreakerTest {
     public void testHandlePausedStateReturnsFalseWhenNotPaused() throws Exception {
         ConsumerCircuitBreaker cb = createCircuitBreaker(3, 10);
         Assert.assertFalse("Should not be paused when no failures",
-                cb.handlePausedState(null));
+                cb.handlePausedState(null, NO_FAILURE));
     }
 
     @Test
@@ -161,9 +168,27 @@ public class ConsumerCircuitBreakerTest {
             consumer.addRecord(new ConsumerRecord<>("test-topic", 1, 1L, null, "b".getBytes()));
         });
 
-        Assert.assertTrue("still in cooldown", cb.handlePausedState(consumer));
+        Assert.assertTrue("still in cooldown", cb.handlePausedState(consumer, NO_FAILURE));
         Assert.assertEquals("the records of the new partition must be read again after the pause",
                 0L, consumer.position(p1));
+    }
+
+    /**
+     * #243: a failed keep-alive poll during the cooldown goes to the consumer, which classifies it
+     * like a failed emit poll, instead of only to DEBUG. The consumer stays paused.
+     */
+    @Test
+    public void autoPauseKeepAliveHandsAFailedPollToTheConsumer() throws Exception {
+        ConsumerCircuitBreaker cb = createCircuitBreaker(1, 60);
+        Assert.assertTrue(cb.recordFailure());
+        MockConsumer<byte[], byte[]> consumer = new MockConsumer<>("earliest");
+        consumer.subscribe(Collections.singleton("test-topic"));
+        SaslAuthenticationException failure = new SaslAuthenticationException("bad credentials");
+        consumer.setPollException(failure);
+        List<Throwable> handled = new ArrayList<>();
+
+        Assert.assertTrue("still in cooldown", cb.handlePausedState(consumer, handled::add));
+        Assert.assertEquals(Collections.singletonList(failure), handled);
     }
 
     private ConsumerCircuitBreaker createCircuitBreaker(int threshold, int cooldown) throws Exception {

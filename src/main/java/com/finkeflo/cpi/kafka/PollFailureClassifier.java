@@ -29,9 +29,9 @@ import org.apache.kafka.common.errors.FencedInstanceIdException;
 /**
  * Sorts a failed poll of the sender's Kafka consumer ({@link CpiKafkaPlusConsumer}) into the
  * {@link Kind} that decides how the consumer reacts. Moved out of the consumer, whose emit poll and
- * keep-alive poll both switch on {@link #classify}; the handler of each kind, and what each poll
- * does with {@link Kind#OTHER}, stay in the consumer. The emit poll passes every {@link Throwable},
- * the keep-alive poll only {@link Exception}s. Does not log. Package-private.
+ * keep-alive polls (between two emit cycles and during an auto-pause) all switch on
+ * {@link #classify}; the handler of each kind, and what each poll does with {@link Kind#OTHER}, stay
+ * in the consumer. Every poll passes every {@link Throwable} (#243). Does not log. Package-private.
  */
 final class PollFailureClassifier {
 
@@ -43,7 +43,7 @@ final class PollFailureClassifier {
         FENCED,
         /** An adapter update replaced the class space of the route (issue #148): polling stops. */
         CLASS_SPACE_GONE,
-        /** Anything else; the emit poll and the keep-alive poll each handle it their own way. */
+        /** Anything else; the emit poll and the keep-alive polls each handle it their own way. */
         OTHER
     }
 

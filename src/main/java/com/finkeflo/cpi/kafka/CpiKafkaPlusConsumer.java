@@ -73,6 +73,8 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
     private static final long KEEP_ALIVE_INTERVAL_SECONDS = 60L;
     /** Poll-Timeout des Keep-Alive-Polls — kurz, treibt nur den Coordinator-Roundtrip. */
     private static final long KEEP_ALIVE_POLL_TIMEOUT_MS = 1000L;
+    /** Minimum gap between two WARN lines for a keep-alive poll that keeps failing during an auto-pause. */
+    private static final long AUTO_PAUSE_KEEP_ALIVE_WARN_INTERVAL_MS = 60_000L;
     /**
      * Upper bound (ms) doStop() waits for the in-flight poll() to return before closing the
      * KafkaConsumer. A wakeup() normally makes poll() return almost instantly; this cap only
@@ -113,6 +115,8 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
      */
     private long lastHeartbeatMs = 0L;
     private boolean lastHeartbeatInitialized = false;
+    /** When a failed keep-alive poll during an auto-pause was last logged at WARN. 0 = not yet logged. */
+    private long lastAutoPauseKeepAliveWarnMs = 0L;
     private volatile ConsumerCircuitBreaker circuitBreaker;
     private volatile RecordProcessor recordProcessor;
     /** Delays the retry of partitions blocked at a record that has to be retried (#187). */
@@ -541,7 +545,8 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
             LOG.error("[CPI-KAFKA-PLUS-DIAG] poll: kafkaConsumer is null (init failed), skipping poll");
             return 0;
         }
-        if (circuitBreaker != null && circuitBreaker.handlePausedState(kafkaConsumer)) {
+        if (circuitBreaker != null
+                && circuitBreaker.handlePausedState(kafkaConsumer, this::handleAutoPauseKeepAliveFailure)) {
             return 0;
         }
 
@@ -854,8 +859,9 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
      * Consumer-Position sich nicht bewegt — danach wird die aktuelle Zuordnung
      * wieder resumed (resume auf nie-pausierten Partitionen ist ein No-op).
      *
-     * <p>Best-effort: ein fehlgeschlagener Keep-Alive-Poll wird nur geloggt und
-     * eskaliert nicht in den Circuit Breaker; der naechste Tick versucht es erneut.
+     * <p>A failed keep-alive poll is handled like a failed emit poll, see
+     * {@link #handleKeepAliveFailure}; any other {@link Exception} is only logged and does not
+     * escalate into the circuit breaker, the next tick polls again.
      */
     private void keepAlivePoll() {
         try {
@@ -872,22 +878,82 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
             LOG.debug("[CPI-KAFKA-PLUS-DIAG] keepAlivePoll: completed (group protocol driven, no records emitted)");
         } catch (WakeupException we) {
             LOG.info("[CPI-KAFKA-PLUS-DIAG] keepAlivePoll: received wakeup signal");
-        } catch (Exception e) {
-            switch (PollFailureClassifier.classify(e, getClass())) {
-                case NON_RETRYABLE:
-                    handleNonRetryablePollFailure(e);
-                    break;
-                case FENCED:
-                    handleFencedInstanceIdFailure(e);
-                    break;
-                case CLASS_SPACE_GONE:
-                    handleBundleWiringInvalidFailure(e);
-                    break;
-                default:
-                    LOG.warn("[CPI-KAFKA-PLUS-DIAG] keepAlivePoll: best-effort poll failed: {}", e.getMessage());
-                    break;
+        } catch (Throwable t) {
+            if (!handleKeepAliveFailure("keepAlivePoll", t)) {
+                LOG.warn("[CPI-KAFKA-PLUS-DIAG] keepAlivePoll: best-effort poll failed: {}", t.getMessage());
             }
         }
+    }
+
+    /**
+     * The keep-alive poll of the circuit breaker during an auto-pause. Any other {@link Exception}
+     * is logged at WARN at most once per {@link #AUTO_PAUSE_KEEP_ALIVE_WARN_INTERVAL_MS}: in
+     * STREAMING mode this poll runs about once per second for as long as the pause lasts.
+     */
+    private void handleAutoPauseKeepAliveFailure(Throwable failure) {
+        if (handleKeepAliveFailure("autoPauseKeepAlivePoll", failure)) {
+            return;
+        }
+        long now = System.currentTimeMillis();
+        if (now - lastAutoPauseKeepAliveWarnMs < AUTO_PAUSE_KEEP_ALIVE_WARN_INTERVAL_MS) {
+            LOG.debug("[CPI-KAFKA-PLUS-DIAG] poll: keepalive poll failed during auto-pause: {}", failure.getMessage());
+            return;
+        }
+        lastAutoPauseKeepAliveWarnMs = now;
+        LOG.warn("[CPI-KAFKA-PLUS-DIAG] poll: keepalive poll failed during auto-pause: {}", failure.getMessage());
+    }
+
+    /**
+     * Runs the handler of the failure's {@link PollFailureClassifier} kind, the same for every poll.
+     *
+     * @return {@code false} for {@link PollFailureClassifier.Kind#OTHER}, which each poll handles its
+     *         own way
+     */
+    private boolean handleClassifiedPollFailure(Throwable failure) {
+        switch (PollFailureClassifier.classify(failure, getClass())) {
+            case NON_RETRYABLE:
+                handleNonRetryablePollFailure(failure);
+                return true;
+            case FENCED:
+                handleFencedInstanceIdFailure(failure);
+                return true;
+            case CLASS_SPACE_GONE:
+                handleBundleWiringInvalidFailure(failure);
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    /**
+     * Handles a failed keep-alive poll, between two emit cycles or during an auto-pause, by the same
+     * {@link PollFailureClassifier} kinds as a failed emit poll. Rejected credentials, a fenced static
+     * member and a replaced class space are dealt with even while no emit cycle runs, which in
+     * SCHEDULED mode can be hours away (#243). An {@link Error} of no such kind is no best-effort
+     * matter either: it counts towards a reconnect and escapes, as it does from the emit poll.
+     *
+     * @param poll names the poll in the log line and in the exception that escapes
+     * @return {@code false} for any other {@link Exception}, which the caller only logs: a keep-alive
+     *         poll is best-effort, and the next tick polls again
+     */
+    private boolean handleKeepAliveFailure(String poll, Throwable failure) {
+        if (handleClassifiedPollFailure(failure)) {
+            return true;
+        }
+        if (failure instanceof Exception) {
+            return false;
+        }
+        LOG.error("[CPI-KAFKA-PLUS-DIAG] {}: FAILED topic='{}' group='{}' exClass={} exMsg='{}'"
+                        + " causeClass={} causeMsg='{}' topStack={}",
+                poll, endpoint.getEffectiveTopic(), endpoint.getGroupId(),
+                failure.getClass().getName(), failure.getMessage(),
+                failure.getCause() != null ? failure.getCause().getClass().getName() : "null",
+                failure.getCause() != null ? failure.getCause().getMessage() : "null",
+                describeTopStack(failure, 6));
+        reportConnectionError(failure);
+        maybeReconnectAfterPollFailure();
+        throw new RuntimeException("Non-Exception Throwable from " + poll + ": " + failure.getClass().getName(),
+                failure);
     }
 
     /**
@@ -985,27 +1051,16 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
                     t.getCause() != null ? t.getCause().getClass().getName() : "null",
                     t.getCause() != null ? t.getCause().getMessage() : "null",
                     describeTopStack(t, 6));
-            switch (PollFailureClassifier.classify(t, getClass())) {
-                case NON_RETRYABLE:
-                    handleNonRetryablePollFailure(t);
-                    break;
-                case FENCED:
-                    handleFencedInstanceIdFailure(t);
-                    break;
-                case CLASS_SPACE_GONE:
-                    handleBundleWiringInvalidFailure(t);
-                    break;
-                default:
-                    // A client without TLS against a TLS-only listener never gets far enough to see a
-                    // handshake error — the broker just drops it, so the poll only ever times out. Name
-                    // the most likely cause instead of leaving the operator with a bare timeout.
-                    String hint = KafkaErrorHelper.tlsMismatchHint(endpoint.getSecurityProtocol());
-                    if (hint != null) {
-                        LOG.warn("[CPI-KAFKA-PLUS-DIAG] poll: {}", hint);
-                    }
-                    reportConnectionError(t);
-                    maybeReconnectAfterPollFailure();
-                    break;
+            if (!handleClassifiedPollFailure(t)) {
+                // A client without TLS against a TLS-only listener never gets far enough to see a
+                // handshake error — the broker just drops it, so the poll only ever times out. Name
+                // the most likely cause instead of leaving the operator with a bare timeout.
+                String hint = KafkaErrorHelper.tlsMismatchHint(endpoint.getSecurityProtocol());
+                if (hint != null) {
+                    LOG.warn("[CPI-KAFKA-PLUS-DIAG] poll: {}", hint);
+                }
+                reportConnectionError(t);
+                maybeReconnectAfterPollFailure();
             }
             if (t instanceof Exception) {
                 throw (Exception) t;
