@@ -28,6 +28,8 @@ import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.LongSupplier;
 
 import org.apache.camel.Exchange;
 import org.apache.camel.Message;
@@ -48,6 +50,10 @@ import org.slf4j.LoggerFactory;
  * Handles everything that happens to a Kafka record after it is polled:
  * deserialization, validation, processing via Camel pipeline, retry with
  * exponential backoff, DLQ routing, header mapping, and offset commits.
+ *
+ * <p>No record, batch or retry is started once the poll's time limit has passed (issue #192),
+ * so that the poll thread calls {@code poll()} again within {@code max.poll.interval.ms}. A record
+ * whose retries the limit interrupts keeps its count of attempts and continues with a later poll.
  *
  * Single-threaded: one instance per Consumer, called exclusively from the
  * ScheduledPollConsumer poll thread. No synchronization needed.
@@ -93,6 +99,21 @@ final class RecordProcessor {
         void commit(Map<TopicPartition, OffsetAndMetadata> offsets);
     }
 
+    /**
+     * A record whose retries a poll's time limit interrupted (issue #192): it is retried by a later
+     * poll from {@code nextAttempt} on instead of starting over. At most one per partition, because
+     * nothing after the record is processed until it is resolved.
+     */
+    private static final class CarriedRetry {
+        private final long offset;
+        private final int nextAttempt;
+
+        CarriedRetry(long offset, int nextAttempt) {
+            this.offset = offset;
+            this.nextAttempt = nextAttempt;
+        }
+    }
+
     private final CpiKafkaPlusEndpoint endpoint;
     private final AdapterTracingHelper tracingHelper;
     private final JsonSchemaValidator jsonSchemaValidator;
@@ -101,6 +122,9 @@ final class RecordProcessor {
     private final ConsumerCallback callback;
     private final OffsetCommitTracker offsetTracker;
     private final RecordFailurePolicy failurePolicy;
+    private final LongSupplier clock;
+    /** Concurrent because the rebalance callbacks can also run on the thread that closes the consumer. */
+    private final Map<TopicPartition, CarriedRetry> carriedRetries = new ConcurrentHashMap<>();
 
     RecordProcessor(CpiKafkaPlusEndpoint endpoint,
                     AdapterTracingHelper tracingHelper,
@@ -109,6 +133,19 @@ final class RecordProcessor {
                     AvroDeserializerHelper avroHelper,
                     ConsumerCallback callback,
                     OffsetCommitTracker offsetTracker) {
+        this(endpoint, tracingHelper, jsonSchemaValidator, dlqHelper, avroHelper, callback, offsetTracker,
+                System::currentTimeMillis);
+    }
+
+    /** @param clock the time the poll's time limit is checked against, in milliseconds */
+    RecordProcessor(CpiKafkaPlusEndpoint endpoint,
+                    AdapterTracingHelper tracingHelper,
+                    JsonSchemaValidator jsonSchemaValidator,
+                    DlqProducerHelper dlqHelper,
+                    AvroDeserializerHelper avroHelper,
+                    ConsumerCallback callback,
+                    OffsetCommitTracker offsetTracker,
+                    LongSupplier clock) {
         this.endpoint = endpoint;
         this.tracingHelper = tracingHelper;
         this.jsonSchemaValidator = jsonSchemaValidator;
@@ -116,6 +153,7 @@ final class RecordProcessor {
         this.avroHelper = avroHelper;
         this.callback = callback;
         this.offsetTracker = offsetTracker;
+        this.clock = clock;
         this.failurePolicy = new RecordFailurePolicy(dlqHelper != null, endpoint::getDlqMaxRetries,
                 endpoint::isRetryOnlyTransientErrors, endpoint::isSkipFailedMessages);
     }
@@ -154,7 +192,8 @@ final class RecordProcessor {
                         i, Math.min(i + batchSize, partitionRecords.size()));
                 // A block set by the schema filter still lets the valid records before it run.
                 Long blockedAt = progress.blockedOffset(tp);
-                if (stopRequested(progress) || (blockedAt != null && batch.get(0).offset() >= blockedAt)) {
+                if (stopRequested(progress) || (blockedAt != null && batch.get(0).offset() >= blockedAt)
+                        || outOfTime(progress, batch.get(0))) {
                     break;
                 }
 
@@ -277,6 +316,9 @@ final class RecordProcessor {
             if (progress.isBlocked(partitionOf(record))) {
                 continue; // nothing after a record that has to be retried
             }
+            if (outOfTime(progress, record)) {
+                break;
+            }
             processedCount += processRecordWithRetry(kafkaConsumer, record, commitAfterSuccess, false, progress);
         }
         return processedCount;
@@ -300,6 +342,32 @@ final class RecordProcessor {
             progress.stop();
         }
         return progress.isStopped();
+    }
+
+    /**
+     * Whether the poll's time limit has passed, so that {@code next} is not started (issue #192).
+     * Records, batches and retries that run long, or many of them, would otherwise keep the poll
+     * thread from calling {@code poll()} within {@code max.poll.interval.ms}: Kafka then gives the
+     * partitions to another member, which processes the same records again. What is not started
+     * stays unresolved and is rewound, so it comes with the next poll. Logged once per poll.
+     */
+    private boolean outOfTime(PollProgress progress, ConsumerRecord<byte[], byte[]> next) {
+        if (progress.isOutOfTime()) {
+            return true;
+        }
+        long now = clock.getAsLong();
+        if (now < progress.deadlineMs()) {
+            return false;
+        }
+        progress.outOfTime();
+        AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("consumer.poll.timeLimit")
+                .with("topic", next.topic())
+                .with("partition", next.partition())
+                .with("offset", next.offset())
+                .with("pollElapsedMs", now - progress.startedMs())
+                .with("pollTimeLimitMs", progress.timeLimitMs())
+                .with("consequence", "records of this poll that were not started yet come with the next poll"));
+        return true;
     }
 
     /**
@@ -431,6 +499,9 @@ final class RecordProcessor {
                                        PollProgress progress) {
         TopicPartition tp = partitionOf(record);
         progress.processing(tp, record.offset());
+        // A record whose retries an earlier poll ran out of time for continues where it stopped
+        // (#192). One carried for another offset is stale: that record was resolved meanwhile.
+        CarriedRetry carried = carriedRetries.remove(tp);
         String value;
         String key;
         try {
@@ -445,6 +516,8 @@ final class RecordProcessor {
         }
 
         int maxRetries = failurePolicy.maxRetries();
+        int firstAttempt = carried != null && carried.offset == record.offset()
+                ? Math.min(carried.nextAttempt, maxRetries) : 0;
         Exception lastError = null;
         int actualRetries = 0;
         boolean permanentError = false;
@@ -463,7 +536,7 @@ final class RecordProcessor {
         }
         final String resolvedBody = batchFallback ? body : value;
 
-        for (int attempt = 0; attempt <= maxRetries; attempt++) {
+        for (int attempt = firstAttempt; attempt <= maxRetries; attempt++) {
             Exchange exchange = callback.createExchange();
 
             tracingHelper.traceInbound(exchange, resolvedBody);
@@ -501,12 +574,20 @@ final class RecordProcessor {
                     break;
                 }
 
-                if (attempt < maxRetries && !sleepWithBackoff(attempt, record)) {
-                    // Interrupted between two attempts: a shutdown, not a poison record. Leave it
-                    // unresolved for the next run instead of dead-lettering a record that may well
-                    // succeed.
-                    progress.stop();
-                    return 0;
+                if (attempt < maxRetries) {
+                    long delayMs = retryDelayMs(attempt);
+                    long now = clock.getAsLong();
+                    if (now + delayMs >= progress.deadlineMs()) {
+                        deferRetry(record, attempt + 1, maxRetries, now, delayMs, progress);
+                        return 0;
+                    }
+                    if (!sleepWithBackoff(attempt, record, delayMs)) {
+                        // Interrupted between two attempts: a shutdown, not a poison record. Leave
+                        // it unresolved for the next run instead of dead-lettering a record that may
+                        // well succeed.
+                        progress.stop();
+                        return 0;
+                    }
                 }
                 continue;
             }
@@ -578,25 +659,59 @@ final class RecordProcessor {
     }
 
     /**
+     * @return the wait before the retry that follows the failed {@code attempt}: the retry delay,
+     *         doubled after every attempt and capped at 300 seconds, or 0 without a retry delay
+     */
+    private long retryDelayMs(int attempt) {
+        int delaySeconds = endpoint.getRetryDelaySeconds();
+        if (delaySeconds <= 0) {
+            return 0L;
+        }
+        int clampedAttempt = Math.min(attempt, 30);
+        return Math.min((long) delaySeconds * (1L << clampedAttempt), MAX_RETRY_DELAY_SECONDS) * 1000L;
+    }
+
+    /**
+     * The retry that follows the failed {@code nextAttempt - 1} would start after the poll's time
+     * limit (issue #192). The poll thread does not wait for it: the record's partition is blocked at
+     * it, rewound and paused until the retry is due, and a later poll runs that retry instead of
+     * starting the record over. So the record still reaches the DLQ after the configured retries,
+     * however many polls they take.
+     */
+    private void deferRetry(ConsumerRecord<byte[], byte[]> record, int nextAttempt, int maxRetries,
+                            long now, long delayMs, PollProgress progress) {
+        TopicPartition tp = partitionOf(record);
+        carriedRetries.put(tp, new CarriedRetry(record.offset(), nextAttempt));
+        progress.deferred(tp, record.offset(), now + delayMs);
+        AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("consumer.retry.deferred")
+                .with("topic", record.topic())
+                .with("partition", record.partition())
+                .with("offset", record.offset())
+                .with("retry", nextAttempt)
+                .with("maxRetries", maxRetries)
+                .with("retryInMs", delayMs)
+                .with("pollElapsedMs", now - progress.startedMs())
+                .with("pollTimeLimitMs", progress.timeLimitMs())
+                .with("consequence", "a later poll runs this retry when it is due; nothing at or after "
+                        + "this offset is committed until then"));
+    }
+
+    /**
      * Sleeps with exponential backoff between retry attempts.
      *
+     * @param delayMs the wait, from {@link #retryDelayMs(int)}
      * @return true to continue retrying, false if interrupted
      */
-    private boolean sleepWithBackoff(int attempt, ConsumerRecord<byte[], byte[]> record) {
-        int delaySeconds = endpoint.getRetryDelaySeconds();
+    private boolean sleepWithBackoff(int attempt, ConsumerRecord<byte[], byte[]> record, long delayMs) {
         int maxRetries = failurePolicy.maxRetries();
 
-        if (delaySeconds > 0) {
-            int clampedAttempt = Math.min(attempt, 30);
-            long backoff = Math.min(
-                    (long) delaySeconds * (1L << clampedAttempt),
-                    MAX_RETRY_DELAY_SECONDS);
+        if (delayMs > 0) {
             LOG.info("[CPI-KAFKA-PLUS-DIAG] Transient error, retrying in {}s "
                     + "(attempt {}/{}): offset={} partition={}",
-                    backoff, attempt + 1, maxRetries + 1,
+                    delayMs / 1000, attempt + 1, maxRetries + 1,
                     record.offset(), record.partition());
             try {
-                Thread.sleep(backoff * 1000);
+                Thread.sleep(delayMs);
             } catch (InterruptedException ie) {
                 Thread.currentThread().interrupt();
                 LOG.warn("[CPI-KAFKA-PLUS-DIAG] Retry delay interrupted, "
@@ -718,7 +833,7 @@ final class RecordProcessor {
                                    boolean commitAfterSuccess, PollProgress progress) {
         int processed = 0;
         for (ConsumerRecord<byte[], byte[]> record : batch) {
-            if (stopRequested(progress) || progress.isBlocked(partitionOf(record))) {
+            if (stopRequested(progress) || progress.isBlocked(partitionOf(record)) || outOfTime(progress, record)) {
                 break;
             }
             processed += processRecordWithRetry(kafkaConsumer, record, commitAfterSuccess, true, progress);
@@ -1032,6 +1147,7 @@ final class RecordProcessor {
         if (revoked == null) {
             return;
         }
+        forgetCarriedRetries(revoked);
         try {
             commitTrackedFor(action, revoked, "revoke commit, partitions=" + revoked.size());
         } catch (org.apache.kafka.common.KafkaException e) {
@@ -1057,6 +1173,14 @@ final class RecordProcessor {
     void dropLost(Collection<TopicPartition> lost) {
         if (lost != null) {
             offsetTracker.drop(lost);
+            forgetCarriedRetries(lost);
+        }
+    }
+
+    /** The next owner of the partitions starts their records over; a retry carried here is stale. */
+    private void forgetCarriedRetries(Collection<TopicPartition> partitions) {
+        for (TopicPartition tp : partitions) {
+            carriedRetries.remove(tp);
         }
     }
 

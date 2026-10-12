@@ -95,9 +95,14 @@ committed will be redelivered to whichever consumer takes over the partition.
 
 This is caused by `max.poll.interval.ms` being shorter than the configured
 **Polling Interval (Seconds)**. The adapter automatically sets `max.poll.interval.ms`
-to `pollingIntervalSeconds + 10 min` so the heartbeat thread does not send a `LeaveGroup`
-between polls. If you see unexpected rebalances, verify that `pollingIntervalSeconds` is
-within the supported range (1 – 21600).
+to `pollingIntervalSeconds + 10 min` (10 min with *Streaming (Continuous)*) so the heartbeat
+thread does not send a `LeaveGroup` between polls. If you see unexpected rebalances, verify that
+`pollingIntervalSeconds` is within the supported range (1 – 21600).
+
+Processing the records of a poll does not exceed it either: the adapter starts no record, batch
+or retry later than halfway through `max.poll.interval.ms` after a poll and leaves the rest to the
+next poll (see [Dead Letter Queue](features/dead-letter-queue.md#retries-and-maxpollintervalms)).
+Only a single integration flow call that takes longer than that half can still exceed it.
 
 ---
 

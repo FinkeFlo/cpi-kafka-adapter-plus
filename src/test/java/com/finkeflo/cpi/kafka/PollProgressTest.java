@@ -177,6 +177,47 @@ public class PollProgressTest {
         Assert.assertTrue(progress.isStopped());
     }
 
+    @Test
+    public void theTimeLimitRunsFromThePoll() {
+        PollProgress progress = new PollProgress(records(P0, 1), 1_000L, 300_000L);
+
+        Assert.assertEquals(301_000L, progress.deadlineMs());
+        Assert.assertFalse(progress.isOutOfTime());
+        progress.outOfTime();
+        Assert.assertTrue(progress.isOutOfTime());
+        Assert.assertFalse("running out of time does not stop the consumer", progress.isStopped());
+    }
+
+    @Test
+    public void aPollWithoutTimeLimitHasNoDeadline() {
+        Assert.assertEquals(Long.MAX_VALUE, new PollProgress(records(P0, 1)).deadlineMs());
+        Assert.assertEquals(Long.MAX_VALUE, new PollProgress(records(P0, 1), 5_000L, Long.MAX_VALUE).deadlineMs());
+    }
+
+    @Test
+    public void aDeferredRetryBlocksThePartitionUntilItIsDue() {
+        PollProgress progress = new PollProgress(records(P0, 5, 6, 7));
+
+        progress.resolved(P0, 5);
+        progress.deferred(P0, 6, 90_000L);
+
+        Assert.assertTrue(progress.isBlocked(P0));
+        Assert.assertEquals(Long.valueOf(90_000L), progress.deferredUntil(P0));
+        Assert.assertEquals(6L, progress.commitOffset(P0));
+        Assert.assertEquals(Collections.singletonMap(P0, 6L), progress.rewindPositions());
+    }
+
+    @Test
+    public void aFailedRecordIsNotDeferred() {
+        PollProgress progress = new PollProgress(records(P0, 5, 6));
+
+        progress.blocked(P0, 5);
+        progress.deferred(P0, 6, 90_000L);
+
+        Assert.assertEquals("the first block wins", Long.valueOf(5L), progress.blockedOffset(P0));
+        Assert.assertNull(progress.deferredUntil(P0));
+    }
+
     private static ConsumerRecords<byte[], byte[]> records(TopicPartition tp, long... offsets) {
         return new ConsumerRecords<>(Collections.singletonMap(tp, list(tp, offsets)));
     }

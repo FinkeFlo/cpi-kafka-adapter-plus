@@ -111,8 +111,15 @@ When `retryDelaySeconds` is set to a value greater than 0, the adapter waits bet
 | 4 (retry 3) | Fails | -> DLQ |
 | **Total** | | **14s** |
 
-!!! warning "max.poll.interval.ms"
-    The consumer's `max.poll.interval.ms` scales with **Polling Interval (Seconds)** (`pollingIntervalSeconds`) — it is that interval plus a 10-minute processing buffer (about 10 minutes at the default 5-second interval), capped at 6 h 10 min. If the total backoff time across all records in a single poll exceeds this limit, Kafka triggers a rebalance. Keep **Retries before DLQ (additional attempts)** (`dlqMaxRetries`) low (1-3) and **Max Poll Records** (`maxPollRecords`) moderate when using retry delays. Combining with **Retry Transient Errors Only** (`retryOnlyTransientErrors`) minimizes the number of records entering the retry loop.
+### Retries and max.poll.interval.ms
+
+Retries run on the consumer's poll thread. If the consumer does not call `poll()` again within `max.poll.interval.ms`, Kafka hands its partitions to another member of the group, which processes the same records again. That limit is 10 minutes with **Consumption Mode** (`consumptionMode`) *Streaming (Continuous)*, and **Polling Interval (Seconds)** (`pollingIntervalSeconds`) plus 10 minutes with *Scheduled Polling*, capped at 6 h 10 min.
+
+So that long retry delays, a slow integration flow or many failing records cannot exceed it, the adapter starts no record, batch or retry later than halfway through that limit after a poll, for example 5 minutes in *Streaming (Continuous)*. What is left of the poll comes with the next poll. A record whose next retry would start later does not wait for it on the poll thread: its partition is rewound to the record and paused until the retry is due, while the other partitions keep flowing. The next poll of the partition runs that retry instead of starting the record over, so the record still reaches the DLQ after **Retries before DLQ (additional attempts)** (`dlqMaxRetries`) retries, only later. In batch mode that poll first sends the batch that starts with the record; if the batch fails again, the record continues with that retry.
+
+The 14 seconds of waiting in the example above fit easily. With **Retry Delay (Seconds)** (`retryDelaySeconds`) = 60 in *Streaming (Continuous)*, the waits are 60, 120 and 240 seconds: for a record at the start of its poll whose flow fails fast, the first two retries start within the 5 minutes, and retry 3, due 7 minutes after the first attempt, runs in a later poll.
+
+The trace shows `consumer.retry.deferred` for such a record and `consumer.poll.timeLimit` when records of a poll are left to the next one (see [Troubleshooting](../troubleshooting.md#consumerpolltimelimit-and-consumerretrydeferred)). A single integration flow call that takes longer than half of `max.poll.interval.ms` can still exceed the limit. **Retry Transient Errors Only** (`retryOnlyTransientErrors`) keeps records with permanent errors out of the retries altogether.
 
 ## Batch Mode Behavior
 
