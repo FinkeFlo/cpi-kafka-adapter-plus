@@ -100,7 +100,7 @@
                 </AttributeReference>
                 <AttributeReference>
                     <ReferenceName>sslKeystoreAlias</ReferenceName>
-                    <description>Leave empty for brokers with a publicly trusted certificate (e.g. Confluent Cloud) — the JVM default truststore is used and TLS is still active. Set a CPI Keystore alias only for a private/company CA, a self-signed broker certificate, or client-certificate authentication (mTLS).</description>
+                    <description>Leave empty for brokers with a publicly trusted certificate (e.g. Confluent Cloud) — the JVM default truststore is used and TLS is still active. Setting any alias makes the adapter trust the certificates of the whole CPI tenant keystore instead of the JVM default truststore, so the broker's CA certificate (or its self-signed certificate) must then be in the tenant keystore. For client-certificate authentication (mTLS) the alias must name a key pair.</description>
                     <OrCondition>
                         <EditCondition>
                             <AttributeName>securityProtocol</AttributeName>
@@ -137,11 +137,11 @@
                 </GuiLabels>
                 <AttributeReference>
                     <ReferenceName>autoOffsetReset</ReferenceName>
-                    <description>What to do when no committed offset exists for the consumer group. 'Latest' skips existing messages and only reads new ones. 'Earliest' reads all available messages from the beginning.</description>
+                    <description>What to do when the consumer group has no valid committed offset. 'Latest' skips existing messages and only reads new ones. 'Earliest' reads all available messages from the beginning. This applies for example on the first deployment with a new Consumer Group ID, after the broker deleted the group's offsets (by default once the group has had no active consumer for 7 days), and when the committed offset no longer exists because the topic's retention deleted those messages. With 'Latest', messages written before that point are never read.</description>
                 </AttributeReference>
                 <AttributeReference>
                     <ReferenceName>commitStrategy</ReferenceName>
-                    <description>When to commit offsets back to Kafka. 'After Successful Processing' ensures at-least-once delivery (recommended). 'Auto Commit' commits periodically regardless of processing success.</description>
+                    <description>When to commit offsets back to Kafka. 'After Successful Processing' ensures at-least-once delivery (recommended). 'Auto Commit' lets the Kafka client commit the consumer position periodically instead: records that were polled but not processed yet can be committed and lost, for example when the integration flow is stopped while a long-running IFlow call is still in progress. With 'Scheduled Polling' it cannot be combined with 'Drain Backlog': the deployment fails.</description>
                 </AttributeReference>
             </AttributeGroup>
             <AttributeGroup id="pollingConfig">
@@ -167,7 +167,7 @@
                 <AttributeReference>
                     <ReferenceName>batchTimeout</ReferenceName>
                     <description>Maximum time in milliseconds a single Kafka poll() call blocks waiting for records before returning (the consumer poll timeout). Default: 5000 (5 seconds). This is the per-poll wait time, not a batch-fill timer: it applies to every poll cycle regardless of batch mode.</description>
-                    <ErrorMessage>Please enter a positive number in milliseconds (e.g. 5000)</ErrorMessage>
+                    <ErrorMessage>Please enter a whole number of 0 or more in milliseconds (e.g. 5000)</ErrorMessage>
                 </AttributeReference>
             </AttributeGroup>
         </Tab>
@@ -191,12 +191,12 @@
                 <AttributeReference>
                     <ReferenceName>fetchMinBytes</ReferenceName>
                     <description>Minimum data in bytes the broker waits to accumulate before answering a fetch request (fetch.min.bytes). Higher values let the broker batch more records per poll under low load, at the cost of added latency (bounded by 'Fetch Max Wait'). Default: 1 (respond immediately, current behavior).</description>
-                    <ErrorMessage>Please enter a positive number (e.g. 1)</ErrorMessage>
+                    <ErrorMessage>Please enter a whole number of 0 or more (e.g. 1)</ErrorMessage>
                 </AttributeReference>
                 <AttributeReference>
                     <ReferenceName>fetchMaxWaitMs</ReferenceName>
                     <description>Maximum time in milliseconds the broker waits for 'Fetch Min Bytes' to accumulate before answering anyway (fetch.max.wait.ms). Only relevant when 'Fetch Min Bytes' is greater than 1. Default: 500.</description>
-                    <ErrorMessage>Please enter a positive number (e.g. 500)</ErrorMessage>
+                    <ErrorMessage>Please enter a whole number of 0 or more (e.g. 500)</ErrorMessage>
                 </AttributeReference>
             </AttributeGroup>
             <AttributeGroup id="backlogDrain">
@@ -206,7 +206,7 @@
                 </GuiLabels>
                 <AttributeReference>
                     <ReferenceName>drainEnabled</ReferenceName>
-                    <description>Enable drain mode: after each poll cycle, continue polling until the topic is empty or the drain limit is reached. Recommended for topics with peak loads (e.g. month-end processing). Ignored when 'Consumption Mode' is Streaming (greedy scheduling already consumes continuously).</description>
+                    <description>Enable drain mode: after each poll cycle, continue polling until the topic is empty or the drain limit is reached. Recommended for topics with peak loads (e.g. month-end processing). Ignored when 'Consumption Mode' is Streaming (greedy scheduling already consumes continuously). Requires Offset Commit Strategy 'After Successful Processing (At-Least-Once)'.</description>
                     <EditCondition>
                         <AttributeName>consumptionMode</AttributeName>
                         <AttributeValue>SCHEDULED</AttributeValue>
@@ -262,11 +262,11 @@
                 </GuiLabels>
                 <AttributeReference>
                     <ReferenceName>batchMode</ReferenceName>
-                    <description>Enable batch mode to process multiple Kafka records in a single IFlow execution. Improves throughput for high-volume topics. Disable for single-message processing.</description>
+                    <description>When enabled (default), the IFlow receives an envelope with up to 'Max Records per IFlow Run (MPL)' records of one partition – {"kafkaRecords":{"record":[{"key":…,"value":…,"topic":…,"partition":…,"offset":…,"timestamp":…}]}} or the XML equivalent – not the original message body. Disable to receive each Kafka message in its own IFlow run, with the message value as the body.</description>
                 </AttributeReference>
                 <AttributeReference>
                     <ReferenceName>batchSize</ReferenceName>
-                    <description>Maximum number of Kafka records grouped into a single IFlow execution (one MPL per batch). The adapter collects up to this many records before triggering the IFlow. Default: 100.</description>
+                    <description>Maximum number of records of one partition from one poll passed to a single IFlow run (one MPL per batch). Batches never span partitions or polls, so the effective size is also limited by 'Max Poll Records': a value above it has no effect. Default: 100.</description>
                     <ErrorMessage>Please enter a positive number for batch size (e.g. 100)</ErrorMessage>
                     <EditCondition>
                         <AttributeName>batchMode</AttributeName>
@@ -275,7 +275,7 @@
                 </AttributeReference>
                 <AttributeReference>
                     <ReferenceName>batchOutputFormat</ReferenceName>
-                    <description>Output format for batched records. JSON Array: [{"key":"...","value":"..."},...]. XML List: wraps records in XML elements.</description>
+                    <description>Output format for batched records. JSON Array: {"kafkaRecords":{"record":[{"key":…,"value":…,"topic":"…","partition":0,"offset":0,"timestamp":0}]}} – key and value are embedded as JSON when they are one JSON document, otherwise as a string. XML List: &lt;kafkaRecords count="n"&gt;&lt;record&gt;…&lt;/record&gt;&lt;/kafkaRecords&gt;, each record with the elements key, value, topic, partition, offset and timestamp; a value that is XML is embedded (format="xml"), any other value is text (format="text").</description>
                     <EditCondition>
                         <AttributeName>batchMode</AttributeName>
                         <AttributeValue>true</AttributeValue>
@@ -354,7 +354,7 @@
                 </AttributeReference>
                 <AttributeReference>
                     <ReferenceName>retryDelaySeconds</ReferenceName>
-                    <description>Initial delay in seconds before a failed message is retried. The delay doubles after each attempt (exponential backoff), capped at 300 seconds. With a Dead Letter Queue it applies to the retries before the message is dead-lettered (0 = retry immediately). With Retry Failed Message it is the first wait before the same offset is retried; the wait is at least 1 second. Example with 2 seconds: before the DLQ, with Max Retries 3, the waits are 2s, 4s, 8s; with Retry Failed Message they are 2s, 4s, 8s, 16s and so on, up to 300s between attempts, until the message succeeds.</description>
+                    <description>Initial delay in seconds before a failed message is retried. The delay doubles after each attempt (exponential backoff), capped at 300 seconds. With a Dead Letter Queue it applies to the retries before the message is dead-lettered (0 = retry immediately). With Retry Failed Message it is the first wait before the same offset is retried; the wait is at least 1 second. Example with 2 seconds: before the DLQ, with 'Retries before DLQ' set to 3, the waits are 2s, 4s, 8s; with Retry Failed Message they are 2s, 4s, 8s, 16s and so on, up to 300s between attempts, until the message succeeds.</description>
                     <Restriction>Constraint.isValidRegex(^(?:\{\{[^{}]+\}\}|[0-9]|[1-9][0-9]|[12][0-9]{2}|300)$)</Restriction>
                     <ErrorMessage>Please enter a number of seconds between 0 and 300 (e.g. 2)</ErrorMessage>
                 </AttributeReference>
@@ -379,7 +379,7 @@
                 </AttributeReference>
                 <AttributeReference>
                     <ReferenceName>dlqMaxRetries</ReferenceName>
-                    <description>Number of processing retries before a message is routed to the DLQ. Default: 3. Set to 0 to route failed messages immediately without retrying.</description>
+                    <description>Number of retries after the first failed attempt before a message is routed to the DLQ: 3 (default) means up to 4 attempts in total. Set to 0 to route failed messages immediately without retrying.</description>
                     <ErrorMessage>Please enter a non-negative number (e.g. 3)</ErrorMessage>
                     <EditCondition>
                         <AttributeName>dlqEnabled</AttributeName>
@@ -418,7 +418,7 @@
                 </AttributeReference>
                 <AttributeReference>
                     <ReferenceName>autoPauseErrorThreshold</ReferenceName>
-                    <description>Number of consecutive processing errors before the consumer pauses. Default: 5.</description>
+                    <description>Number of consecutive failed records (or failed batches without a Dead Letter Queue) before the consumer pauses. A record counts once after its last attempt, also when it is then written to the Dead Letter Queue; with Retry Failed Message, every new attempt on a later poll counts again. Records that fail JSON Schema validation do not count, and a successful record or batch resets the count. Default: 5.</description>
                     <ErrorMessage>Please enter a positive number (e.g. 5)</ErrorMessage>
                     <EditCondition>
                         <AttributeName>autoPauseEnabled</AttributeName>
@@ -607,7 +607,7 @@
         <GuiLabels guid="b1000003-0000-0000-0000-000000000003"><Label language="EN">Offset Commit Strategy</Label></GuiLabels>
         <FixedValues>
             <FixedValue><Value>BATCH_COMPLETE</Value><GuiLabels guid="b1000003-0000-0000-0000-000000000031"><Label language="EN">After Successful Processing (At-Least-Once)</Label></GuiLabels></FixedValue>
-            <FixedValue><Value>AUTO</Value><GuiLabels guid="b1000003-0000-0000-0000-000000000032"><Label language="EN">Auto Commit (Periodic)</Label></GuiLabels></FixedValue>
+            <FixedValue><Value>AUTO</Value><GuiLabels guid="b1000003-0000-0000-0000-000000000032"><Label language="EN">Auto Commit (Periodic, may lose messages)</Label></GuiLabels></FixedValue>
         </FixedValues>
     </AttributeMetadata>
     <AttributeMetadata>
@@ -777,8 +777,8 @@
         <isparameterized>true</isparameterized>
         <GuiLabels guid="b1000004-0000-0000-0000-000000000007"><Label language="EN">Enable Idempotent Producer</Label></GuiLabels>
     </AttributeMetadata>
-    <!-- retries: removed from UI — Kafka uses Integer.MAX_VALUE with idempotence,
-         deliveryTimeoutSeconds is the effective limit. Can be re-enabled if needed. -->
+    <!-- retries: removed for good – no endpoint option exists. The Kafka client retries a send
+         until deliveryTimeoutSeconds expires, so that is the effective limit. -->
     <AttributeMetadata>
         <Name>deliveryTimeoutSeconds</Name>
         <Usage>false</Usage>
@@ -848,8 +848,8 @@
         <GuiLabels guid="b1000005-0000-0000-0000-000000000005"><Label language="EN">Subject Name Strategy</Label></GuiLabels>
         <FixedValues>
             <FixedValue><Value>TopicNameStrategy</Value><GuiLabels guid="b1000005-0000-0000-0000-000000000051"><Label language="EN">TopicNameStrategy</Label></GuiLabels></FixedValue>
-            <FixedValue><Value>RecordNameStrategy</Value><GuiLabels guid="b1000005-0000-0000-0000-000000000052"><Label language="EN">RecordNameStrategy</Label></GuiLabels></FixedValue>
-            <FixedValue><Value>TopicRecordNameStrategy</Value><GuiLabels guid="b1000005-0000-0000-0000-000000000053"><Label language="EN">TopicRecordNameStrategy</Label></GuiLabels></FixedValue>
+            <FixedValue><Value>RecordNameStrategy</Value><GuiLabels guid="b1000005-0000-0000-0000-000000000052"><Label language="EN">RecordNameStrategy (not supported – deployment fails)</Label></GuiLabels></FixedValue>
+            <FixedValue><Value>TopicRecordNameStrategy</Value><GuiLabels guid="b1000005-0000-0000-0000-000000000053"><Label language="EN">TopicRecordNameStrategy (not supported – deployment fails)</Label></GuiLabels></FixedValue>
         </FixedValues>
     </AttributeMetadata>
     <AttributeMetadata>
@@ -897,7 +897,7 @@
         <Default>3</Default>
         <Length/>
         <isparameterized>true</isparameterized>
-        <GuiLabels guid="b1000006-0000-0000-0000-000000000003"><Label language="EN">Max Retries before DLQ</Label></GuiLabels>
+        <GuiLabels guid="b1000006-0000-0000-0000-000000000003"><Label language="EN">Retries before DLQ (additional attempts)</Label></GuiLabels>
     </AttributeMetadata>
     <AttributeMetadata>
         <Name>dlqCredentialAlias</Name>
@@ -928,7 +928,7 @@
         <Default>true</Default>
         <Length/>
         <isparameterized>true</isparameterized>
-        <GuiLabels guid="b1000006-0000-0000-0000-000000000005"><Label language="EN">Skip Retries for Permanent Errors</Label></GuiLabels>
+        <GuiLabels guid="b1000006-0000-0000-0000-000000000005"><Label language="EN">Retry Transient Errors Only</Label></GuiLabels>
     </AttributeMetadata>
     <AttributeMetadata>
         <Name>retryDelaySeconds</Name>

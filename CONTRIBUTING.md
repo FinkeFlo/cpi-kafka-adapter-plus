@@ -121,6 +121,10 @@ If your PR introduces a breaking change, add an exclamation mark `!` after the c
 
 Never commit secrets, credentials, tenant names or other private/internal data. Every pull request is scanned for secrets (gitleaks) in CI.
 
+CI also checks the code and what the adapter ships:
+- **Static analysis:** CodeQL analyses every pull request and `main` as GitHub code scanning. It runs with the *default setup*, which is configured in the repository settings, so there is no workflow file for it. Its alerts are listed under *Security → Code scanning*.
+- **Known vulnerabilities:** the `Dependency Scan` workflow builds the adapter bundle and scans it with [Grype](https://github.com/anchore/grype), including every library on its `Bundle-ClassPath` and kafka-clients, whose classes the bundle holds unpacked. It runs on pull requests that change `pom.xml`, on `main` and every Monday, and fails on a finding of severity high or critical. A finding that has to stay, for example because no fixed version exists yet, goes into `.grype.yaml` with the reason.
+
 **Strict Rule: Do not commit any real client names, proprietary internal project names, or sensitive tenant URLs.**
 
 When writing documentation, creating test cases, or providing placeholder data, **always use generic dummy data**. 

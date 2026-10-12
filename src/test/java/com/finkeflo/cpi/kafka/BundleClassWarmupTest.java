@@ -49,6 +49,12 @@ public class BundleClassWarmupTest {
     }
 
     @Test
+    public void camelVersionComesFromTheManifestOfCamelApi() {
+        String version = BundleClassWarmup.camelVersion(BundleClassWarmup.class);
+        Assert.assertTrue(String.valueOf(version), version != null && version.startsWith("3.14."));
+    }
+
+    @Test
     public void bundleClassPathEntriesSkipsRootAndAttributes() {
         List<String> entries = BundleClassWarmup.bundleClassPathEntries(
                 ".,lz4-java-1.8.0.jar,/zstd-jni-1.5.7-12.jar;foo=bar, snappy-java-1.1.10.8.jar");

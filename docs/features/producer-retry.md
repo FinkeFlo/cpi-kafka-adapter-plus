@@ -51,7 +51,7 @@ retry for batches.
 
 From metadata version 1.4 the UI flags a value outside these ranges; an externalized `{{parameter}}`
 is not flagged and is checked when the channel starts. *Delay Between Attempts* and *Total Retry
-Budget* are hidden while *Max Send Attempts* is `1`, because they have no effect then and the start
+Budget* are hidden while *Send Attempts (total, 1 = off)* is `1`, because they have no effect then and the start
 check ignores them.
 
 These are **separate** from the sender-side `retryDelaySeconds` / `retryOnlyTransientErrors`, which

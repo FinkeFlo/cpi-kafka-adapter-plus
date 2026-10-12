@@ -86,9 +86,11 @@ producer was closed while this send was using it …" in front of that message. 
 against the replacement of the client; that says nothing about the broker or the record, so it
 triggers no second rebuild and does not count towards the node-fault escalation. The next message
 uses a new producer, and with the [producer retry](features/producer-retry.md) on, a single message
-that Kafka refused before buffering it is sent again on the new producer. Up to 1.4.1 such a send
-was reported as `UNKNOWN_FATAL`, or failed with a `NullPointerException` when the rebuild had
-already discarded the producer.
+that Kafka refused before buffering it is sent again on the new producer. A stopping integration
+flow builds no new producer, so there the message fails with "The receiver for Kafka topic '…' was
+stopped (the integration flow is stopping or was undeployed), so no new Kafka producer is built and
+the message is not sent." Up to 1.4.1 such a send was reported as `UNKNOWN_FATAL`, or failed with a
+`NullPointerException` when the rebuild had already discarded the producer.
 
 ## Finding the adapter's lines
 
@@ -214,15 +216,21 @@ the node field above is the evidence to attach to a ticket.
 
 When the same fault (keyed by exception class and error code) recurs **5 times within 20 minutes**
 on one JVM despite the adapter's mitigation, a `producer.node.fault.escalation` line is emitted.
+Only failed sends of the shared, non-transactional producer that are classified
+`FATAL_PRODUCER_UNUSABLE` or `UNKNOWN_FATAL` count; a `RETRIABLE` failure such as a timeout or a
+`FATAL_DATA_ERROR` never escalates, however often it recurs.
 This is the single most actionable diagnostic line the adapter can produce: it means the node is
 experiencing a persistent problem that automatic recovery cannot fix.
 
 ```
-[CPI-KAFKA-PLUS-DIAG] producer.node.fault.escalation faultClass=TimeoutException
-  errorCode=KP-PROD-002 classification=RETRIABLE countInWindow=5 windowMinutes=20
-  producerPath=SHARED topic=… thread=… advice='The same fault has recurred 5 times
-  within 20 minutes on this JVM despite mitigation…'
+[CPI-KAFKA-PLUS-DIAG] producer.node.fault.escalation faultClass=java.lang.IllegalMonitorStateException
+  errorCode=KP-META-002 classification=UNKNOWN_FATAL countInWindow=5 windowMinutes=20
+  producerPath=SHARED clientId=… topic=… thread=… advice='The same fault has recurred 5 times
+  within 20 minutes on this JVM despite mitigation…' jvmUptimeMs=… jvmThreadCount=… …
 ```
+
+The line always carries the JVM state (`jvmUptimeMs`, `jvmThreadCount`, `jvmHeapUsedMB`, …); with
+`diagnosticsLevel` `FULL` it also carries a bounded thread dump (`threadDump`).
 
 **What to do:**
 
@@ -232,8 +240,11 @@ experiencing a persistent problem that automatic recovery cannot fix.
 3. Collect the evidence (error code, classification, node address) and open a support ticket
    requesting that the node be recycled or the integration flow redeployed.
 
-The escalation fires once per fault identity per 20-minute window. If the fault stops and returns,
-it fires again. Successful sends reset the window.
+The 20-minute window starts at the first occurrence of a fault, and the escalation fires at most
+once per window, at the fifth occurrence. Successful sends do not reset the window: a fault that
+stops and returns within the same 20 minutes does not fire again. The count starts over only when
+the window has expired or when a different fault occurs, so two faults that alternate never
+escalate.
 
 ## Producer rebuild tracking
 
@@ -311,7 +322,7 @@ deployment error names the field.
 
 * **Sender:** an empty *Consumer Group ID*, an *Offset Commit Strategy* other than `BATCH_COMPLETE`/`AUTO`,
   *Max Poll Records* below 1, a negative *Fetch Min Bytes*, *Fetch Max Wait (ms)*, *Poll Timeout (ms)* or
-  *Max Retries before DLQ*, *Max Records per IFlow Run (MPL)* below 1 in batch mode, or a
+  *Retries before DLQ (additional attempts)*, *Max Records per IFlow Run (MPL)* below 1 in batch mode, or a
   *Dead Letter Topic* that is also a source topic or has spaces around its name.
 * **Receiver:** an unknown *Batch Send Mode*, *Delivery Timeout (Seconds)* below 1, or a
   *Subject Name Strategy* other than `TopicNameStrategy` with Avro serialization.
@@ -359,13 +370,16 @@ the adapter is thrashing. The individual poll failures are logged separately wit
 ### `class-warmup.*` at start-up
 
 Four to five lines per adapter bundle revision, written once when the first Kafka endpoint of that
-revision starts. `class-warmup.stage1.completed` (the adapter's own classes, synchronous),
-`class-warmup.codecs.completed codecs=gzip:ok,snappy:ok,lz4:ok,zstd:ok` (one compress/decompress
-round trip per codec so that the native libraries are extracted while the bundle revision is still
-live) and `class-warmup.stage2.completed` (every class in the bundle, on a low-priority daemon
-thread, ~2 s on a tenant). `class-warmup.stage2.failures count=61` is expected: those classes need
-optional libraries (grpc, jose4j, joni, asm) that are deliberately not shipped. Review the list only
-if the count changes after a dependency upgrade.
+revision starts. `class-warmup.start` names the bundle revision and the runtime: `java`,
+`javaVendor` and `camel` are the Java and Camel versions of the tenant. Then
+`class-warmup.stage1.completed` (the adapter's own classes, synchronous),
+`class-warmup.codecs.completed codecs=gzip:ok,snappy:ok,lz4:ok,zstd:ok lz4Implementation=JavaSafe`
+(one compress/decompress round trip per codec so that the native libraries are extracted while the
+bundle revision is still live; `lz4Implementation` is the LZ4 implementation Kafka uses, the pure
+Java `JavaSafe` inside the bundle) and `class-warmup.stage2.completed` (every class in the bundle,
+on a low-priority daemon thread, ~2 s on a tenant). `class-warmup.stage2.failures count=61` is
+expected: those classes need optional libraries (grpc, jose4j, joni, asm) that are deliberately not
+shipped. Review the list only if the count changes after a dependency upgrade.
 
 Why this exists: deploying a new adapter version makes CPI purge the *old* bundle revision at once,
 while every running integration flow keeps using its class loader. Any class or resource that had
@@ -486,8 +500,9 @@ supported:
 | `STANDARD` (default) | All failure paths log the full serialised cause chain. Sufficient for root-causing most production incidents. |
 | `FULL` | Adds one thing: a bounded thread dump attached to `producer.node.fault.escalation`, capped at 20 threads and 10 frames each, with lock owners resolved. That dump is the only evidence that can settle a monitor-ownership question, and it is the reason `FULL` exists. |
 
-`STANDARD` is fully diagnostic on its own. Do not run at `FULL` permanently: the extra output adds
-volume and latency on every send. Switch to `FULL` only when you need the additional detail, then
-switch back.
+`STANDARD` is fully diagnostic on its own. `FULL` costs nothing on a normal send: the thread dump is
+taken only when a node-fault escalation fires, at most once per 20-minute window, and makes that one
+line longer by up to about 5,000 characters. Switch to `FULL` while you investigate a node fault,
+then switch back.
 
 See [Configuration](configuration.md) for how to set this option.

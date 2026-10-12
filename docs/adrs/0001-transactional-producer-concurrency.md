@@ -58,6 +58,13 @@ Reasoning:
     cpi-kafka-adapter-txn-0-1   (worker node 0, slot 1)
     cpi-kafka-adapter-txn-1-0   (worker node 1, slot 0)
     ```
+    **Note (2026-10-12):** the implementation adds a hash of the target topic, so that two channels
+    with the same prefix but different topics never share an id:
+    `<transactionalIdPrefix>-<topicHash>-<memberSuffix>-<slot>`, where `topicHash` is the first 8 hex
+    characters of the SHA-256 digest of the topic name. For the topic `orders` the first id of
+    worker node 0 is `cpi-kafka-adapter-txn-1c168adb-0-0`. Without `CF_INSTANCE_INDEX` and
+    `HOSTNAME` the member suffix is a random `r` plus 12 hex characters, which changes on every
+    restart. The decision above is unchanged.
   - Slots are managed with a simple bounded resource (e.g. a `Semaphore(N)` per node): a transaction acquires a free slot, builds its `transactional.id` from that slot number, creates a new `KafkaProducer` for the transaction (Option 2's model is unaffected — the producer/connection is still created and closed per transaction), and releases the slot when the transaction finishes (commit or abort).
   - Reusing the same `transactional.id` string across successive, non-overlapping transactions on the same slot is safe: the transaction coordinator tracks state by ID (bumping the producer epoch on every `initTransactions()` call), not by producer object/connection. If a previous transaction on that slot crashed without committing, the *next* `initTransactions()` call with the same ID automatically fences/aborts the dangling one — this is the intended zombie-recovery behavior, not a risk.
   - This keeps the total number of distinct `transactional.id`s bounded (worker nodes × slots per node) and reused indefinitely, avoiding the coordinator-state bloat of a per-transaction GUID, while still preventing cross-node fencing collisions.

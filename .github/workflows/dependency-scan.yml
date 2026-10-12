@@ -1,0 +1,70 @@
+name: Dependency Scan
+
+# Scans what the adapter ships for known vulnerabilities: the bundle jar with every library on its
+# Bundle-ClassPath, and kafka-clients, whose classes the bundle carries unpacked. The ESA installs
+# exactly this bundle, so libraries that only arrive transitively, such as the LZ4 codec of #240,
+# are covered too, not only the dependencies declared in pom.xml.
+#
+# Static analysis is not part of this workflow: CodeQL runs as GitHub code scanning with the
+# default setup, which is configured in the repository settings and has no workflow file.
+#
+# A finding of severity high or critical fails the scan, also when no fixed version exists yet,
+# because shipping it needs a decision. To accept one, list it in .grype.yaml with the reason.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - pom.xml
+      - .github/workflows/dependency-scan.yml
+  schedule:
+    # Advisories are published without any change to the code. Mondays, 05:30 UTC.
+    - cron: '30 5 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  grype:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+
+      - name: Build the adapter bundle
+        run: mvn -B package -DskipTests
+
+      # kafka-clients is scanned as its own jar: the bundle holds its classes without any Maven
+      # metadata, so a scanner cannot recognise them there.
+      - name: Collect the bundle and kafka-clients
+        run: |
+          shopt -s nullglob
+          bundles=(target/*.jar)
+          if [ ${#bundles[@]} -ne 1 ]; then
+            echo "::error::Expected exactly one bundle jar in target/, found: ${bundles[*]:-none}"
+            exit 1
+          fi
+          mkdir -p target/dependency-scan
+          cp "${bundles[0]}" target/dependency-scan/
+          mvn -B dependency:copy-dependencies -DincludeGroupIds=org.apache.kafka \
+            -DincludeArtifactIds=kafka-clients -DincludeScope=runtime \
+            -DoutputDirectory=target/dependency-scan
+          ls -l target/dependency-scan
+
+      # Pinned to a commit, as the action's README recommends: a tag can later point to other
+      # code. Dependabot updates the pin together with the version comment.
+      - name: Scan for known vulnerabilities (Grype)
+        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
+        with:
+          path: target/dependency-scan
+          fail-build: true
+          severity-cutoff: high
+          output-format: table
+          cache-db: true
