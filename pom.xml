@@ -128,7 +128,7 @@
         <dependency>
             <groupId>at.yawk.lz4</groupId>
             <artifactId>lz4-java</artifactId>
-            <version>1.11.4</version>
+            <version>1.12.0</version>
             <scope>runtime</scope>
         </dependency>
 
@@ -667,7 +667,7 @@
                     <dependency>
                         <groupId>org.ow2.asm</groupId>
                         <artifactId>asm</artifactId>
-                        <version>9.10.1</version>
+                        <version>9.11</version>
                     </dependency>
                 </dependencies>
             </plugin>
