@@ -21,6 +21,8 @@
 package com.finkeflo.cpi.kafka;
 
 import java.net.URISyntaxException;
+import java.util.Arrays;
+import java.util.List;
 
 import org.apache.camel.Consumer;
 import org.apache.camel.Processor;
@@ -28,6 +30,7 @@ import org.apache.camel.Producer;
 import org.apache.camel.support.DefaultPollingEndpoint;
 import org.apache.camel.spi.UriEndpoint;
 import org.apache.camel.spi.UriParam;
+import org.apache.kafka.common.utils.Utils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -37,6 +40,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
 
     private static final Logger LOG = LoggerFactory.getLogger(CpiKafkaPlusEndpoint.class);
+
+    /** The mechanisms the adapter can log in with; it builds the login for these only. */
+    private static final List<String> SASL_MECHANISMS = Arrays.asList("PLAIN", "SCRAM-SHA-256", "SCRAM-SHA-512");
 
     private final CpiKafkaPlusComponent component;
     private String topicFromUri;
@@ -424,18 +430,23 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
             throw new IllegalArgumentException(UiLabels.field("topic") + " must not be empty, got: "
                     + UiLabels.quote(effectiveTopic) + ". Please set it in the adapter Connection tab.");
         }
-        if (!effectiveTopic.equals(effectiveTopic.trim())) {
-            throw new IllegalArgumentException(UiLabels.field("topic") + " must not start or end with a space, got: "
-                    + UiLabels.quote(effectiveTopic) + ". Please remove the spaces around the topic name in the "
-                    + "adapter Connection tab.");
-        }
         if (bootstrapServers == null || bootstrapServers.trim().isEmpty()) {
             throw new IllegalArgumentException(UiLabels.field("bootstrapServers") + " must not be empty, got: "
                     + UiLabels.quote(bootstrapServers) + ". Please set the Kafka broker address in the adapter "
                     + "Connection tab.");
         }
+        for (String entry : bootstrapServers.split(",")) {
+            // An empty entry is skipped, as Kafka's ClientUtils does.
+            String address = entry.trim();
+            String problem = address.isEmpty() ? null : unusableAddress(address);
+            if (problem != null) {
+                throw new IllegalArgumentException(UiLabels.field("bootstrapServers")
+                        + " must be a comma-separated list of host:port addresses, got: "
+                        + UiLabels.quote(bootstrapServers) + ". " + problem);
+            }
+        }
         if (schemaRegistryEnabled
-                && (schemaRegistryUrl == null || schemaRegistryUrl.isEmpty())) {
+                && (schemaRegistryUrl == null || schemaRegistryUrl.trim().isEmpty())) {
             throw new IllegalArgumentException(UiLabels.field("schemaRegistryUrl") + " must not be empty while "
                     + UiLabels.field("schemaRegistryEnabled") + " is on, got: " + UiLabels.quote(schemaRegistryUrl));
         }
@@ -456,12 +467,18 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
                         + e.getMessage(), e);
             }
         }
-        if (securityProtocol != null
-                && securityProtocol.toUpperCase().contains("SASL")
-                && (credentialAlias == null || credentialAlias.trim().isEmpty())) {
+        boolean sasl = securityProtocol != null && securityProtocol.toUpperCase().contains("SASL");
+        if (sasl && (credentialAlias == null || credentialAlias.trim().isEmpty())) {
             throw new IllegalArgumentException(UiLabels.field("credentialAlias") + " must not be empty while "
                     + UiLabels.field("securityProtocol") + " is " + securityProtocol + ", got: "
                     + UiLabels.quote(credentialAlias));
+        }
+        if (sasl && !SASL_MECHANISMS.contains(saslMechanism)) {
+            // Any other mechanism used to get the PLAIN login and failed at the first connect.
+            throw new IllegalArgumentException(UiLabels.field("saslMechanism")
+                    + " must be PLAIN, SCRAM-SHA-256 or SCRAM-SHA-512 while " + UiLabels.field("securityProtocol")
+                    + " is " + securityProtocol + ", got: " + UiLabels.quote(saslMechanism)
+                    + ". The adapter can log in with no other mechanism.");
         }
         if (diagnosticsLevel != null
                 && !diagnosticsLevel.isEmpty()
@@ -470,6 +487,27 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
             throw new IllegalArgumentException(UiLabels.field("diagnosticsLevel")
                     + " must be STANDARD (default) or FULL, got: " + UiLabels.quote(diagnosticsLevel));
         }
+    }
+
+    /**
+     * Why Kafka cannot use {@code address} as a bootstrap server, or {@code null} if it can. Read as
+     * Kafka's ClientUtils reads it: host and port as {@link Utils#getHost} and {@link Utils#getPort}
+     * find them, and a port that an {@code InetSocketAddress} takes.
+     */
+    private static String unusableAddress(String address) {
+        Integer port;
+        try {
+            port = Utils.getPort(address);
+        } catch (NumberFormatException e) {
+            port = Integer.MAX_VALUE; // more digits than an int holds
+        }
+        if (Utils.getHost(address) == null || port == null) {
+            return "Kafka cannot read '" + address + "' as host:port.";
+        }
+        if (port > 65535) {
+            return "The port of '" + address + "' is above 65535.";
+        }
+        return null;
     }
 
     /** The first 40 characters of {@code text}, and "..." if there are more. */
@@ -545,7 +583,11 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
     // --- Getters and Setters ---
 
     public String getBootstrapServers() { return bootstrapServers; }
-    public void setBootstrapServers(String bootstrapServers) { this.bootstrapServers = bootstrapServers; }
+    /**
+     * Trimmed, entry by entry, and without empty entries: kafka-clients 4.3.1 rejects an empty entry,
+     * so a trailing comma failed every poll and send (#261).
+     */
+    public void setBootstrapServers(String bootstrapServers) { this.bootstrapServers = addressList(bootstrapServers); }
 
     public String getTopic() { return topic; }
     public void setTopic(String topic) { this.topic = topic != null ? topic.trim() : null; }
@@ -569,8 +611,48 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
         return value == null ? null : value.trim().toUpperCase(java.util.Locale.ROOT);
     }
 
+    /** For a value where a space at either end can never be meant, such as an alias or a URL (#261). */
+    private static String trim(String value) {
+        return value == null ? null : value.trim();
+    }
+
+    /**
+     * Kafka's spelling of {@code value} if it is one of {@code keywords} in any case, with or without
+     * spaces around it, and anything else unchanged, for Kafka to take or reject. Kafka compares these
+     * keywords case-sensitively, and an externalized value bypasses the dropdown (#261).
+     */
+    private static String kafkaKeyword(String value, String... keywords) {
+        if (value != null) {
+            for (String keyword : keywords) {
+                if (keyword.equalsIgnoreCase(value.trim())) {
+                    return keyword;
+                }
+            }
+        }
+        return value;
+    }
+
+    /** The trimmed, non-empty entries of a comma-separated list, joined by commas. */
+    private static String addressList(String value) {
+        if (value == null) {
+            return null;
+        }
+        StringBuilder list = new StringBuilder();
+        for (String entry : value.split(",")) {
+            String address = entry.trim();
+            if (!address.isEmpty()) {
+                if (list.length() > 0) {
+                    list.append(',');
+                }
+                list.append(address);
+            }
+        }
+        return list.toString();
+    }
+
     public String getCredentialAlias() { return credentialAlias; }
-    public void setCredentialAlias(String credentialAlias) { this.credentialAlias = credentialAlias; }
+    /** Trimmed: the Secure Store lookup takes the alias as it is (#261). */
+    public void setCredentialAlias(String credentialAlias) { this.credentialAlias = trim(credentialAlias); }
 
     public String getSslKeystoreAlias() { return sslKeystoreAlias; }
     public void setSslKeystoreAlias(String sslKeystoreAlias) { this.sslKeystoreAlias = sslKeystoreAlias; }
@@ -579,7 +661,10 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
     public void setPollingIntervalSeconds(long pollingIntervalSeconds) { this.pollingIntervalSeconds = pollingIntervalSeconds; }
 
     public String getAutoOffsetReset() { return autoOffsetReset; }
-    public void setAutoOffsetReset(String autoOffsetReset) { this.autoOffsetReset = autoOffsetReset; }
+    /** {@code latest}, {@code earliest} and {@code none} in any case are passed in Kafka's spelling (#261). */
+    public void setAutoOffsetReset(String autoOffsetReset) {
+        this.autoOffsetReset = kafkaKeyword(autoOffsetReset, "latest", "earliest", "none");
+    }
 
     public int getMaxPollRecords() { return maxPollRecords; }
     public void setMaxPollRecords(int maxPollRecords) { this.maxPollRecords = maxPollRecords; }
@@ -638,10 +723,14 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
     public void setJsonSchemaReportError(boolean jsonSchemaReportError) { this.jsonSchemaReportError = jsonSchemaReportError; }
 
     public String getSchemaRegistryUrl() { return schemaRegistryUrl; }
-    public void setSchemaRegistryUrl(String schemaRegistryUrl) { this.schemaRegistryUrl = schemaRegistryUrl; }
+    /** Trimmed, like the URL every registry request is built from (#261). */
+    public void setSchemaRegistryUrl(String schemaRegistryUrl) { this.schemaRegistryUrl = trim(schemaRegistryUrl); }
 
     public String getSchemaRegistryCredentialAlias() { return schemaRegistryCredentialAlias; }
-    public void setSchemaRegistryCredentialAlias(String schemaRegistryCredentialAlias) { this.schemaRegistryCredentialAlias = schemaRegistryCredentialAlias; }
+    /** Trimmed, like {@link #setCredentialAlias(String)}. */
+    public void setSchemaRegistryCredentialAlias(String schemaRegistryCredentialAlias) {
+        this.schemaRegistryCredentialAlias = trim(schemaRegistryCredentialAlias);
+    }
 
     public String getAvroOutputFormat() { return avroOutputFormat; }
     public void setAvroOutputFormat(String avroOutputFormat) { this.avroOutputFormat = avroOutputFormat; }
@@ -664,7 +753,8 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
     public void setDlqMaxRetries(int dlqMaxRetries) { this.dlqMaxRetries = dlqMaxRetries; }
 
     public String getDlqCredentialAlias() { return dlqCredentialAlias; }
-    public void setDlqCredentialAlias(String dlqCredentialAlias) { this.dlqCredentialAlias = dlqCredentialAlias; }
+    /** Trimmed, like {@link #setCredentialAlias(String)}. */
+    public void setDlqCredentialAlias(String dlqCredentialAlias) { this.dlqCredentialAlias = trim(dlqCredentialAlias); }
 
     // --- Smart Retry Getters/Setters ---
 
@@ -710,10 +800,14 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
     public void setProducerBatchMode(String producerBatchMode) { this.producerBatchMode = producerBatchMode; }
 
     public String getAcks() { return acks; }
-    public void setAcks(String acks) { this.acks = acks; }
+    /** {@code all} in any case is passed in Kafka's spelling (#261). */
+    public void setAcks(String acks) { this.acks = kafkaKeyword(acks, "all", "-1", "0", "1"); }
 
     public String getCompressionType() { return compressionType; }
-    public void setCompressionType(String compressionType) { this.compressionType = compressionType; }
+    /** The codec names in any case are passed in Kafka's spelling (#261). */
+    public void setCompressionType(String compressionType) {
+        this.compressionType = kafkaKeyword(compressionType, "none", "gzip", "snappy", "lz4", "zstd");
+    }
 
     public int getMaxRequestSizeKb() { return maxRequestSizeKb; }
     public void setMaxRequestSizeKb(int maxRequestSizeKb) { this.maxRequestSizeKb = maxRequestSizeKb; }

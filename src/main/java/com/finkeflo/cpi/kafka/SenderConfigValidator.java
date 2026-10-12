@@ -20,6 +20,8 @@
  */
 package com.finkeflo.cpi.kafka;
 
+import java.util.regex.Pattern;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -38,6 +40,9 @@ import org.slf4j.LoggerFactory;
 final class SenderConfigValidator {
 
     private static final Logger LOG = LoggerFactory.getLogger(CpiKafkaPlusConsumer.class);
+
+    /** The characters and the length Kafka allows in a topic name. It also refuses "." and ".." alone. */
+    private static final Pattern TOPIC_NAME = Pattern.compile("[a-zA-Z0-9._-]{1,249}");
 
     private SenderConfigValidator() {
     }
@@ -165,12 +170,21 @@ final class SenderConfigValidator {
                         + " must not start or end with a space, got: " + UiLabels.quote(dlqTopic)
                         + ". Please remove the spaces around the topic name.");
             }
+            if (!TOPIC_NAME.matcher(dlqTopic).matches() || ".".equals(dlqTopic) || "..".equals(dlqTopic)) {
+                // Fails at the first dead letter, when the record can no longer go anywhere else (#261).
+                throw new IllegalArgumentException(UiLabels.field("dlqTopic") + " must be a valid Kafka topic "
+                        + "name, got: " + UiLabels.quote(dlqTopic) + ". Kafka allows 1 to 249 characters from "
+                        + "a-z, A-Z, 0-9, '.', '_' and '-', but not '.' or '..' alone.");
+            }
             if (CpiKafkaPlusConsumer.parseTopics(endpoint.getEffectiveTopic()).contains(dlqTopic)) {
                 throw new IllegalArgumentException(UiLabels.field("dlqTopic") + " must not be a topic this "
                         + "channel consumes, got: " + UiLabels.quote(dlqTopic) + ". A failed record would be "
                         + "dead-lettered into its own source and consumed again, endlessly. Please use a "
                         + "separate DLQ topic.");
             }
+        }
+        if (endpoint.isSchemaRegistryEnabled() && endpoint.isAvroValueDeserialization()) {
+            SchemaRegistryHttpClient.requireUsableUrl(endpoint.getSchemaRegistryUrl());
         }
         if (batchPath && !"JSON_ARRAY".equalsIgnoreCase(batchOutputFormat)
                 && !"XML_LIST".equalsIgnoreCase(batchOutputFormat)) {
@@ -201,6 +215,13 @@ final class SenderConfigValidator {
                     .with("autoPauseCooldownSeconds", endpoint.getAutoPauseCooldownSeconds())
                     .with("reason", "values above " + ConsumerCircuitBreaker.MAX_COOLDOWN_SECONDS
                             + " are used as " + ConsumerCircuitBreaker.MAX_COOLDOWN_SECONDS));
+        }
+        if (endpoint.getSecurityProtocol() == null || endpoint.getSecurityProtocol().isEmpty()) {
+            // Works against a PLAINTEXT broker, so it is logged, not rejected (#261).
+            AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("consumer.config.ineffective")
+                    .with("parameter", "securityProtocol")
+                    .with("value", "")
+                    .with("reason", SecurityConfigHelper.EMPTY_PROTOCOL));
         }
     }
 

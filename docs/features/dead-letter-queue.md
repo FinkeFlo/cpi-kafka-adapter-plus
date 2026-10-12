@@ -11,7 +11,7 @@ When **Enable Dead Letter Queue** (`dlqEnabled`) is turned on, records that fail
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `dlqEnabled` | `false` | Enable Dead Letter Queue routing for failed records |
-| `dlqTopic` | _(required)_ | Kafka topic to send failed records to |
+| `dlqTopic` | _(required)_ | Kafka topic to send failed records to. Kafka takes 1 to 249 characters from `a-z`, `A-Z`, `0-9`, `.`, `_` and `-`, but not `.` or `..` alone; any other name fails the deployment. |
 | `dlqMaxRetries` | `3` | Number of retry attempts before a record is sent to the DLQ |
 | `dlqCredentialAlias` | _(empty)_ | SASL credential alias for the DLQ Kafka cluster. Only visible when DLQ is enabled. Leave empty to reuse the main consumer credentials. |
 | `retryOnlyTransientErrors` | `true` | Only retry transient errors (timeouts, connection failures). Permanent errors are sent directly to DLQ. |

@@ -298,6 +298,26 @@ value or spaces around it show.
   longer than 249 characters. 1.4.1 checked the first slot only, whose id is one character shorter from
   11 *Max Concurrent Transactions* on, so this check can stop a channel that deployed before. Shorten the
   prefix by the number of characters the message gives.
+* **Receiver:** *Max Request Size (KB)* or *Buffer Memory (KB)* below 1, a negative
+  *Producer Batch Size (KB)*, or, with *Enable Schema Registry* and *Serialize Values as Avro* on, a
+  *Schema Registry URL* that does not start with `http://` or `https://`.
+* **Sender:** a *Dead Letter Topic* that Kafka refuses as a topic name: Kafka takes 1 to 249 characters
+  from `a-z`, `A-Z`, `0-9`, `.`, `_` and `-`, but not `.` or `..` alone. With *Enable Schema Registry*
+  and *Deserialize Values as Avro* on, a *Schema Registry URL* that does not start with `http://` or
+  `https://`.
+* **Both:** a *Bootstrap Servers* entry that Kafka cannot read as `host:port`, such as `broker1` or
+  `b1:9092;b2:9092`, or whose port is above 65535, and, with a SASL *Security Protocol*, a
+  *SASL Mechanism* other than `PLAIN`, `SCRAM-SHA-256` or `SCRAM-SHA-512`.
+
+Apart from the *Transactional ID Prefix*, these values never worked: each failed at the first poll, send,
+dead letter or Schema Registry call instead. Fix the value and redeploy.
+
+1.4.2 also deploys a few values that failed before. Spaces around a number, a switch, a credential alias,
+the *Bootstrap Servers* or the *Schema Registry URL* are removed, an empty entry in *Bootstrap Servers*,
+such as after a trailing comma, is dropped, and *Auto Offset Reset*, *Compression Type* and
+*Acknowledgments* take Kafka's keywords in any letter case, such as `LATEST`, `GZIP` or `ALL`. The
+*Consumer Group ID* and the *Transactional ID Prefix* keep their spaces: they identify the channel to
+Kafka.
 
 ### A channel does not start after updating to 1.4.1
 
@@ -429,6 +449,9 @@ the same. `parameter` names the setting and `reason` says why:
 * `producerRetryMaxAttempts` above 1 with transactional batching and 1 *Max Concurrent Transactions*:
   a retry holds the only transaction slot for up to *Total Retry Budget (Seconds)* and blocks every
   other send on the node meanwhile.
+* `securityProtocol` empty, as an externalized value can be: the Kafka client connects with `PLAINTEXT`,
+  without TLS and without authentication, which works against a `PLAINTEXT` listener only. Up to 1.4.1
+  this was not logged.
 
 Up to 1.4.1 the two retry lines were WARN, which does not reach the tenant trace. Change the setting
 if the line should go away.
@@ -442,6 +465,9 @@ and the channel starts all the same:
   are formatted as `JSON_ARRAY`.
 * `consumer.config.ineffective parameter=avroOutputFormat`: an unknown *Avro Output Format*; Avro
   records are converted to JSON.
+* `consumer.config.ineffective parameter=securityProtocol value=''`: an empty *Security Protocol*, as an
+  externalized value can be; the Kafka client connects with `PLAINTEXT`, without TLS and without
+  authentication, which works against a `PLAINTEXT` listener only. Up to 1.4.1 this was not logged.
 * `consumer.config.clamped`: with **Auto-Pause on Errors**, a *Consecutive Error Threshold* or an
   *Initial Pause Duration (sec)* below 1 is used as 1, and an *Initial Pause Duration (sec)* above 900
   as 900, the longest pause there is. Up to 1.4.1 a value above 900 was cut without a line.

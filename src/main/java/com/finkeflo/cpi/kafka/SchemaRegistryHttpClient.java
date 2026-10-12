@@ -25,6 +25,7 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
+import java.net.MalformedURLException;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
@@ -320,6 +321,29 @@ final class SchemaRegistryHttpClient {
     // -----------------------------------------------------------------------
     // Utilities
     // -----------------------------------------------------------------------
+
+    /**
+     * Rejects a registry URL that no request can be sent to (#261). Every request URL is built from it
+     * as {@link #openConnection} builds it, and only http and https connect. The value in the message
+     * is masked as in a log line: the URL may carry credentials. An empty URL is left to
+     * {@link CpiKafkaPlusEndpoint#validateConfiguration()}, which rejects it while the registry is on.
+     */
+    static void requireUsableUrl(String url) {
+        if (url == null || url.trim().isEmpty()) {
+            return;
+        }
+        String protocol;
+        try {
+            protocol = new URL(normalizeUrl(url) + "/subjects").getProtocol();
+        } catch (MalformedURLException e) {
+            protocol = null;
+        }
+        if (!"http".equals(protocol) && !"https".equals(protocol)) {
+            throw new IllegalArgumentException(UiLabels.field("schemaRegistryUrl")
+                    + " must be an http or https URL, got: " + UiLabels.quote(withoutUserInfo(url))
+                    + ". Please start it with https:// or http://.");
+        }
+    }
 
     /**
      * The URL with any {@code user:password@} replaced by {@code ***@}, for log lines. A Schema

@@ -61,16 +61,16 @@ public class StartRejectionMessagesTest {
         ctx.close();
     }
 
-    /**
-     * One case per start rejection, each from a configuration that starts but for the one value. Not
-     * here: the check for spaces around the topic, which cannot fail because {@code setTopic} trims.
-     */
+    /** One case per start rejection, each from a configuration that starts but for the one value. */
     @Test
     public void everyStartRejectionNamesLabelAndValue() throws Exception {
         List<Rejection> rejections = Arrays.asList(
                 // CpiKafkaPlusEndpoint.validateConfiguration(), shared by both directions
                 receiver("topic", "''", e -> e.setTopic(" ")),
-                receiver("bootstrapServers", "' '", e -> e.setBootstrapServers(" ")),
+                // The setter trims, so a blank value is reported as the empty one it becomes (#261).
+                receiver("bootstrapServers", "''", e -> e.setBootstrapServers(" ")),
+                receiver("bootstrapServers", "'b1:9092,broker2'", e -> e.setBootstrapServers("b1:9092, broker2")),
+                sender("bootstrapServers", "'b1:99999'", e -> e.setBootstrapServers("b1:99999")),
                 receiver("schemaRegistryUrl", "''", e -> {
                     e.setSchemaRegistryEnabled(true);
                     e.setSchemaRegistryUrl("");
@@ -87,10 +87,23 @@ public class StartRejectionMessagesTest {
                     e.setSecurityProtocol("SASL_SSL");
                     e.setCredentialAlias("");
                 }),
+                sender("saslMechanism", "'OAUTHBEARER'", e -> {
+                    e.setSecurityProtocol("SASL_SSL");
+                    e.setCredentialAlias("kafka-credentials");
+                    e.setSaslMechanism("oauthbearer");
+                }),
                 receiver("diagnosticsLevel", "'VERBOSE'", e -> e.setDiagnosticsLevel("VERBOSE")),
                 // ReceiverConfigValidator and TransactionalProducerPool
                 receiver("producerBatchMode", "'CSV'", e -> e.setProducerBatchMode("CSV")),
                 receiver("deliveryTimeoutSeconds", "0", e -> e.setDeliveryTimeoutSeconds(0)),
+                receiver("maxRequestSizeKb", "0", e -> e.setMaxRequestSizeKb(0)),
+                receiver("producerBatchSizeKb", "-1", e -> e.setProducerBatchSizeKb(-1)),
+                receiver("bufferMemoryKb", "0", e -> e.setBufferMemoryKb(0)),
+                receiver("schemaRegistryUrl", "'***@sr.example.com:8081'", e -> {
+                    e.setSchemaRegistryEnabled(true);
+                    e.setSchemaRegistryUrl("user:secret@sr.example.com:8081");
+                    e.setAvroValueSerialization(true);
+                }),
                 receiver("subjectNameStrategy", "'RecordNameStrategy'", e -> {
                     e.setSchemaRegistryEnabled(true);
                     e.setSchemaRegistryUrl("http://localhost:8081");
@@ -141,6 +154,12 @@ public class StartRejectionMessagesTest {
                     e.setDlqMaxRetries(-1);
                 }),
                 sender("dlqTopic", "' orders-dlq '", e -> dlq(e, " orders-dlq ")),
+                sender("dlqTopic", "'orders dlq'", e -> dlq(e, "orders dlq")),
+                sender("schemaRegistryUrl", "'ftp://sr.example.com'", e -> {
+                    e.setSchemaRegistryEnabled(true);
+                    e.setSchemaRegistryUrl("ftp://sr.example.com");
+                    e.setAvroValueDeserialization(true);
+                }),
                 sender("dlqTopic", "'orders'", e -> dlq(e, "orders")),
                 sender("topic", "','", e -> {
                     e.setTopic(",");

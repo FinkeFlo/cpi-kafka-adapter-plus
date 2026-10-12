@@ -206,16 +206,19 @@
                 <AttributeReference>
                     <ReferenceName>maxRequestSizeKb</ReferenceName>
                     <description>Maximum size of a single produce request in kilobytes. Default: 5120 KB (5 MB). Increase if your messages exceed 5 MB. Must also be allowed by the broker's message.max.bytes setting.</description>
+                    <Restriction>Constraint.isValidRegex(^(?:\{\{[^{}]+\}\}|0*[1-9][0-9]{0,9})?$)</Restriction>
                     <ErrorMessage>Please enter a positive number in KB (e.g. 5120 for 5 MB)</ErrorMessage>
                 </AttributeReference>
                 <AttributeReference>
                     <ReferenceName>producerBatchSizeKb</ReferenceName>
                     <description>Maximum size of a producer batch in kilobytes. Default: 1024 KB (1 MB). The producer groups records into batches per partition for efficiency.</description>
+                    <Restriction>Constraint.isValidRegex(^(?:\{\{[^{}]+\}\}|0*[0-9]{1,10}|-0+)?$)</Restriction>
                     <ErrorMessage>Please enter a positive number in KB (e.g. 1024 for 1 MB)</ErrorMessage>
                 </AttributeReference>
                 <AttributeReference>
                     <ReferenceName>bufferMemoryKb</ReferenceName>
                     <description>Total memory in kilobytes available for buffering unsent records. Default: 32768 KB (32 MB). If the buffer is full, the producer blocks until space is available or delivery.timeout.ms is exceeded.</description>
+                    <Restriction>Constraint.isValidRegex(^(?:\{\{[^{}]+\}\}|0*[1-9][0-9]{0,18})?$)</Restriction>
                     <ErrorMessage>Please enter a positive number in KB (e.g. 32768 for 32 MB)</ErrorMessage>
                 </AttributeReference>
             </AttributeGroup>

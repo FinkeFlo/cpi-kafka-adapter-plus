@@ -80,6 +80,8 @@ public class ConsumerStartOrderTest {
         e.setDlqMaxRetries(-1);
         e.setDrainEnabled(true);
         e.setMinBacklogToDrain(-1);
+        e.setSchemaRegistryEnabled(true);
+        e.setSchemaRegistryUrl("ftp://sr.example.com");
         e.setMaxPartitionFetchSizeKb(0);
         e.setRetryDelaySeconds(999);
         e.setPollingIntervalSeconds(0);
@@ -119,11 +121,18 @@ public class ConsumerStartOrderTest {
         e.setDlqMaxRetries(3);
         assertRejected(e, "'Dead Letter Topic' (dlqTopic) must not start or end with a space, got: "
                 + "' orders-dlq '. Please remove the spaces around the topic name.");
+        e.setDlqTopic("orders dlq");
+        assertRejected(e, "'Dead Letter Topic' (dlqTopic) must be a valid Kafka topic name, got: 'orders dlq'. "
+                + "Kafka allows 1 to 249 characters from a-z, A-Z, 0-9, '.', '_' and '-', but not '.' or '..' "
+                + "alone.");
         e.setDlqTopic("orders");
         assertRejected(e, "'Dead Letter Topic' (dlqTopic) must not be a topic this channel consumes, got: "
                 + "'orders'. A failed record would be dead-lettered into its own source and consumed again, "
                 + "endlessly. Please use a separate DLQ topic.");
         e.setDlqTopic("orders-dlq");
+        assertRejected(e, "'Schema Registry URL' (schemaRegistryUrl) must be an http or https URL, got: "
+                + "'ftp://sr.example.com'. Please start it with https:// or http://.");
+        e.setSchemaRegistryUrl("https://sr.example.com");
         assertRejected(e, "'Offset Commit Strategy' (commitStrategy) must be BATCH_COMPLETE while 'Drain "
                 + "Backlog' (drainEnabled) is on, got: 'AUTO'. AUTO commit cannot guarantee at-least-once "
                 + "delivery during drain loops.");

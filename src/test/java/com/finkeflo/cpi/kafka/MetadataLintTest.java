@@ -89,8 +89,7 @@ public class MetadataLintTest {
             KNOWN_VIOLATIONS.put("error-message-without-restriction sender." + field, "#206");
         }
         for (String field : Arrays.asList("deliveryTimeoutSeconds", "transactionalIdPrefix",
-                "maxConcurrentTransactions", "maxRequestSizeKb", "producerBatchSizeKb", "bufferMemoryKb",
-                "schemaRegistryUrl")) {
+                "maxConcurrentTransactions", "schemaRegistryUrl")) {
             KNOWN_VIOLATIONS.put("error-message-without-restriction receiver." + field, "#206");
         }
         // Whether the UI checks a Restriction against an externalized {{parameter}} literally is a
@@ -118,6 +117,10 @@ public class MetadataLintTest {
                 "producerRetryTotalBudgetSeconds", "900"));
         RANGES.put("receiver.producerRetryTotalBudgetSeconds", new RangeSpec(5, 900,
                 "producerRetryMaxAttempts", "2", "deliveryTimeoutSeconds", "1", "producerRetryDelaySeconds", "1"));
+        // Open ranges: every value of the type from the minimum on (#261).
+        RANGES.put("receiver.maxRequestSizeKb", RangeSpec.atLeast(1));
+        RANGES.put("receiver.producerBatchSizeKb", RangeSpec.atLeast(0));
+        RANGES.put("receiver.bufferMemoryKb", RangeSpec.atLeast(1));
     }
 
     /** Text Restrictions: one value the pattern must accept and one it must reject. */
@@ -165,6 +168,9 @@ public class MetadataLintTest {
     }
 
     private static final class RangeSpec {
+        /** The upper bound of an open range: the largest value of the field's type. */
+        static final long TYPE_MAX = Long.MAX_VALUE;
+
         final long lo;
         final long hi;
         final Map<String, String> activation;
@@ -173,6 +179,15 @@ public class MetadataLintTest {
             this.lo = lo;
             this.hi = hi;
             this.activation = params(activation);
+        }
+
+        static RangeSpec atLeast(long lo, String... activation) {
+            return new RangeSpec(lo, TYPE_MAX, activation);
+        }
+
+        /** The largest value in range of a field of {@code dataType}. */
+        long hi(String dataType) {
+            return hi == TYPE_MAX && "xsd:integer".equals(dataType) ? Integer.MAX_VALUE : hi;
         }
     }
 
@@ -444,8 +459,13 @@ public class MetadataLintTest {
                                    RangeSpec range, Set<String> violations) throws Exception {
         String name = a.name;
         String key = direction.id + "." + name;
-        for (long value : new long[] {range.lo - 1, range.lo, range.hi, range.hi + 1}) {
-            boolean inRange = value >= range.lo && value <= range.hi;
+        long hi = range.hi(a.dataType);
+        // Above the largest value of its type a field cannot even be bound, so an open range ends there.
+        long[] values = range.hi == RangeSpec.TYPE_MAX
+                ? new long[] {range.lo - 1, range.lo, hi}
+                : new long[] {range.lo - 1, range.lo, hi, hi + 1};
+        for (long value : values) {
+            boolean inRange = value >= range.lo && value <= hi;
             if (pattern.matcher(String.valueOf(value)).find() != inRange) {
                 violations.add("restriction-range-mismatch " + key + "=" + value + " (pattern "
                         + (inRange ? "rejects" : "accepts") + " it)");
@@ -472,7 +492,9 @@ public class MetadataLintTest {
         RangeSpec range = RANGES.get(key);
         if (range != null) {
             values.add(String.valueOf(range.lo - 1));
-            values.add(String.valueOf(range.hi + 1));
+            if (range.hi != RangeSpec.TYPE_MAX) {
+                values.add(String.valueOf(range.hi + 1));
+            }
         }
         if ("xsd:boolean".equals(a.dataType)) {
             values.add("true");

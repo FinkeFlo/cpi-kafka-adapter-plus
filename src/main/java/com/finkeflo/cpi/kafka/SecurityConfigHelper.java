@@ -34,6 +34,13 @@ public final class SecurityConfigHelper {
 
     private static final Logger LOG = LoggerFactory.getLogger(SecurityConfigHelper.class);
 
+    /**
+     * What an empty security protocol means: nothing is configured, so Kafka's default applies. Both
+     * validators log it at start with this reason (#261).
+     */
+    static final String EMPTY_PROTOCOL = "empty; the Kafka client connects with PLAINTEXT, without TLS "
+            + "and without authentication";
+
     private SecurityConfigHelper() {}
 
     /**

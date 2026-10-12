@@ -49,6 +49,11 @@ For Kafka clusters using SCRAM authentication:
 
 Supported SCRAM mechanisms: `SCRAM-SHA-256` and `SCRAM-SHA-512`.
 
+The mechanism may be written in any letter case. With a SASL `securityProtocol`, any other mechanism,
+such as an externalized `OAUTHBEARER`, fails the deployment with
+`'SASL Mechanism' (saslMechanism) must be PLAIN, SCRAM-SHA-256 or SCRAM-SHA-512 …, got: 'OAUTHBEARER'`.
+Up to 1.4.1 such a channel deployed with the PLAIN login and failed at the first connect.
+
 !!! note "Kerberos / GSSAPI is not supported"
     Only `PLAIN`, `SCRAM-SHA-256` and `SCRAM-SHA-512` are supported. SASL/GSSAPI
     (Kerberos) is intentionally **not** available: CPI's OSGi runtime does not export

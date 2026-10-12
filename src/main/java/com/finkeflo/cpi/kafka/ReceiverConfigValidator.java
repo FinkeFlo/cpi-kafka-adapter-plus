@@ -72,9 +72,10 @@ final class ReceiverConfigValidator {
     }
 
     /**
-     * Phase 1, before {@code super.doStart()}: the batch send mode, the delivery timeout and the
-     * subject name strategy. Logs {@code producer.config.ineffective} when JSON Schema validation is
-     * switched on with a batch send mode.
+     * Phase 1, before {@code super.doStart()}: the batch send mode, the delivery timeout, the producer
+     * sizes, and with Avro serialization the Schema Registry URL and the subject name strategy. Logs
+     * {@code producer.config.ineffective} when JSON Schema validation is switched on with a batch send
+     * mode, and for an empty security protocol.
      */
     static void validateBeforeStart(CpiKafkaPlusEndpoint endpoint) {
         // Values that can never work (#183): each used to fail every single message instead.
@@ -96,14 +97,38 @@ final class ReceiverConfigValidator {
             throw new IllegalArgumentException(UiLabels.field("deliveryTimeoutSeconds") + " must be at least 1, got: "
                     + endpoint.getDeliveryTimeoutSeconds() + ". With 0 every send times out before it is sent.");
         }
-        // null keeps today's meaning, TopicNameStrategy; case-sensitive exactly like resolveSubject().
+        // A negative size fails the Kafka client constructor, and with a request size or buffer of 0
+        // every send fails (#261).
+        if (endpoint.getMaxRequestSizeKb() < 1) {
+            throw new IllegalArgumentException(UiLabels.field("maxRequestSizeKb") + " must be at least 1, got: "
+                    + endpoint.getMaxRequestSizeKb() + ". No message fits into a smaller request.");
+        }
+        if (endpoint.getProducerBatchSizeKb() < 0) {
+            throw new IllegalArgumentException(UiLabels.field("producerBatchSizeKb") + " must be at least 0, got: "
+                    + endpoint.getProducerBatchSizeKb() + ". 0 switches batching off.");
+        }
+        if (endpoint.getBufferMemoryKb() < 1) {
+            throw new IllegalArgumentException(UiLabels.field("bufferMemoryKb") + " must be at least 1, got: "
+                    + endpoint.getBufferMemoryKb() + ". No message fits into a smaller buffer.");
+        }
+        boolean avro = endpoint.isSchemaRegistryEnabled() && endpoint.isAvroValueSerialization();
+        if (avro) {
+            SchemaRegistryHttpClient.requireUsableUrl(endpoint.getSchemaRegistryUrl());
+        }
+        // null keeps today's meaning, TopicNameStrategy; case-insensitive like resolveSubject() (#261).
         String strategy = endpoint.getSubjectNameStrategy();
-        if (endpoint.isSchemaRegistryEnabled() && endpoint.isAvroValueSerialization()
-                && strategy != null && !AvroSerializerHelper.TOPIC_NAME_STRATEGY.equals(strategy)) {
+        if (avro && strategy != null && !AvroSerializerHelper.TOPIC_NAME_STRATEGY.equalsIgnoreCase(strategy)) {
             throw new IllegalArgumentException(UiLabels.field("subjectNameStrategy") + " must be "
                     + AvroSerializerHelper.TOPIC_NAME_STRATEGY + " while " + UiLabels.field("avroValueSerialization")
                     + " is on, got: " + UiLabels.quote(strategy) + ". The subject cannot be resolved from JSON "
                     + "input without the record name.");
+        }
+        if (endpoint.getSecurityProtocol() == null || endpoint.getSecurityProtocol().isEmpty()) {
+            // Works against a PLAINTEXT broker, so it is logged, not rejected (#261).
+            AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("producer.config.ineffective")
+                    .with("parameter", "securityProtocol")
+                    .with("value", "")
+                    .with("reason", SecurityConfigHelper.EMPTY_PROTOCOL));
         }
     }
 

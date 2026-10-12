@@ -4,6 +4,8 @@ All adapter parameters are configured on the `CpiKafkaPlusEndpoint`. The section
 
 A value that can never work fails the deployment with a message that names the field as the UI shows it, its parameter and the value it got: `'<UI label>' (<parameter>) must …, got: <value>`, for example `'Max Poll Records' (maxPollRecords) must be at least 1, got: 0`. A text value is quoted, so an empty value or spaces around it show. A value the adapter replaces with a working one, or a setting without effect, is logged once at deployment as ERROR (`consumer.config.*`, `producer.config.ineffective`); see [Troubleshooting](troubleshooting.md).
 
+An externalized parameter bypasses the dropdowns, and its value reaches the adapter as it is. So the adapter removes the spaces around a number, a switch, a credential alias, the bootstrap servers and the Schema Registry URL, and takes Kafka's keywords for `autoOffsetReset`, `compressionType` and `acks` in any letter case (`LATEST`, `GZIP`, `ALL`). The consumer group ID and the transactional ID prefix are used exactly as entered: they identify the channel to Kafka.
+
 ---
 
 ## Sender (Consumer)
@@ -12,7 +14,7 @@ A value that can never work fails the deployment with a message that names the f
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `bootstrapServers` | _(required)_ | Kafka bootstrap servers, comma-separated. |
+| `bootstrapServers` | _(required)_ | Kafka bootstrap servers, comma-separated `host:port` addresses, each optionally with a listener prefix such as `SASL_SSL://`. Spaces around the addresses and empty entries, such as after a trailing comma, are removed. An address Kafka cannot read as `host:port`, or a port above 65535, fails the deployment. |
 | `topic` | _(required)_ | Kafka topic or comma-separated topics to consume from. |
 | `groupId` | — | Consumer group ID. |
 
@@ -20,8 +22,8 @@ A value that can never work fails the deployment with a message that names the f
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `securityProtocol` | `SASL_SSL` | Security protocol, covering transport and authentication in one value: `SASL_SSL` (UI: "SASL_SSL (SASL over TLS)"), `SSL` (UI: "SSL (TLS, client certificate optional via Keystore Alias)") — TLS with a client certificate (mTLS) only when `sslKeystoreAlias` holds one, `SASL_PLAINTEXT` (UI: "SASL_PLAINTEXT (no TLS)"), `PLAINTEXT` (UI: "PLAINTEXT (no TLS, no authentication)"). Managed brokers such as Confluent Cloud accept TLS only. |
-| `saslMechanism` | `PLAIN` | SASL mechanism: `PLAIN`, `SCRAM-SHA-256`, `SCRAM-SHA-512`. |
+| `securityProtocol` | `SASL_SSL` | Security protocol, covering transport and authentication in one value: `SASL_SSL` (UI: "SASL_SSL (SASL over TLS)"), `SSL` (UI: "SSL (TLS, client certificate optional via Keystore Alias)") — TLS with a client certificate (mTLS) only when `sslKeystoreAlias` holds one, `SASL_PLAINTEXT` (UI: "SASL_PLAINTEXT (no TLS)"), `PLAINTEXT` (UI: "PLAINTEXT (no TLS, no authentication)"). Managed brokers such as Confluent Cloud accept TLS only. An empty externalized value connects with `PLAINTEXT`, without TLS and without authentication; the deployment logs this once as ERROR (`consumer.config.ineffective`). |
+| `saslMechanism` | `PLAIN` | SASL mechanism: `PLAIN`, `SCRAM-SHA-256`, `SCRAM-SHA-512`, in any letter case. With a SASL protocol any other value fails the deployment. |
 | `credentialAlias` | — | Credential alias for SASL username/password from CPI Secure Store. Neither may contain a line break or another control character; the adapter refuses such a credential at the first connect, naming the alias (see [Authentication](security/authentication.md#cpi-secure-store)). |
 | `sslKeystoreAlias` | — | Leave empty for brokers with a publicly trusted certificate (e.g. Confluent Cloud) — the JVM default truststore is used and TLS is still active. Set a CPI Keystore alias only for a private/company CA, a self-signed broker certificate, or client-certificate authentication (mTLS). |
 
@@ -39,7 +41,7 @@ For detailed security setup, see [Authentication](security/authentication.md).
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `autoOffsetReset` | `latest` | Auto offset reset: `earliest` or `latest`. |
+| `autoOffsetReset` | `latest` | Auto offset reset: `earliest` or `latest`, in any letter case. An externalized value may also be Kafka's `none` or `by_duration:<duration>`; anything else is passed to Kafka as it is. |
 | `commitStrategy` | `BATCH_COMPLETE` | Offset commit strategy: `AUTO`, `BATCH_COMPLETE`. |
 
 **Polling**
@@ -94,7 +96,7 @@ In `XML_LIST` mode, each `<value>` element carries a `format` attribute (`"xml"`
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `schemaRegistryEnabled` | `false` | Enable Confluent Schema Registry integration. |
-| `schemaRegistryUrl` | — | Confluent Schema Registry URL. |
+| `schemaRegistryUrl` | — | Confluent Schema Registry URL, starting with `http://` or `https://` in any letter case. While `schemaRegistryEnabled` and `avroValueDeserialization` are on, any other URL fails the deployment. |
 | `schemaRegistryCredentialAlias` | — | Credential alias for Schema Registry authentication. |
 | `avroOutputFormat` | `JSON` | Avro output format: `JSON`, `XML`. |
 | `avroValueDeserialization` | `true` | Deserialize message values using Avro. Requires Schema Registry. |
@@ -115,7 +117,7 @@ For details on Avro integration, see [Avro / Schema Registry](features/avro-sche
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `dlqEnabled` | `false` | Enable Dead Letter Queue routing for failed messages. |
-| `dlqTopic` | — | Topic name for the Dead Letter Queue. |
+| `dlqTopic` | — | Topic name for the Dead Letter Queue: 1 to 249 characters from `a-z`, `A-Z`, `0-9`, `.`, `_` and `-`, but not `.` or `..` alone, and not a topic this channel consumes. Anything else fails the deployment. |
 | `dlqMaxRetries` | `3` | Maximum processing retries before routing to the DLQ. |
 | `dlqCredentialAlias` | — | SASL credential alias for writing to the DLQ topic, if that needs other credentials than the main connection. The DLQ topic is always on the same cluster (`bootstrapServers`); leave empty to reuse `credentialAlias`. As there, a user name or password with a line break or another control character is refused. |
 | `retryOnlyTransientErrors` | `true` | **Sender (consumer) direction only.** Retry only transient errors; send permanent errors directly to the DLQ. The receiver direction uses `producerRetryOnlyTransientErrors`. |
@@ -139,15 +141,15 @@ For details on DLQ and retry behavior, see [Dead Letter Queue](features/dead-let
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `bootstrapServers` | _(required)_ | Kafka bootstrap servers, comma-separated. |
+| `bootstrapServers` | _(required)_ | Kafka bootstrap servers, comma-separated `host:port` addresses, each optionally with a listener prefix such as `SASL_SSL://`. Spaces around the addresses and empty entries, such as after a trailing comma, are removed. An address Kafka cannot read as `host:port`, or a port above 65535, fails the deployment. |
 | `topic` | _(required)_ | Kafka topic to produce messages to. Can be a Camel Simple expression resolved per message, e.g. `${header.targetTopic}` or `${property.targetTopic}`; a message whose expression does not resolve to a topic name fails. A `CamelKafkaTopic` header on the message overrides the configured topic. |
 
 **Security**
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `securityProtocol` | `SASL_SSL` | Security protocol, covering transport and authentication in one value: `SASL_SSL` (UI: "SASL_SSL (SASL over TLS)"), `SSL` (UI: "SSL (TLS, client certificate optional via Keystore Alias)") — TLS with a client certificate (mTLS) only when `sslKeystoreAlias` holds one, `SASL_PLAINTEXT` (UI: "SASL_PLAINTEXT (no TLS)"), `PLAINTEXT` (UI: "PLAINTEXT (no TLS, no authentication)"). Managed brokers such as Confluent Cloud accept TLS only. |
-| `saslMechanism` | `PLAIN` | SASL mechanism: `PLAIN`, `SCRAM-SHA-256`, `SCRAM-SHA-512`. |
+| `securityProtocol` | `SASL_SSL` | Security protocol, covering transport and authentication in one value: `SASL_SSL` (UI: "SASL_SSL (SASL over TLS)"), `SSL` (UI: "SSL (TLS, client certificate optional via Keystore Alias)") — TLS with a client certificate (mTLS) only when `sslKeystoreAlias` holds one, `SASL_PLAINTEXT` (UI: "SASL_PLAINTEXT (no TLS)"), `PLAINTEXT` (UI: "PLAINTEXT (no TLS, no authentication)"). Managed brokers such as Confluent Cloud accept TLS only. An empty externalized value connects with `PLAINTEXT`, without TLS and without authentication; the deployment logs this once as ERROR (`producer.config.ineffective`). |
+| `saslMechanism` | `PLAIN` | SASL mechanism: `PLAIN`, `SCRAM-SHA-256`, `SCRAM-SHA-512`, in any letter case. With a SASL protocol any other value fails the deployment. |
 | `credentialAlias` | — | Credential alias for SASL username/password from CPI Secure Store. Neither may contain a line break or another control character; the adapter refuses such a credential at the first connect, naming the alias (see [Authentication](security/authentication.md#cpi-secure-store)). |
 | `sslKeystoreAlias` | — | Leave empty for brokers with a publicly trusted certificate (e.g. Confluent Cloud) — the JVM default truststore is used and TLS is still active. Set a CPI Keystore alias only for a private/company CA, a self-signed broker certificate, or client-certificate authentication (mTLS). |
 
@@ -165,7 +167,7 @@ For detailed security setup, see [Authentication](security/authentication.md).
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `acks` | `all` | Producer acknowledgments: `all`, `1`, `0`. Only used with `enableIdempotence=false`; otherwise the adapter always sends with `all`. |
+| `acks` | `all` | Producer acknowledgments: `all` (in any letter case), `1`, `0`. Only used with `enableIdempotence=false`; otherwise the adapter always sends with `all`. |
 | `enableIdempotence` | `true` | Enable idempotent producer: the broker discards duplicates from the producer's own internal retries. Forces `acks=all`. Not end-to-end exactly-once: a message the caller sends twice is written twice. |
 | `deliveryTimeoutSeconds` | `120` | Maximum delivery time in seconds, including retries. With `enableTransactions` the adapter derives `transaction.timeout.ms` from this value (plus up to 30 s commit headroom, never below 60 s), so the maximum is 870 s — above that a broker rejects the producer. |
 
@@ -189,10 +191,10 @@ For detailed security setup, see [Authentication](security/authentication.md).
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `compressionType` | `none` | Compression type: `none`, `gzip`, `lz4`, `zstd`. |
-| `maxRequestSizeKb` | `5120` | Maximum request size in KB. |
-| `producerBatchSizeKb` | `1024` | Kafka producer internal batch size in KB (UI label: "Producer Batch Size (KB)"). Controls how many records the client buffers before sending to the broker. |
-| `bufferMemoryKb` | `32768` | Total memory for producer buffering in KB. |
+| `compressionType` | `none` | Compression type: `none`, `gzip`, `lz4`, `zstd`, in any letter case; an externalized value may also be `snappy`. |
+| `maxRequestSizeKb` | `5120` | Maximum request size in KB, at least 1: with less, no message fits into a request, so the deployment fails. |
+| `producerBatchSizeKb` | `1024` | Kafka producer internal batch size in KB (UI label: "Producer Batch Size (KB)"). Controls how many records the client buffers before sending to the broker. 0 switches batching off; a negative value fails the deployment. |
+| `bufferMemoryKb` | `32768` | Total memory for producer buffering in KB, at least 1: with less, no message fits into the buffer, so the deployment fails. |
 
 ### Message Handling
 
@@ -209,10 +211,10 @@ For more details, see [JSON Schema Validation](features/json-schema-validation.m
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `schemaRegistryEnabled` | `false` | Enable Confluent Schema Registry integration. |
-| `schemaRegistryUrl` | — | Confluent Schema Registry URL. |
+| `schemaRegistryUrl` | — | Confluent Schema Registry URL, starting with `http://` or `https://` in any letter case. While `schemaRegistryEnabled` and `avroValueSerialization` are on, any other URL fails the deployment. |
 | `schemaRegistryCredentialAlias` | — | Credential alias for Schema Registry authentication. |
 | `autoRegisterSchemas` | `false` | Automatically register schemas with Schema Registry. |
-| `subjectNameStrategy` | `TopicNameStrategy` | Subject naming strategy. Only `TopicNameStrategy` (subject `<topic>-value`) is supported: with `RecordNameStrategy` or `TopicRecordNameStrategy` every message fails, because the record name cannot be derived from the JSON input. |
+| `subjectNameStrategy` | `TopicNameStrategy` | Subject naming strategy. Only `TopicNameStrategy` (subject `<topic>-value`) is supported, its name in any letter case: while `schemaRegistryEnabled` and `avroValueSerialization` are on, `RecordNameStrategy` or `TopicRecordNameStrategy` fails the deployment, because the record name cannot be derived from the JSON input. |
 | `avroValueSerialization` | `true` | Serialize message values using Avro. Requires Schema Registry. |
 
 For details on Avro integration, see [Avro / Schema Registry](features/avro-schema-registry.md).

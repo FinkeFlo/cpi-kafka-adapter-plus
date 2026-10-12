@@ -174,8 +174,9 @@ public class AvroSerializerHelper implements Closeable {
     // Subject name strategy
     // -----------------------------------------------------------------------
 
+    /** Case-insensitive, like the start check in {@link ReceiverConfigValidator} (#261). */
     private String resolveSubject(String topic) {
-        if (TOPIC_NAME_STRATEGY.equals(strategyName)) {
+        if (TOPIC_NAME_STRATEGY.equalsIgnoreCase(strategyName)) {
             return topic + "-value";
         }
         throw new IllegalStateException(

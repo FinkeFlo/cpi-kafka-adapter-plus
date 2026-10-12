@@ -66,11 +66,15 @@ public class ProducerStartOrderTest {
     @Test
     public void eachCheckRejectsOnlyOnceTheEarlierOnesPass() throws Exception {
         CpiKafkaPlusEndpoint e = endpoint();
+        e.setBootstrapServers("localhost:9999,broker2");
         e.setDiagnosticsLevel("VERBOSE");
         e.setProducerBatchMode("CSV");
         e.setDeliveryTimeoutSeconds(0);
+        e.setMaxRequestSizeKb(0);
+        e.setProducerBatchSizeKb(-1);
+        e.setBufferMemoryKb(0);
         e.setSchemaRegistryEnabled(true);
-        e.setSchemaRegistryUrl("http://localhost:8081");
+        e.setSchemaRegistryUrl("localhost:8081");
         e.setAvroValueSerialization(true);
         e.setSubjectNameStrategy("RecordNameStrategy");
         e.setEnableTransactions(true);
@@ -82,6 +86,9 @@ public class ProducerStartOrderTest {
         e.setProducerRetryTotalBudgetSeconds(901);
 
         // CpiKafkaPlusEndpoint.validateConfiguration(), shared with the sender, comes first
+        assertRejected(e, "'Bootstrap Servers' (bootstrapServers) must be a comma-separated list of host:port "
+                + "addresses, got: 'localhost:9999,broker2'. Kafka cannot read 'broker2' as host:port.");
+        e.setBootstrapServers("localhost:9999");
         assertRejected(e, "'Diagnostics Level' (diagnosticsLevel) must be STANDARD (default) or FULL, got: "
                 + "'VERBOSE'");
         e.setDiagnosticsLevel("STANDARD");
@@ -91,6 +98,18 @@ public class ProducerStartOrderTest {
         assertRejected(e, "'Delivery Timeout (Seconds)' (deliveryTimeoutSeconds) must be at least 1, got: 0. "
                 + "With 0 every send times out before it is sent.");
         e.setDeliveryTimeoutSeconds(871);
+        assertRejected(e, "'Max Request Size (KB)' (maxRequestSizeKb) must be at least 1, got: 0. No message "
+                + "fits into a smaller request.");
+        e.setMaxRequestSizeKb(1);
+        assertRejected(e, "'Producer Batch Size (KB)' (producerBatchSizeKb) must be at least 0, got: -1. 0 "
+                + "switches batching off.");
+        e.setProducerBatchSizeKb(0);
+        assertRejected(e, "'Buffer Memory (KB)' (bufferMemoryKb) must be at least 1, got: 0. No message fits "
+                + "into a smaller buffer.");
+        e.setBufferMemoryKb(1);
+        assertRejected(e, "'Schema Registry URL' (schemaRegistryUrl) must be an http or https URL, got: "
+                + "'localhost:8081'. Please start it with https:// or http://.");
+        e.setSchemaRegistryUrl("http://localhost:8081");
         assertRejected(e, "'Subject Name Strategy' (subjectNameStrategy) must be TopicNameStrategy while "
                 + "'Serialize Values as Avro' (avroValueSerialization) is on, got: 'RecordNameStrategy'. The "
                 + "subject cannot be resolved from JSON input without the record name.");

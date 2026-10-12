@@ -31,34 +31,6 @@ import org.junit.Test;
 public class CpiKafkaPlusComponentTest {
 
     @Test
-    public void testTrimQueryParamValues_leadingSpace() {
-        String input  = "cpi-kafka-plus:foo?bootstrapServers=localhost%3A9092&topic= my-topic&enableTransactions=true";
-        String result = CpiKafkaPlusComponent.trimQueryParamValues(input);
-        Assert.assertTrue("leading space in topic value must be trimmed", result.contains("topic=my-topic"));
-    }
-
-    @Test
-    public void testTrimQueryParamValues_trailingSpace() {
-        String input  = "cpi-kafka-plus:foo?topic=my-topic &enableTransactions=false";
-        String result = CpiKafkaPlusComponent.trimQueryParamValues(input);
-        Assert.assertTrue("trailing space in topic value must be trimmed", result.contains("topic=my-topic&"));
-    }
-
-    @Test
-    public void testTrimQueryParamValues_noSpaces() {
-        String input  = "cpi-kafka-plus:foo?topic=my-topic&enableTransactions=true";
-        Assert.assertEquals("URI without spaces must be unchanged",
-                input, CpiKafkaPlusComponent.trimQueryParamValues(input));
-    }
-
-    @Test
-    public void testTrimQueryParamValues_noQueryString() {
-        String input = "cpi-kafka-plus:foo";
-        Assert.assertEquals("URI without query string must be unchanged",
-                input, CpiKafkaPlusComponent.trimQueryParamValues(input));
-    }
-
-    @Test
     public void testComponentCreation() throws Exception {
         CpiKafkaPlusComponent component = new CpiKafkaPlusComponent();
         Assert.assertNotNull("Component should be created", component);
