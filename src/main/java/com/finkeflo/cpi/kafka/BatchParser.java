@@ -315,16 +315,26 @@ public final class BatchParser {
             try {
                 Transformer transformer = TransformerFactory.newInstance().newTransformer();
                 transformer.setOutputProperty(OutputKeys.OMIT_XML_DECLARATION, "yes");
+                Transformer xmlTransformer = null;
                 for (int i = 0; i < children.getLength(); i++) {
                     Node child = children.item(i);
                     if (child.getNodeType() == Node.TEXT_NODE && !hasText) {
                         continue;
                     }
+                    Transformer serializer = transformer;
                     if (child.getNodeType() == Node.ELEMENT_NODE) {
                         declareNamespaces((Element) child, namespaces);
+                        if (isHtmlWithoutNamespace(child)) {
+                            if (xmlTransformer == null) {
+                                xmlTransformer = TransformerFactory.newInstance().newTransformer();
+                                xmlTransformer.setOutputProperty(OutputKeys.METHOD, "xml");
+                                xmlTransformer.setOutputProperty(OutputKeys.OMIT_XML_DECLARATION, "yes");
+                            }
+                            serializer = xmlTransformer;
+                        }
                     }
                     StringWriter writer = new StringWriter();
-                    transformer.transform(new DOMSource(child), new StreamResult(writer));
+                    serializer.transform(new DOMSource(child), new StreamResult(writer));
                     sb.append(writer.toString());
                 }
             } catch (Exception e) {
@@ -340,6 +350,18 @@ public final class BatchParser {
             return null; // tombstone
         }
         return text;
+    }
+
+    /**
+     * An element called {@code html}, in any case, in no namespace. Left to its default, the
+     * transformer writes such an element with the HTML output method: {@code <br>} instead of
+     * {@code <br/>}, which no XML parser reads, a {@code META} element added to {@code <head>}, and
+     * indented. Only these elements get the XML method explicitly: under it the namespace
+     * declarations of other elements would come out in a different order than they always did.
+     */
+    private static boolean isHtmlWithoutNamespace(Node element) {
+        String namespace = element.getNamespaceURI();
+        return "html".equalsIgnoreCase(element.getLocalName()) && (namespace == null || namespace.isEmpty());
     }
 
     private static boolean isXmlWhitespace(String text) {

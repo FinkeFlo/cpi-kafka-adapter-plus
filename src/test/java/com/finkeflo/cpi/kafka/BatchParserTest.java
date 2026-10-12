@@ -390,6 +390,18 @@ public class BatchParserTest {
         Assert.assertEquals("<a/><b>x</b>", xmlValue("<value>\n  <a/>\n\t<b>x</b>\r\n</value>"));
     }
 
+    /**
+     * A value whose first element is {@code <html>} is XML like any other. Left to the transformer's
+     * default, it was written with the HTML output method: {@code <br>} instead of {@code <br/>},
+     * which no XML parser accepts, with a {@code META} element added to {@code <head>} and indented.
+     */
+    @Test
+    public void aValueWhoseFirstElementIsHtmlIsStillWrittenAsXml() {
+        Assert.assertEquals("<html><head><title>t</title></head><body><br/><p>x</p></body></html>",
+                xmlValue("<value><html><head><title>t</title></head><body><br/><p>x</p></body></html></value>"));
+        Assert.assertEquals("Text <HTML><br/></HTML>", xmlValue("<value>Text <HTML><br/></HTML></value>"));
+    }
+
     @Test
     public void aValueKeepsTheNamespacesDeclaredOnKafkaRecords() {
         List<BatchRecord> records = BatchParser.parseXml(
@@ -446,7 +458,8 @@ public class BatchParserTest {
      * Batches without namespace declarations, and values that declare their namespaces themselves,
      * produce exactly the records they did before the parser became namespace-aware, compared
      * against a copy of the previous parser. Only values with element children go through the
-     * serializer; the others are listed to show that the text path is untouched.
+     * serializer; the others are listed to show that the text path is untouched. An element called
+     * {@code html} in no namespace is left out on purpose: it is now written as XML (see above).
      */
     @Test
     public void valuesWithoutOutsideNamespacesAreTheSameAsBefore() throws Exception {
@@ -468,7 +481,7 @@ public class BatchParserTest {
             "<value><a>\u00e4\u00f6\u00fc\u00df \ud83d\ude00 &#169; &#x20AC; \u0085 \u2028</a></value>",
             "<value><a xml:lang=\"de\" xml:space=\"preserve\"> x </a></value>",
             "<value><record><key>inner</key><value>x</value></record></value>",
-            "<value><html><body><br/></body></html></value>",
+            "<value><html xmlns=\"http://www.w3.org/1999/xhtml\" lang=\"de\"><body><br/></body></html></value>",
             "<value><x:o xmlns:x=\"urn:x\" xmlns=\"urn:d\"><x:i y=\"1\"/><j/></x:o></value>",
             "<value><a xmlns=\"urn:a\"><b xmlns=\"\"/></a></value>",
             "<value><p:a xmlns:p=\"urn:p\" p:x=\"1\" y=\"2\"><p:b/><c xmlns=\"urn:c\"><d/></c></p:a></value>",
