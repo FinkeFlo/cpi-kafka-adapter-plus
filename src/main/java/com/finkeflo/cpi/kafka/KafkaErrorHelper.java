@@ -140,14 +140,17 @@ final class KafkaErrorHelper {
      * Walks the exception cause chain to determine if the error is transient, i.e. whether the
      * sender should run its route again for the failed record. Returns true if any exception in
      * the chain is a known network/connection exception type, a
-     * {@code java.util.concurrent.TimeoutException} or a Kafka {@code RetriableException}. Returns
+     * {@code java.util.concurrent.TimeoutException}, a Kafka {@code RetriableException} or a
+     * Schema Registry request that failed for a reason outside the record (no answer, 401, 408, 429
+     * or 5xx, see {@link SchemaRegistryHttpClient.SchemaRegistryException#isTransient()}). Returns
      * false for permanent errors (NPE, ClassCastException, FileNotFoundException, etc.) that
      * would fail identically on retry.
      *
-     * <p>Used for {@code retryOnlyTransientErrors} in the record processor and for the
-     * {@code retryable} field of {@code adapter.failure.reported}. Deliberately separate from
-     * {@link #classify(Throwable)}, which judges a failed producer send: a refused connection is
-     * transient here and {@link Classification#UNKNOWN_FATAL} there.
+     * <p>Used for {@code retryOnlyTransientErrors} in the record processor, for a record or batch
+     * that cannot be deserialized (#188) and for the {@code retryable} field of
+     * {@code adapter.failure.reported}. Deliberately separate from {@link #classify(Throwable)},
+     * which judges a failed producer send: a refused connection is transient here and
+     * {@link Classification#UNKNOWN_FATAL} there.
      */
     static boolean isTransientForRedelivery(Exception e) {
         for (Throwable current : CauseChain.of(e)) {
@@ -160,6 +163,10 @@ final class KafkaErrorHelper {
             }
             if (KAFKA_RETRIABLE_EXCEPTION != null
                     && KAFKA_RETRIABLE_EXCEPTION.isInstance(current)) {
+                return true;
+            }
+            if (current instanceof SchemaRegistryHttpClient.SchemaRegistryException
+                    && ((SchemaRegistryHttpClient.SchemaRegistryException) current).isTransient()) {
                 return true;
             }
         }

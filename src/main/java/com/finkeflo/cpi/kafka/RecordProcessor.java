@@ -849,8 +849,10 @@ final class RecordProcessor {
      * because the Kafka client itself receives raw bytes via ByteArrayDeserializer).
      *
      * <p>Without a DLQ the record is handled like any other failed record without a DLQ. If the
-     * DLQ write fails, the partition is blocked at the record and it is retried later. The error no
-     * longer escapes the poll: that skipped every remaining record of the poll as well.
+     * DLQ write fails, the partition is blocked at the record and it is retried later. So is a
+     * record whose deserialization failed for a transient cause, such as a Schema Registry that
+     * does not answer, DLQ or not: the record is not at fault (#188). The error no longer escapes
+     * the poll: that skipped every remaining record of the poll as well.
      */
     private int handleDeserializationFailure(Consumer<byte[], byte[]> kafkaConsumer,
                                               ConsumerRecord<byte[], byte[]> record,
@@ -873,7 +875,7 @@ final class RecordProcessor {
         progress.failed();
 
         TopicPartition tp = partitionOf(record);
-        RecordFailurePolicy.Action action = failurePolicy.forDeserializationFailure();
+        RecordFailurePolicy.Action action = failurePolicy.forDeserializationFailure(cause);
         if (action != RecordFailurePolicy.Action.DEAD_LETTER) {
             blockOrSkip(kafkaConsumer, record, action, commitAfterSuccess, progress);
             callback.handleException("Could not deserialize Kafka record at offset " + record.offset(),
