@@ -1306,7 +1306,7 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
         StringBuilder msg = new StringBuilder(prefix)
                 .append(" Kafka topic '").append(topic).append("': ").append(e.getMessage());
 
-        Throwable probeFailure = topicChecker.lastProbeFailure();
+        Throwable probeFailure = topicChecker.lastProbeFailure(topic);
         if (probeFailure != null) {
             msg.append(" The broker could not be reached during the pre-send check either (")
                     .append(KafkaErrorHelper.describeChain(probeFailure)).append(").");

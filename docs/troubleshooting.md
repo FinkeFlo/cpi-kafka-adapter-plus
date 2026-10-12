@@ -417,6 +417,11 @@ The up-front metadata fetch did not succeed. This is not itself a failure: the s
 same fetch and will report a more precise error. Treat it as a hint that the broker was slow or
 unreachable at that moment.
 
+A pre-warm whose producer is rebuilt or closed while it runs is not reported here. It is abandoned
+with an INFO line ("Metadata pre-warm of topic '…' abandoned after … ms: the producer was replaced
+while it ran (…)"), and the next send pre-warms the new producer. Up to 1.4.1 that race could appear
+here as a `NullPointerException`.
+
 ## Message Processing Log enrichment
 
 When a failure occurs during an exchange on a **sender** (consumer) channel, the adapter enriches
