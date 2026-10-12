@@ -29,6 +29,7 @@ import java.util.concurrent.Future;
 import org.apache.camel.Exchange;
 import org.apache.camel.Message;
 import org.apache.camel.support.DefaultProducer;
+import org.apache.camel.support.ExchangeHelper;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.clients.producer.RecordMetadata;
@@ -70,6 +71,13 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
      */
     java.util.function.Function<Properties, KafkaProducer<byte[], byte[]>> txnProducerFactory =
             TransactionalProducerPool::createTransactionalProducer;
+    /**
+     * Creates the shared producer. A field for the same reason as {@link #txnProducerFactory}: it is
+     * the seam through which a test hands out the producer that a send after a rebuild builds,
+     * without a broker.
+     */
+    java.util.function.Function<Properties, KafkaProducer<byte[], byte[]>> sharedProducerFactory =
+            props -> new KafkaProducer<>(props, new ByteArraySerializer(), new ByteArraySerializer());
     private AvroSerializerHelper avroHelper;
     private AdapterTracingHelper tracingHelper;
     private JsonSchemaValidator jsonSchemaValidator;
@@ -204,10 +212,13 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
             LOG.info("[CPI-KAFKA-PLUS-DIAG] ensureInitialized: creating Kafka resources for topic='{}'",
                     endpoint.getEffectiveTopic());
 
-            if (!createKafkaProducer()) {
+            // Helpers first: they need no connection, and a helper that cannot be built (a Schema
+            // Registry credential alias that does not resolve, say) used to cost a complete
+            // KafkaProducer, built and closed again under this monitor, on every message.
+            if (!ensureHelpersInitializedLocked()) {
                 return;
             }
-            if (!ensureHelpersInitializedLocked()) {
+            if (!createKafkaProducer()) {
                 return;
             }
 
@@ -261,8 +272,7 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
             LOG.debug("[CPI-KAFKA-PLUS-DIAG] ensureInitialized: producer properties built, security={}, sasl={}",
                     endpoint.getSecurityProtocol(), endpoint.getSaslMechanism());
             kafkaProducer = BundleBackedClassLoader.withBundleClassLoader(getClass(),
-                    () -> new KafkaProducer<>(props,
-                            new ByteArraySerializer(), new ByteArraySerializer()));
+                    () -> sharedProducerFactory.apply(props));
 
             // c3: Capture the resolved client.id for diagnostic correlation with broker-side logs.
             // This is stable across producer rebuilds as long as the endpoint adapterInstanceID
@@ -298,7 +308,6 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
                 avroHelper = null;
             }
             jsonSchemaValidator = null;
-            closeProducerQuietly();
             lastInitException = e;
             return false;
         }
@@ -380,10 +389,9 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
                 throw initFailure("Serialization helpers");
             }
         } else {
-            ensureInitialized();
-            if (kafkaProducer == null) {
-                throw initFailure("Kafka producer");
-            }
+            // Built here, before the topic checks, so the pre-warm has a client to warm. The send
+            // reads the producer again: a rebuild may replace it in between.
+            sharedProducer();
         }
 
         Message in = exchange.getIn();
@@ -401,6 +409,29 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
             processBatch(exchange, in, topic, batchMode);
         } else {
             processSingle(exchange, in, topic);
+        }
+    }
+
+    /**
+     * The shared producer for one send attempt, built when there is none. Callers read it once into
+     * a local and keep using that: a rebuild after another send's failure clears the field at any
+     * moment, and reading the field again in the middle of a send turned that race into a
+     * {@code NullPointerException} (#246).
+     */
+    private KafkaProducer<byte[], byte[]> sharedProducer() {
+        KafkaProducer<byte[], byte[]> producer = kafkaProducer;
+        if (producer != null) {
+            return producer;
+        }
+        // Under the monitor that closeProducerQuietly() detaches under, so a rebuild cannot clear the
+        // producer between building and reading it.
+        synchronized (this) {
+            ensureInitialized();
+            producer = kafkaProducer;
+            if (producer == null) {
+                throw initFailure("Kafka producer");
+            }
+            return producer;
         }
     }
 
@@ -434,23 +465,25 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
         if (endpoint.isTransactionalBatching()) {
             sendTransactionalBatch(in, topic, batchMode, records, fallbackKey, partition, timestamp, valueSerializer);
         } else {
+            KafkaProducer<byte[], byte[]> producer = sharedProducer();
             try {
                 ProducerBatchHelper.BatchSendResult result = ProducerBatchHelper.sendBatch(
-                        kafkaProducer, records, topic, fallbackKey, partition, timestamp,
+                        producer, records, topic, fallbackKey, partition, timestamp,
                         in, this::addRecordHeaders, valueSerializer, null, sendGuard,
                         ProducerPath.SHARED, resolvedClientId);
 
                 ProducerBatchHelper.setResponseHeadersAndBody(in, topic, batchMode, result);
                 recordSendSuccess();
             } catch (Exception e) {
+                Exception failure = reclassifyIfProducerReplaced(e, producer);
                 Map<String, String> ctx = new java.util.LinkedHashMap<>();
                 ctx.put("topic", topic);
                 ctx.put("batchMode", batchMode);
                 ctx.put("recordCount", String.valueOf(records.size()));
                 CorrelationHelper.addTo(ctx, exchange);
-                tracingHelper.traceError(exchange, e, ctx);
-                handleSendFailure(e, "producer.batch.send", ctx);
-                throw sendFailure("Failed to send batch to", topic, e);
+                tracingHelper.traceError(exchange, failure, ctx);
+                handleSendFailure(failure, "producer.batch.send", ctx);
+                throw sendFailure("Failed to send batch to", topic, failure);
             }
         }
     }
@@ -720,23 +753,25 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
         // Determine key from kafka.KEY header
         String keyStr = in.getHeader("kafka.KEY", String.class);
 
-        // JSON Schema validation of outbound message (if enabled)
-        if (jsonSchemaValidator != null) {
-            String bodyStr = in.getBody(String.class);
-            if (bodyStr != null) {
-                String validationError = jsonSchemaValidator.validate(bodyStr);
-                if (validationError != null) {
-                    if (endpoint.isJsonSchemaReportError()) {
-                        tracingHelper.traceOutbound(exchange,
-                                bodyStr.getBytes(StandardCharsets.UTF_8));
-                    }
-                    throw new RuntimeException("Outbound " + validationError);
+        // Read the body once. A stream body that is not cached can be read only once: validating it
+        // as a String and then reading it again for the send used to send it empty (#246).
+        byte[] bodyBytes = readBody(in);
+
+        // JSON Schema validation of outbound message (if enabled), on the bytes that are sent,
+        // decoded with the exchange charset as Camel's String conversion of the body does
+        if (jsonSchemaValidator != null && bodyBytes != null) {
+            String validationError = jsonSchemaValidator.validate(
+                    new String(bodyBytes, ExchangeHelper.getCharsetName(exchange)));
+            if (validationError != null) {
+                if (endpoint.isJsonSchemaReportError()) {
+                    tracingHelper.traceOutbound(exchange, bodyBytes);
                 }
+                throw new RuntimeException("Outbound " + validationError);
             }
         }
 
         // Serialize value
-        byte[] value = serializeValue(topic, in);
+        byte[] value = serializeValue(topic, bodyBytes);
 
         // Serialize key
         byte[] key = serializeKey(topic, keyStr);
@@ -768,6 +803,7 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
         // record provably never reached the producer's buffer (send() threw, or returned Kafka's
         // FutureFailure). A failure after buffering may already be on the broker, and a second send()
         // gets a new sequence number the broker does not deduplicate — see ProducerRetryPolicy.
+        // Each attempt reads the shared producer anew, so an attempt after a rebuild uses the new one.
         int maxAttempts = endpoint.getProducerRetryMaxAttempts();
         long delayMs = endpoint.getProducerRetryDelaySeconds() * 1000L;
         long startedAtMs = System.currentTimeMillis();
@@ -777,12 +813,15 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
         int attempt = 0;
 
         for (attempt = 1; attempt <= maxAttempts; attempt++) {
+            // Outside the try: a producer that cannot be built fails the exchange as it does before
+            // the first attempt, with the init failure, not as a send failure.
+            KafkaProducer<byte[], byte[]> producer = sharedProducer();
             // Stays true when send() itself throws: then nothing was buffered.
             boolean failedBeforeBuffering = true;
             try {
                 long deadlineMs = sendGuard.newDeadline();
                 Future<RecordMetadata> future = MonitorFaultRetry.execute(
-                        () -> kafkaProducer.send(record),
+                        () -> producer.send(record),
                         new MonitorFaultRetry.Budget(),
                         deadlineMs,
                         topic,
@@ -809,15 +848,15 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
                         metadata.topic(), metadata.partition(), metadata.offset());
                 return;
             } catch (Exception e) {
-                lastError = e;
+                lastError = reclassifyIfProducerReplaced(e, producer);
                 ProducerRetryPolicy.Decision decision = ProducerRetryPolicy.decideSingle(
-                        e, failedBeforeBuffering, attempt, maxAttempts, delayMs, budgetDeadlineMs,
+                        lastError, failedBeforeBuffering, attempt, maxAttempts, delayMs, budgetDeadlineMs,
                         System.currentTimeMillis(), endpoint.isEnableIdempotence());
                 if (!decision.isRetry()) {
                     stopReason = decision.stopReason();
                     break;
                 }
-                logSingleRetryAttempt(attempt, maxAttempts, e, topic, budgetDeadlineMs);
+                logSingleRetryAttempt(attempt, maxAttempts, lastError, topic, budgetDeadlineMs);
             }
 
             if (!sleepBetweenAttempts(delayMs)) {
@@ -925,7 +964,8 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
         return resolved.trim();
     }
 
-    private byte[] serializeValue(String topic, Message message) {
+    /** The body as bytes; read it only once, see {@link #processSingle}. */
+    private static byte[] readBody(Message message) {
         byte[] bodyBytes = message.getBody(byte[].class);
         if (bodyBytes == null) {
             String bodyStr = message.getBody(String.class);
@@ -933,7 +973,10 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
                 bodyBytes = bodyStr.getBytes(StandardCharsets.UTF_8);
             }
         }
+        return bodyBytes;
+    }
 
+    private byte[] serializeValue(String topic, byte[] bodyBytes) {
         if (bodyBytes == null) {
             return null;
         }
@@ -1080,6 +1123,27 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
     }
 
     /**
+     * A send whose producer was closed under it, by the rebuild after another send's failure or by
+     * the route stopping, fails with "Cannot perform operation after producer has been closed",
+     * "Producer is closed forcefully" or the like. Unrecognised, that is {@code UNKNOWN_FATAL}: a
+     * permanent failure that asks for one more rebuild and counts towards the node-fault escalation
+     * (#246). It says nothing about the broker or the record, only that the send lost a race against
+     * the replacement of the client, so it is reported as transient instead. Recognised failures
+     * keep their classification, and so does the KAFKA-10902 monitor fault, which the escalation
+     * exists for.
+     *
+     * @param used the producer the failed send ran on
+     */
+    private Exception reclassifyIfProducerReplaced(Exception failure, KafkaProducer<byte[], byte[]> used) {
+        if (used == kafkaProducer
+                || KafkaErrorHelper.classify(failure) != Classification.UNKNOWN_FATAL
+                || KafkaErrorHelper.isMetadataMonitorFault(failure)) {
+            return failure;
+        }
+        return new ProducerReplacedException(failure);
+    }
+
+    /**
      * Records a failure of the shared, non-transactional producer.
      *
      * <p>The failure is <b>always</b> logged at ERROR. It previously was not: logging happened only
@@ -1145,16 +1209,16 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
     }
 
     /**
-     * e4: Triggers a producer rebuild and measures/logs the outcome.
+     * e4: Rebuilds the producer and reports what happened.
      *
-     * <p>The reason this method exists (instead of just calling {@link #triggerReconnect()})
-     * is that we currently rebuild and then have no idea whether it helped.
-     *
-     * <p>This method emits {@code producerRecreated=true/false} and the duration. Whether the
-     * rebuild actually <i>helped</i> is determined by the next send: if that succeeds,
-     * {@link #recordSendSuccess()} emits {@code producer.rebuild.effect} with {@code outcome=RECOVERED}.
-     * If it fails, the diagnosis is that rebuilding did not help — which is visible from the
-     * failure line immediately following the rebuild line.
+     * <p>The rebuild is lazy: the producer is closed and discarded here, and the next send builds a
+     * new one. The event therefore reports whether there was a producer to discard
+     * ({@code producerDiscarded}), not whether a new one exists; the former
+     * {@code producerRecreated} read the field right after it had been cleared and was always
+     * {@code false} (#246). Whether the rebuild <i>helped</i> is determined by the next send: if that
+     * succeeds, {@link #recordSendSuccess()} emits {@code producer.rebuild.effect} with
+     * {@code outcome=RECOVERED}; if the new producer cannot be built, {@code producer.init.failed}
+     * says why; if it is built but the send fails, the failure line follows the rebuild line.
      */
     private void triggerReconnectWithMeasurement() {
         lastRebuildAttemptMs = System.currentTimeMillis();
@@ -1162,35 +1226,17 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
         pendingRebuildEffect = true; // Track whether next send shows recovery
 
         long rebuildStartMs = System.currentTimeMillis();
-        boolean producerRecreated = false;
-        Exception rebuildException = null;
-
-        try {
-            triggerReconnect();
-            // A non-null producer only means it was constructed, not that it works
-            producerRecreated = (kafkaProducer != null);
-        } catch (Exception e) {
-            rebuildException = e;
-        }
-
+        boolean producerDiscarded = triggerReconnect();
         long rebuildDurationMs = System.currentTimeMillis() - rebuildStartMs;
 
-        // Route both success and failure through AdapterDiagnostics for consistent format
-        AdapterDiagnostics.Event event = AdapterDiagnostics.event("producer.rebuild.outcome")
-                .with("producerRecreated", producerRecreated)
+        AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("producer.rebuild.outcome")
+                .with("producerDiscarded", producerDiscarded)
+                .with("consequence", "the next send builds a new producer")
                 .with("durationMs", rebuildDurationMs)
                 .with("attemptsSinceLastSuccess", rebuildAttemptsSinceSuccess)
                 .with("producerPath", ProducerPath.SHARED)
                 .withOptional("clientId", resolvedClientId)
-                .with("thread", Thread.currentThread().getName());
-
-        if (rebuildException != null) {
-            AdapterDiagnostics.error(LOG, event.with("rebuildException", rebuildException.getClass().getSimpleName()),
-                    rebuildException);
-        } else {
-            // No throwable - just log the outcome. Next send will close the loop.
-            AdapterDiagnostics.error(LOG, event, null);
-        }
+                .with("thread", Thread.currentThread().getName()), null);
     }
 
     /**
@@ -1287,9 +1333,11 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
      * Replaces only the producer. The serialization helpers do not depend on the connection and stay
      * as they are: clearing the Avro helper here, while {@code helpersInitialized} stayed true, made
      * every later message go out as raw JSON.
+     *
+     * @return whether there was a producer to discard
      */
-    private void triggerReconnect() {
-        closeProducerQuietly();
+    private boolean triggerReconnect() {
+        return closeProducerQuietly();
     }
 
     /**
@@ -1297,8 +1345,10 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
      * closes it outside. Clearing the field only after the close used to wipe out a producer another
      * thread had built in the meantime, leaving {@code initialized=true} without a producer. Closing
      * outside the monitor keeps the 5 s close from blocking every other sender.
+     *
+     * @return whether there was a producer to discard
      */
-    private void closeProducerQuietly() {
+    private boolean closeProducerQuietly() {
         KafkaProducer<byte[], byte[]> detached;
         synchronized (this) {
             initialized = false;
@@ -1317,6 +1367,7 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
                 LOG.warn("[CPI-KAFKA-PLUS-DIAG] Error closing Kafka producer: {}", e.getMessage());
             }
         }
+        return detached != null;
     }
 
     private void closeAvroHelperQuietly() {
@@ -1330,4 +1381,20 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
         }
     }
 
+    /**
+     * A send failure caused by the shared producer being closed while the send was using it. A
+     * Kafka {@link org.apache.kafka.common.errors.RetriableException}, so that every classification
+     * of the failure (the retry decision, the rebuild decision, the node-fault escalation) reads it
+     * as transient; the original failure is the cause.
+     */
+    static final class ProducerReplacedException extends org.apache.kafka.common.errors.RetriableException {
+
+        private static final long serialVersionUID = 1L;
+
+        ProducerReplacedException(Exception cause) {
+            super("The shared Kafka producer was closed while this send was using it (another send's "
+                    + "failure had it rebuilt, or the route was stopping); the next send uses a new "
+                    + "producer. " + KafkaErrorHelper.describeChain(cause), cause);
+        }
+    }
 }
