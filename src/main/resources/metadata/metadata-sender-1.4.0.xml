@@ -354,7 +354,7 @@
                 </AttributeReference>
                 <AttributeReference>
                     <ReferenceName>retryDelaySeconds</ReferenceName>
-                    <description>Initial delay in seconds before a failed message is retried. The delay doubles after each attempt (exponential backoff), capped at 300 seconds. With a Dead Letter Queue it applies to the retries before the message is dead-lettered (0 = retry immediately). With Retry Failed Message it is the first wait before the same offset is retried; the wait is at least 1 second. Example with 2 seconds: before the DLQ, with Max Retries 3, the waits are 2s, 4s, 8s; with Retry Failed Message they are 2s, 4s, 8s, 16s and so on, up to 300s between attempts, until the message succeeds.</description>
+                    <description>Initial delay in seconds before a failed message is retried. The delay doubles after each attempt (exponential backoff), capped at 300 seconds. With a Dead Letter Queue it applies to the retries before the message is dead-lettered (0 = retry immediately). With Retry Failed Message it is the first wait before the same offset is retried; the wait is at least 1 second. Example with 2 seconds: before the DLQ, with 'Retries before DLQ' set to 3, the waits are 2s, 4s, 8s; with Retry Failed Message they are 2s, 4s, 8s, 16s and so on, up to 300s between attempts, until the message succeeds.</description>
                     <Restriction>Constraint.isValidRegex(^(?:\{\{[^{}]+\}\}|[0-9]|[1-9][0-9]|[12][0-9]{2}|300)$)</Restriction>
                     <ErrorMessage>Please enter a number of seconds between 0 and 300 (e.g. 2)</ErrorMessage>
                 </AttributeReference>
@@ -379,7 +379,7 @@
                 </AttributeReference>
                 <AttributeReference>
                     <ReferenceName>dlqMaxRetries</ReferenceName>
-                    <description>Number of processing retries before a message is routed to the DLQ. Default: 3. Set to 0 to route failed messages immediately without retrying.</description>
+                    <description>Number of retries after the first failed attempt before a message is routed to the DLQ: 3 (default) means up to 4 attempts in total. Set to 0 to route failed messages immediately without retrying.</description>
                     <ErrorMessage>Please enter a non-negative number (e.g. 3)</ErrorMessage>
                     <EditCondition>
                         <AttributeName>dlqEnabled</AttributeName>
@@ -897,7 +897,7 @@
         <Default>3</Default>
         <Length/>
         <isparameterized>true</isparameterized>
-        <GuiLabels guid="b1000006-0000-0000-0000-000000000003"><Label language="EN">Max Retries before DLQ</Label></GuiLabels>
+        <GuiLabels guid="b1000006-0000-0000-0000-000000000003"><Label language="EN">Retries before DLQ (additional attempts)</Label></GuiLabels>
     </AttributeMetadata>
     <AttributeMetadata>
         <Name>dlqCredentialAlias</Name>
@@ -928,7 +928,7 @@
         <Default>true</Default>
         <Length/>
         <isparameterized>true</isparameterized>
-        <GuiLabels guid="b1000006-0000-0000-0000-000000000005"><Label language="EN">Skip Retries for Permanent Errors</Label></GuiLabels>
+        <GuiLabels guid="b1000006-0000-0000-0000-000000000005"><Label language="EN">Retry Transient Errors Only</Label></GuiLabels>
     </AttributeMetadata>
     <AttributeMetadata>
         <Name>retryDelaySeconds</Name>

@@ -114,9 +114,9 @@ For details on Avro integration, see [Avro / Schema Registry](features/avro-sche
 |-----------|---------|-------------|
 | `dlqEnabled` | `false` | Enable Dead Letter Queue routing for failed messages. |
 | `dlqTopic` | — | Topic name for the Dead Letter Queue. |
-| `dlqMaxRetries` | `3` | Maximum processing retries before routing to the DLQ. |
+| `dlqMaxRetries` | `3` | Retries after the first failed attempt before a record is routed to the DLQ (UI: "Retries before DLQ (additional attempts)"): `3` means up to 4 attempts in total, `0` routes it after the first failure. |
 | `dlqCredentialAlias` | — | SASL credential alias for writing to the DLQ topic, if that needs other credentials than the main connection. The DLQ topic is always on the same cluster (`bootstrapServers`); leave empty to reuse `credentialAlias`. |
-| `retryOnlyTransientErrors` | `true` | **Sender (consumer) direction only.** Retry only transient errors; send permanent errors directly to the DLQ. The receiver direction uses `producerRetryOnlyTransientErrors`. |
+| `retryOnlyTransientErrors` | `true` | **Sender (consumer) direction only.** Retry only transient errors; send permanent errors directly to the DLQ (UI: "Retry Transient Errors Only"). The receiver direction uses `producerRetryOnlyTransientErrors`. |
 | `writeMplErrorAttachment` | `true` | Write the full error diagnostic (including full stack trace) as MPL attachment `KafkaAdapterError`. Disable to keep only searchable MPL headers/attributes. |
 
 **Auto-Pause on Errors**
@@ -221,7 +221,7 @@ For details on Avro integration, see [Avro / Schema Registry](features/avro-sche
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `producerRetryMaxAttempts` | `1` | Total number of send attempts, not additional attempts. `1` keeps the previous behaviour and switches the retry off. Range 1–5. |
+| `producerRetryMaxAttempts` | `1` | Total number of send attempts, not additional attempts (UI: "Send Attempts (total, 1 = off)"). `1` keeps the previous behaviour and switches the retry off. Range 1–5. |
 | `producerRetryDelaySeconds` | `2` | Constant wait between attempts in seconds. Range 1–30. Shown only when `producerRetryMaxAttempts` is not `1`. |
 | `producerRetryOnlyTransientErrors` | `true` | Retry only transient (`RETRIABLE`) failures. `false` additionally retries an unusable transactional producer. |
 | `producerRetryTotalBudgetSeconds` | `30` | Hard upper bound for all attempts of one message together. Must stay below the calling system's timeout; a Kafka-to-Kafka or scheduled channel has no such caller and can use a larger budget. Range 5–900. Shown only when `producerRetryMaxAttempts` is not `1`. |

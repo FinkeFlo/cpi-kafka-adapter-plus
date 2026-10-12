@@ -4,7 +4,7 @@ The adapter supports routing failed messages to a Dead Letter Queue topic, preve
 
 ## Overview
 
-When **Enable Dead Letter Queue** (`dlqEnabled`) is turned on, records that fail processing in the CPI IFlow are retried a configurable number of times. If all retries configured via **Max Retries before DLQ** (`dlqMaxRetries`) are exhausted, the record is forwarded to the configured **DLQ Topic** (`dlqTopic`) instead of blocking the consumer — unless the write to the DLQ itself fails, see [When the DLQ Write Fails](#when-the-dlq-write-fails). The original record key, value, and headers are preserved, and error metadata is added as Kafka headers.
+When **Enable Dead Letter Queue** (`dlqEnabled`) is turned on, records that fail processing in the CPI IFlow are retried a configurable number of times. If all retries configured via **Retries before DLQ (additional attempts)** (`dlqMaxRetries`) are exhausted, the record is forwarded to the configured **DLQ Topic** (`dlqTopic`) instead of blocking the consumer — unless the write to the DLQ itself fails, see [When the DLQ Write Fails](#when-the-dlq-write-fails). The original record key, value, and headers are preserved, and error metadata is added as Kafka headers.
 
 ## Configuration
 
@@ -12,9 +12,9 @@ When **Enable Dead Letter Queue** (`dlqEnabled`) is turned on, records that fail
 |-----------|---------|-------------|
 | `dlqEnabled` | `false` | Enable Dead Letter Queue routing for failed records |
 | `dlqTopic` | _(required)_ | Kafka topic to send failed records to |
-| `dlqMaxRetries` | `3` | Number of retry attempts before a record is sent to the DLQ |
+| `dlqMaxRetries` | `3` | Number of retries after the first failed attempt before a record is sent to the DLQ (UI: "Retries before DLQ (additional attempts)") |
 | `dlqCredentialAlias` | _(empty)_ | SASL credential alias for the DLQ Kafka cluster. Only visible when DLQ is enabled. Leave empty to reuse the main consumer credentials. |
-| `retryOnlyTransientErrors` | `true` | Only retry transient errors (timeouts, connection failures). Permanent errors are sent directly to DLQ. |
+| `retryOnlyTransientErrors` | `true` | Only retry transient errors (timeouts, connection failures). Permanent errors are sent directly to DLQ. (UI: "Retry Transient Errors Only") |
 | `retryDelaySeconds` | `0` | Initial delay between retries in seconds. Doubles after each retry (exponential backoff), capped at 300s. |
 
 !!! note "Not to be confused with the producer retry"
@@ -33,7 +33,7 @@ of that size (`message.max.bytes` / `max.message.bytes`).
 
 ## How Retries Work
 
-Retries happen **synchronously in memory** during the same poll cycle — the record is not re-read from Kafka. The consumer holds the record and passes it to the IFlow pipeline up to **Max Retries before DLQ** (`dlqMaxRetries`) + 1 times (1 initial attempt + N retries).
+Retries happen **synchronously in memory** during the same poll cycle — the record is not re-read from Kafka. The consumer holds the record and passes it to the IFlow pipeline up to **Retries before DLQ (additional attempts)** (`dlqMaxRetries`) + 1 times (1 initial attempt + N retries).
 
 ```
 Record consumed from Kafka
@@ -59,7 +59,7 @@ restart. An attempt that fails during the stop usually fails because of the stop
 
 ## Smart Retry: Error Classification
 
-When **Only Retry Transient Errors** (`retryOnlyTransientErrors`) is enabled (default), the adapter classifies exceptions before retrying. Permanent errors are sent directly to the DLQ without further retry attempts.
+When **Retry Transient Errors Only** (`retryOnlyTransientErrors`) is enabled (default), the adapter classifies exceptions before retrying. Permanent errors are sent directly to the DLQ without further retry attempts.
 
 ### Transient Errors (retried)
 
@@ -94,7 +94,7 @@ When `retryDelaySeconds` is set to a value greater than 0, the adapter waits bet
 
 **Formula:** `delay = min(retryDelaySeconds * 2^attempt, 300)`
 
-**Example** with `retryDelaySeconds=2` and **Max Retries before DLQ** (`dlqMaxRetries`) = 3:
+**Example** with `retryDelaySeconds=2` and **Retries before DLQ (additional attempts)** (`dlqMaxRetries`) = 3:
 
 | Attempt | Result | Wait |
 |---------|--------|------|
@@ -105,7 +105,7 @@ When `retryDelaySeconds` is set to a value greater than 0, the adapter waits bet
 | **Total** | | **14s** |
 
 !!! warning "max.poll.interval.ms"
-    The consumer's `max.poll.interval.ms` scales with **Polling Interval (Seconds)** (`pollingIntervalSeconds`) — it is that interval plus a 10-minute processing buffer (about 10 minutes at the default 5-second interval), capped at 6 h 10 min. If the total backoff time across all records in a single poll exceeds this limit, Kafka triggers a rebalance. Keep **Max Retries before DLQ** (`dlqMaxRetries`) low (1-3) and **Max Poll Records** (`maxPollRecords`) moderate when using retry delays. Combining with **Only Retry Transient Errors** (`retryOnlyTransientErrors`) minimizes the number of records entering the retry loop.
+    The consumer's `max.poll.interval.ms` scales with **Polling Interval (Seconds)** (`pollingIntervalSeconds`) — it is that interval plus a 10-minute processing buffer (about 10 minutes at the default 5-second interval), capped at 6 h 10 min. If the total backoff time across all records in a single poll exceeds this limit, Kafka triggers a rebalance. Keep **Retries before DLQ (additional attempts)** (`dlqMaxRetries`) low (1-3) and **Max Poll Records** (`maxPollRecords`) moderate when using retry delays. Combining with **Retry Transient Errors Only** (`retryOnlyTransientErrors`) minimizes the number of records entering the retry loop.
 
 ## Batch Mode Behavior
 
@@ -120,7 +120,7 @@ This means a single bad record does not drag the entire batch into the DLQ.
 
 ### Example: 5-Record Batch with One Bad Record
 
-**Setup:** **Max Records per IFlow Run (MPL)** (`batchSize`) = 5, **Max Retries before DLQ** (`dlqMaxRetries`) = 2, Record #3 contains invalid data.
+**Setup:** **Max Records per IFlow Run (MPL)** (`batchSize`) = 5, **Retries before DLQ (additional attempts)** (`dlqMaxRetries`) = 2, Record #3 contains invalid data.
 
 | Step | Action | Result |
 |------|--------|--------|
@@ -233,9 +233,9 @@ These headers allow consumers of the DLQ topic to trace the origin of each faile
 
 ## Recommendations
 
-- **Start with the default** of **Max Retries before DLQ** (`dlqMaxRetries`) = 3 — this handles transient errors well without adding too much latency
+- **Start with the default** of **Retries before DLQ (additional attempts)** (`dlqMaxRetries`) = 3 — this handles transient errors well without adding too much latency
 - **Monitor the DLQ topic** to detect recurring failures and fix root causes
 - **Use the DLQ headers** (`CpiKafkaPlusDlqError`, `CpiKafkaPlusDlqOriginalTopic`) to build automated alerting or reprocessing pipelines
 - **Combine with Offset Commit Strategy = After Successful Processing (At-Least-Once)** (`BATCH_COMPLETE`) to ensure at-least-once delivery — records are only committed after successful processing or DLQ routing
-- **Enable Only Retry Transient Errors** (`retryOnlyTransientErrors`) (default) to avoid wasting retries on mapping errors, NPEs, or other permanent failures
+- **Enable Retry Transient Errors Only** (`retryOnlyTransientErrors`) (default) to avoid wasting retries on mapping errors, NPEs, or other permanent failures
 - **Set `retryDelaySeconds=2`** when using DLQ with transient-error-prone backends to give downstream systems time to recover

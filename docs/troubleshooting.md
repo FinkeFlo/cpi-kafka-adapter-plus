@@ -294,7 +294,7 @@ deployment error names the field.
 
 * **Sender:** an empty *Consumer Group ID*, an *Offset Commit Strategy* other than `BATCH_COMPLETE`/`AUTO`,
   *Max Poll Records* below 1, a negative *Fetch Min Bytes*, *Fetch Max Wait (ms)*, *Poll Timeout (ms)* or
-  *Max Retries before DLQ*, *Max Records per IFlow Run (MPL)* below 1 in batch mode, or a
+  *Retries before DLQ (additional attempts)*, *Max Records per IFlow Run (MPL)* below 1 in batch mode, or a
   *Dead Letter Topic* that is also a source topic or has spaces around its name.
 * **Receiver:** an unknown *Batch Send Mode*, *Delivery Timeout (Seconds)* below 1, or a
   *Subject Name Strategy* other than `TopicNameStrategy` with Avro serialization.
