@@ -50,9 +50,10 @@ import java.util.function.IntSupplier;
  * </ul>
  * {@code errorHandling} is Retry Failed Message ({@link Action#BLOCK}, the default) or Skip Failed
  * Message ({@link Action#SKIP}). A failed DLQ write always blocks: the record stays unresolved and
- * is retried after a backoff. A stop request or an interrupted pause between two retries leaves the
- * record unresolved as well, without dead-lettering it; the caller checks for that, because it owns
- * the pause.
+ * is retried after a backoff. A route call that fails while the consumer is stopping, and an
+ * interrupted pause between two retries, leave the record (a batch: all its records) unresolved
+ * without any of these actions, so it is delivered again after the restart (#242); the caller
+ * checks for that before asking this policy, because it owns the stop request and the pause.
  */
 final class RecordFailurePolicy {
 

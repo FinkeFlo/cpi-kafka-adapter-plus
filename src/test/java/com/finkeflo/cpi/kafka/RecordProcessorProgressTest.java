@@ -927,6 +927,99 @@ public class RecordProcessorProgressTest {
         Assert.assertEquals(3L, committed(consumer, P0));
     }
 
+    // --- a stop during the route call (#242): the record stays unresolved, it is no poison record ---
+
+    @Test
+    public void stopDuringAPermanentRouteFailureDoesNotDeadLetter() throws Exception {
+        stopAfterFirstRecord.set(true);
+        failing.add("0:0");
+        MockConsumer<byte[], byte[]> consumer = consumerWith(P0, "a", "b");
+        CpiKafkaPlusEndpoint endpoint = endpoint(true, null);
+        endpoint.setDlqMaxRetries(2);
+        MockProducer<byte[], byte[]> dlq = okDlqProducer();
+        RecordingTracingHelper tracing = new RecordingTracingHelper(endpoint);
+        RecordProcessor processor = processor(endpoint, dlqHelper(dlq), null, tracing);
+
+        PollProgress progress = processSingle(processor, consumer);
+
+        Assert.assertEquals(Collections.singletonList("0:0"), invoked);
+        Assert.assertTrue("a route call that fails during a stop is no poison record", dlq.history().isEmpty());
+        Assert.assertTrue("nor a failure to report", tracing.traced.isEmpty());
+        Assert.assertEquals("nor one that counts towards auto-pause", 0, progress.failuresSinceLastSuccess());
+        Assert.assertFalse("a stop starts no retry backoff", progress.isBlocked(P0));
+        Assert.assertTrue(progress.isStopped());
+        Assert.assertEquals(-1L, committed(consumer, P0));
+        Assert.assertEquals(0L, consumer.position(P0));
+    }
+
+    @Test
+    public void stopDuringTheLastAttemptDoesNotDeadLetter() throws Exception {
+        // dlqMaxRetries=0: the first attempt is the last one, so no pause between two retries follows it
+        stopAfterFirstRecord.set(true);
+        failingTransiently.add("0:0");
+        MockConsumer<byte[], byte[]> consumer = consumerWith(P0, "a", "b");
+        MockProducer<byte[], byte[]> dlq = okDlqProducer();
+        RecordProcessor processor = processor(endpoint(true, null), dlqHelper(dlq), null);
+
+        PollProgress progress = processSingle(processor, consumer);
+
+        Assert.assertEquals(Collections.singletonList("0:0"), invoked);
+        Assert.assertTrue(dlq.history().isEmpty());
+        Assert.assertTrue(progress.isStopped());
+        Assert.assertEquals(-1L, committed(consumer, P0));
+        Assert.assertEquals(0L, consumer.position(P0));
+    }
+
+    @Test
+    public void stopDuringAFailedRouteCallDoesNotSkipTheRecord() throws Exception {
+        stopAfterFirstRecord.set(true);
+        failing.add("0:0");
+        MockConsumer<byte[], byte[]> consumer = consumerWith(P0, "a", "b");
+        RecordProcessor processor = processor(skip(endpoint(false, null)), null, null);
+
+        PollProgress progress = processSingle(processor, consumer);
+
+        Assert.assertEquals(Collections.singletonList("0:0"), invoked);
+        Assert.assertTrue(progress.isStopped());
+        Assert.assertEquals("Skip Failed Message must not commit what the stop broke off",
+                -1L, committed(consumer, P0));
+        Assert.assertEquals(0L, consumer.position(P0));
+    }
+
+    @Test
+    public void stopDuringAFailedBatchDoesNotSkipTheBatch() throws Exception {
+        stopAfterFirstRecord.set(true);
+        failing.add("0:0-2");
+        MockConsumer<byte[], byte[]> consumer = consumerWith(P0, "a", "b", "c");
+        RecordProcessor processor = processor(skip(batchEndpoint(false, null)), null, null);
+
+        PollProgress progress = processBatch(processor, consumer);
+
+        Assert.assertEquals(Collections.singletonList("0:0-2"), invoked);
+        Assert.assertEquals(0, progress.failuresSinceLastSuccess());
+        Assert.assertTrue(progress.isStopped());
+        Assert.assertEquals(-1L, committed(consumer, P0));
+        Assert.assertEquals(0L, consumer.position(P0));
+    }
+
+    @Test
+    public void stopDuringAFailedBatchWithDlqDeadLettersNothing() throws Exception {
+        stopAfterFirstRecord.set(true);
+        failing.add("0:0-2");
+        MockConsumer<byte[], byte[]> consumer = consumerWith(P0, "a", "b", "c");
+        MockProducer<byte[], byte[]> dlq = okDlqProducer();
+        RecordProcessor processor = processor(batchEndpoint(true, null), dlqHelper(dlq), null);
+
+        PollProgress progress = processBatch(processor, consumer);
+
+        Assert.assertEquals("no fallback to single records once the consumer stops",
+                Collections.singletonList("0:0-2"), invoked);
+        Assert.assertTrue(dlq.history().isEmpty());
+        Assert.assertTrue(progress.isStopped());
+        Assert.assertEquals(-1L, committed(consumer, P0));
+        Assert.assertEquals(0L, consumer.position(P0));
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────────────
 
     private PollProgress processBatch(RecordProcessor processor, MockConsumer<byte[], byte[]> consumer)

@@ -192,7 +192,10 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
 
         @Override
         public boolean isStopRequested() {
-            return shutdownRequested;
+            // A graceful shutdown first suspends the consumer and waits for the exchanges in flight,
+            // and only then stops it and interrupts this thread. Starting no further record while
+            // suspended lets that wait end with the record in flight (#242).
+            return shutdownRequested || CpiKafkaPlusConsumer.this.isSuspendingOrSuspended();
         }
     };
 

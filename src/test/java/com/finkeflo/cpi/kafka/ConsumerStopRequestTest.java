@@ -47,4 +47,33 @@ public class ConsumerStopRequestTest {
             Assert.assertTrue(consumer.getConsumerCallback().isStopRequested());
         }
     }
+
+    /**
+     * A graceful shutdown suspends the consumer first and waits for the exchanges in flight; only
+     * then it stops the consumer and interrupts the poll thread. Starting the next record while
+     * suspended would keep that wait going until its timeout (#242).
+     */
+    @Test
+    public void callbackReportsASuspendAsAStop() throws Exception {
+        try (DefaultCamelContext ctx = new DefaultCamelContext()) {
+            ctx.addComponent("cpi-kafka-plus", new CpiKafkaPlusComponent());
+            ctx.start();
+            CpiKafkaPlusEndpoint endpoint = (CpiKafkaPlusEndpoint) ctx.getEndpoint(
+                    "cpi-kafka-plus:orders?bootstrapServers=localhost:9092&groupId=g&securityProtocol=PLAINTEXT");
+            CpiKafkaPlusConsumer consumer = (CpiKafkaPlusConsumer) endpoint.createConsumer(exchange -> { });
+
+            consumer.start();
+            try {
+                Assert.assertFalse(consumer.getConsumerCallback().isStopRequested());
+
+                consumer.suspend();
+                Assert.assertTrue(consumer.getConsumerCallback().isStopRequested());
+
+                consumer.resume();
+                Assert.assertFalse(consumer.getConsumerCallback().isStopRequested());
+            } finally {
+                consumer.stop();
+            }
+        }
+    }
 }
