@@ -1034,7 +1034,11 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
         return keyStr.getBytes(StandardCharsets.UTF_8);
     }
 
-    private void addRecordHeaders(ProducerRecord<byte[], byte[]> record, Message message) {
+    /**
+     * Copies the exchange headers that {@code allowedHeaders} lets through to the record. A
+     * {@code byte[]} value is sent as it is, any other value as the UTF-8 bytes of its text.
+     */
+    void addRecordHeaders(ProducerRecord<byte[], byte[]> record, Message message) {
         Map<String, Object> headers = message.getHeaders();
         String allowedHeadersPattern = endpoint.getAllowedHeaders();
         
@@ -1051,7 +1055,9 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
             }
             
             Object val = entry.getValue();
-            if (val != null) {
+            if (val instanceof byte[]) {
+                record.headers().add(name, (byte[]) val);
+            } else if (val != null) {
                 record.headers().add(name, val.toString().getBytes(StandardCharsets.UTF_8));
             }
         }
