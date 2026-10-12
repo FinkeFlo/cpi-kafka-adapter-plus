@@ -20,7 +20,7 @@ All adapter parameters are configured on the `CpiKafkaPlusEndpoint`. The section
 |-----------|---------|-------------|
 | `securityProtocol` | `SASL_SSL` | Security protocol, covering transport and authentication in one value: `SASL_SSL` (UI: "SASL_SSL (SASL over TLS)"), `SSL` (UI: "SSL (TLS, client certificate optional via Keystore Alias)") — TLS with a client certificate (mTLS) only when `sslKeystoreAlias` holds one, `SASL_PLAINTEXT` (UI: "SASL_PLAINTEXT (no TLS)"), `PLAINTEXT` (UI: "PLAINTEXT (no TLS, no authentication)"). Managed brokers such as Confluent Cloud accept TLS only. |
 | `saslMechanism` | `PLAIN` | SASL mechanism: `PLAIN`, `SCRAM-SHA-256`, `SCRAM-SHA-512`. |
-| `credentialAlias` | — | Credential alias for SASL username/password from CPI Secure Store. |
+| `credentialAlias` | — | Credential alias for SASL username/password from CPI Secure Store. Neither may contain a line break or another control character; the adapter refuses such a credential at the first connect, naming the alias (see [Authentication](security/authentication.md#cpi-secure-store)). |
 | `sslKeystoreAlias` | — | Leave empty for brokers with a publicly trusted certificate (e.g. Confluent Cloud) — the JVM default truststore is used and TLS is still active. Set a CPI Keystore alias only for a private/company CA, a self-signed broker certificate, or client-certificate authentication (mTLS). |
 
 For detailed security setup, see [Authentication](security/authentication.md).
@@ -115,7 +115,7 @@ For details on Avro integration, see [Avro / Schema Registry](features/avro-sche
 | `dlqEnabled` | `false` | Enable Dead Letter Queue routing for failed messages. |
 | `dlqTopic` | — | Topic name for the Dead Letter Queue. |
 | `dlqMaxRetries` | `3` | Maximum processing retries before routing to the DLQ. |
-| `dlqCredentialAlias` | — | SASL credential alias for writing to the DLQ topic, if that needs other credentials than the main connection. The DLQ topic is always on the same cluster (`bootstrapServers`); leave empty to reuse `credentialAlias`. |
+| `dlqCredentialAlias` | — | SASL credential alias for writing to the DLQ topic, if that needs other credentials than the main connection. The DLQ topic is always on the same cluster (`bootstrapServers`); leave empty to reuse `credentialAlias`. As there, a user name or password with a line break or another control character is refused. |
 | `retryOnlyTransientErrors` | `true` | **Sender (consumer) direction only.** Retry only transient errors; send permanent errors directly to the DLQ. The receiver direction uses `producerRetryOnlyTransientErrors`. |
 | `writeMplErrorAttachment` | `true` | Write the full error diagnostic (including full stack trace) as MPL attachment `KafkaAdapterError`. Disable to keep only searchable MPL headers/attributes. |
 
@@ -146,7 +146,7 @@ For details on DLQ and retry behavior, see [Dead Letter Queue](features/dead-let
 |-----------|---------|-------------|
 | `securityProtocol` | `SASL_SSL` | Security protocol, covering transport and authentication in one value: `SASL_SSL` (UI: "SASL_SSL (SASL over TLS)"), `SSL` (UI: "SSL (TLS, client certificate optional via Keystore Alias)") — TLS with a client certificate (mTLS) only when `sslKeystoreAlias` holds one, `SASL_PLAINTEXT` (UI: "SASL_PLAINTEXT (no TLS)"), `PLAINTEXT` (UI: "PLAINTEXT (no TLS, no authentication)"). Managed brokers such as Confluent Cloud accept TLS only. |
 | `saslMechanism` | `PLAIN` | SASL mechanism: `PLAIN`, `SCRAM-SHA-256`, `SCRAM-SHA-512`. |
-| `credentialAlias` | — | Credential alias for SASL username/password from CPI Secure Store. |
+| `credentialAlias` | — | Credential alias for SASL username/password from CPI Secure Store. Neither may contain a line break or another control character; the adapter refuses such a credential at the first connect, naming the alias (see [Authentication](security/authentication.md#cpi-secure-store)). |
 | `sslKeystoreAlias` | — | Leave empty for brokers with a publicly trusted certificate (e.g. Confluent Cloud) — the JVM default truststore is used and TLS is still active. Set a CPI Keystore alias only for a private/company CA, a self-signed broker certificate, or client-certificate authentication (mTLS). |
 
 For detailed security setup, see [Authentication](security/authentication.md).

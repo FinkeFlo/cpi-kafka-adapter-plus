@@ -67,14 +67,18 @@ public final class SecurityConfigHelper {
         try {
             CredentialHelper.UserCredentials credentials = CredentialHelper.getUserCredential(alias);
             if (credentials != null) {
-                String jaasConfig = buildJaasConfig(
-                        endpoint.getSaslMechanism(), credentials.username(), credentials.password());
+                String jaasConfig = buildJaasConfig(endpoint.getSaslMechanism(), credentials.username(),
+                        credentials.password(), "'Credential Alias' (credentialAlias) '" + alias + "'");
                 props.put("sasl.jaas.config", jaasConfig);
                 LOG.info("SASL credentials resolved for alias '{}'", alias);
             } else {
                 LOG.error("[CPI-KAFKA-PLUS-DIAG] SASL configured but no credentials resolved for alias '{}'. " +
                         "Kafka will fail to connect.", alias);
             }
+        } catch (UnusableCredentialException e) {
+            // Fails the client build with a message that names the alias. Logged and dropped here,
+            // the client would fail anyway, on the missing JAAS configuration instead.
+            throw e;
         } catch (Exception e) {
             LOG.error("[CPI-KAFKA-PLUS-DIAG] Could not resolve SASL credentials from Secure Store alias '{}': {}. " +
                     "Kafka client will likely fail to connect.", alias, e.getMessage());
@@ -92,7 +96,20 @@ public final class SecurityConfigHelper {
         LOG.info("Kafka SSL will use CPI keystore alias '{}' for trust/key material", sslKeystoreAlias);
     }
 
-    static String buildJaasConfig(String mechanism, String username, String password) {
+    /**
+     * The {@code sasl.jaas.config} of a SASL login with these credentials.
+     *
+     * @param source where the credentials come from, named in the message of a rejection, e.g.
+     *        {@code 'Credential Alias' (credentialAlias) 'kafka-credentials'}
+     * @throws UnusableCredentialException if the user name or the password contains a control
+     *         character, CR and LF included
+     */
+    static String buildJaasConfig(String mechanism, String username, String password, String source) {
+        // Kafka reads the configuration with a StreamTokenizer: a quoted value ends at a line break,
+        // and the rest of the password becomes a key that Kafka's error message then quotes. So the
+        // message names where the credential comes from, never the value or a part of it.
+        rejectControlCharacters(username, "user name", source);
+        rejectControlCharacters(password, "password", source);
         String loginModule;
         String mech = mechanism.toUpperCase();
         if ("SCRAM-SHA-256".equals(mech) || "SCRAM-SHA-512".equals(mech)) {
@@ -105,6 +122,19 @@ public final class SecurityConfigHelper {
         return String.format("%s required username=\"%s\" password=\"%s\";", loginModule, safeUser, safePass);
     }
 
+    private static void rejectControlCharacters(String value, String what, String source) {
+        if (value == null) {
+            return;
+        }
+        for (int i = 0; i < value.length(); i++) {
+            if (Character.isISOControl(value.charAt(i))) {
+                throw new UnusableCredentialException("The " + what + " stored under " + source
+                        + " contains a line break or another control character, which the Kafka client's "
+                        + "JAAS configuration cannot take. Please store the credential without it.");
+            }
+        }
+    }
+
     /**
      * Override SASL credentials with a different credential alias.
      * Used by DLQ producer when the DLQ cluster requires separate credentials.
@@ -113,13 +143,16 @@ public final class SecurityConfigHelper {
         try {
             CredentialHelper.UserCredentials credentials = CredentialHelper.getUserCredential(alias);
             if (credentials != null) {
-                String jaasConfig = buildJaasConfig(mechanism, credentials.username(), credentials.password());
+                String jaasConfig = buildJaasConfig(mechanism, credentials.username(), credentials.password(),
+                        "'DLQ SASL Credential Alias' (dlqCredentialAlias) '" + alias + "'");
                 props.put("sasl.jaas.config", jaasConfig);
                 LOG.info("DLQ SASL credentials resolved for alias '{}'", alias);
             } else {
                 LOG.error("[CPI-KAFKA-PLUS-DIAG] DLQ credential alias '{}' configured but no credentials resolved. " +
                         "DLQ producer will fail to connect.", alias);
             }
+        } catch (UnusableCredentialException e) {
+            throw e;   // as in configureSasl
         } catch (Exception e) {
             LOG.warn("[CPI-KAFKA-PLUS-DIAG] Could not resolve DLQ credentials from Secure Store alias '{}': {}",
                     alias, e.getMessage());
@@ -148,5 +181,17 @@ public final class SecurityConfigHelper {
         }
         String trimmed = value.trim();
         return trimmed.isEmpty() ? null : trimmed;
+    }
+
+    /**
+     * A credential that cannot be written into a JAAS configuration. Its message names the alias,
+     * never the value.
+     */
+    static final class UnusableCredentialException extends IllegalArgumentException {
+        private static final long serialVersionUID = 1L;
+
+        UnusableCredentialException(String message) {
+            super(message);
+        }
     }
 }

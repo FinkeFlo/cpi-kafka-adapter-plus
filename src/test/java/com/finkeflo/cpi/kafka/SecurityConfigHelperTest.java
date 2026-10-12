@@ -36,15 +36,79 @@ import org.junit.Test;
 
 public class SecurityConfigHelperTest {
 
+    private static final String SOURCE = "'Credential Alias' (credentialAlias) 'kafka-user'";
+
     @After
     public void resetResolvers() {
         CredentialHelper.setCredentialResolver(null);
         CredentialHelper.setSslContextResolver(null);
     }
 
+    /**
+     * A line break ends a quoted JAAS value, and Kafka quotes the rest of the password in its error
+     * (#245). Every ISO control character is refused, in the user name as in the password, and the
+     * message names where the credential comes from but no part of it.
+     */
+    @Test
+    public void controlCharactersInACredentialAreRejectedWithoutTheValue() {
+        for (String control : new String[] {"\n", "\r", "\r\n", "\t", "\u0000", "\u007f", "\u0085"}) {
+            String value = "QuuxHeadPart" + control + "QuuxTailPart";
+            assertUnusable("password", () -> SecurityConfigHelper.buildJaasConfig("PLAIN", "user", value, SOURCE));
+            assertUnusable("user name", () -> SecurityConfigHelper.buildJaasConfig("SCRAM-SHA-512", value, "pass",
+                    SOURCE));
+        }
+    }
+
+    @Test
+    public void printableCharactersAreStillAccepted() {
+        String result = SecurityConfigHelper.buildJaasConfig("PLAIN", "user", "päss w€rd ~!", SOURCE);
+        Assert.assertTrue(result, result.endsWith("password=\"päss w€rd ~!\";"));
+    }
+
+    @Test
+    public void anUnusableCredentialFailsTheClientBuildInsteadOfBeingLogged() {
+        CredentialHelper.setCredentialResolver(alias ->
+                new CredentialHelper.UserCredentials("alice", "QuuxHeadPart\nQuuxTailPart"));
+        CpiKafkaPlusEndpoint endpoint = new CpiKafkaPlusEndpoint();
+        endpoint.setSecurityProtocol("SASL_SSL");
+        endpoint.setCredentialAlias("kafka-user");
+        Properties props = new Properties();
+
+        assertUnusable("password", () -> SecurityConfigHelper.configureSecurityProperties(props, endpoint));
+        Assert.assertNull(props.getProperty("sasl.jaas.config"));
+    }
+
+    @Test
+    public void anUnusableDlqCredentialNamesTheDlqAlias() {
+        CredentialHelper.setCredentialResolver(alias ->
+                new CredentialHelper.UserCredentials("alice", "QuuxHeadPart\nQuuxTailPart"));
+        Properties props = new Properties();
+
+        try {
+            SecurityConfigHelper.overrideSaslCredentials(props, "PLAIN", "dlq-user");
+            Assert.fail("expected the credential to be rejected");
+        } catch (SecurityConfigHelper.UnusableCredentialException expected) {
+            Assert.assertTrue(expected.getMessage(), expected.getMessage().startsWith("The password stored under "
+                    + "'DLQ SASL Credential Alias' (dlqCredentialAlias) 'dlq-user' contains a line break"));
+            Assert.assertFalse(expected.getMessage(), expected.getMessage().contains("Quux"));
+        }
+        Assert.assertNull(props.getProperty("sasl.jaas.config"));
+    }
+
+    private static void assertUnusable(String what, Runnable build) {
+        try {
+            build.run();
+            Assert.fail("expected the " + what + " to be rejected");
+        } catch (SecurityConfigHelper.UnusableCredentialException expected) {
+            Assert.assertEquals("The " + what + " stored under " + SOURCE + " contains a line break or another "
+                    + "control character, which the Kafka client's JAAS configuration cannot take. Please store "
+                    + "the credential without it.", expected.getMessage());
+        }
+    }
+
     @Test
     public void testBuildJaasConfigPlain() {
-        String result = SecurityConfigHelper.buildJaasConfig("PLAIN", "user", "pass");
+        String result = SecurityConfigHelper.buildJaasConfig("PLAIN", "user", "pass", SOURCE);
         Assert.assertEquals(
                 "org.apache.kafka.common.security.plain.PlainLoginModule required username=\"user\" password=\"pass\";",
                 result);
@@ -52,19 +116,19 @@ public class SecurityConfigHelperTest {
 
     @Test
     public void testBuildJaasConfigScramSha256() {
-        String result = SecurityConfigHelper.buildJaasConfig("SCRAM-SHA-256", "user", "pass");
+        String result = SecurityConfigHelper.buildJaasConfig("SCRAM-SHA-256", "user", "pass", SOURCE);
         Assert.assertTrue(result.startsWith("org.apache.kafka.common.security.scram.ScramLoginModule"));
     }
 
     @Test
     public void testBuildJaasConfigScramSha512() {
-        String result = SecurityConfigHelper.buildJaasConfig("SCRAM-SHA-512", "user", "pass");
+        String result = SecurityConfigHelper.buildJaasConfig("SCRAM-SHA-512", "user", "pass", SOURCE);
         Assert.assertTrue(result.startsWith("org.apache.kafka.common.security.scram.ScramLoginModule"));
     }
 
     @Test
     public void testBuildJaasConfigEscapesDoubleQuotes() {
-        String result = SecurityConfigHelper.buildJaasConfig("PLAIN", "user", "pass\"word");
+        String result = SecurityConfigHelper.buildJaasConfig("PLAIN", "user", "pass\"word", SOURCE);
         Assert.assertEquals(
                 "org.apache.kafka.common.security.plain.PlainLoginModule required username=\"user\" password=\"pass\\\"word\";",
                 result);
@@ -72,7 +136,7 @@ public class SecurityConfigHelperTest {
 
     @Test
     public void testBuildJaasConfigEscapesBackslashes() {
-        String result = SecurityConfigHelper.buildJaasConfig("PLAIN", "user", "pass\\word");
+        String result = SecurityConfigHelper.buildJaasConfig("PLAIN", "user", "pass\\word", SOURCE);
         Assert.assertEquals(
                 "org.apache.kafka.common.security.plain.PlainLoginModule required username=\"user\" password=\"pass\\\\word\";",
                 result);
@@ -80,7 +144,7 @@ public class SecurityConfigHelperTest {
 
     @Test
     public void testBuildJaasConfigEscapesBackslashBeforeQuote() {
-        String result = SecurityConfigHelper.buildJaasConfig("PLAIN", "user", "pass\\\"end");
+        String result = SecurityConfigHelper.buildJaasConfig("PLAIN", "user", "pass\\\"end", SOURCE);
         Assert.assertEquals(
                 "org.apache.kafka.common.security.plain.PlainLoginModule required username=\"user\" password=\"pass\\\\\\\"end\";",
                 result);
@@ -88,7 +152,7 @@ public class SecurityConfigHelperTest {
 
     @Test
     public void testBuildJaasConfigEscapesUsernameSpecialChars() {
-        String result = SecurityConfigHelper.buildJaasConfig("PLAIN", "user\"name", "pass");
+        String result = SecurityConfigHelper.buildJaasConfig("PLAIN", "user\"name", "pass", SOURCE);
         Assert.assertEquals(
                 "org.apache.kafka.common.security.plain.PlainLoginModule required username=\"user\\\"name\" password=\"pass\";",
                 result);

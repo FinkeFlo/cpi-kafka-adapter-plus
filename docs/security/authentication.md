@@ -97,6 +97,20 @@ All credentials are managed through the SAP CPI Secure Store:
 
 Credential artifacts are referenced by their **alias** in the adapter configuration. The adapter resolves them at runtime via the `ITApiFactory`.
 
+The user name and the password of a SASL credential (*Credential Alias*, *DLQ SASL Credential Alias*) must not
+contain a line break or any other control character: a line break would end the value in the Kafka client's JAAS
+configuration. The adapter refuses such a credential before the Kafka client sees it, and the error names the
+alias, never the value:
+
+```
+The password stored under 'Credential Alias' (credentialAlias) 'my-kafka-user' contains a line break or another
+control character, which the Kafka client's JAAS configuration cannot take. Please store the credential without it.
+```
+
+The sender reports it in `consumer.init.failed`, the DLQ producer in `dlq.producer.init.failed`, and the receiver
+fails every message with it. Store the credential again without the character, for example without a line break
+copied along with the secret.
+
 ## Troubleshooting: "Topic not present in metadata"
 
 Kafka reports several unrelated problems with the same message:

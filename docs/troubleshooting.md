@@ -404,6 +404,12 @@ Initialisation failed. `bootstrapServers` and `securityProtocol` are in the line
 cause chain usually names the problem directly — a rejected credential, a TLS handshake failure, or
 an unreachable broker.
 
+A SASL credential with a line break or another control character is refused before the client is
+built: the cause names the alias, e.g. `The password stored under 'Credential Alias' (credentialAlias)
+'my-kafka-user' contains a line break or another control character`, never the value. The sender
+reports the same in `consumer.init.failed`, the DLQ producer in `dlq.producer.init.failed`. See
+[Authentication](security/authentication.md#cpi-secure-store).
+
 ### `producer.metadata.prewarm outcome=FAILED`
 
 The up-front metadata fetch did not succeed. This is not itself a failure: the send path performs the
