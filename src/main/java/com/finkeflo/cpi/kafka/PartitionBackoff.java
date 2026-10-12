@@ -37,6 +37,9 @@ import org.apache.kafka.common.TopicPartition;
  * flowing. The delay doubles for every further failure at the same offset, up to a cap; a failure
  * at another offset, or any progress, starts over.
  *
+ * <p>It also holds back a partition whose poll ran out of time before the next retry of a record
+ * (issue #192), until that retry is due.
+ *
  * <p>Single-threaded, like the poll loop that owns it.
  */
 final class PartitionBackoff {
@@ -72,6 +75,20 @@ final class PartitionBackoff {
         long delayMs = Math.min(baseDelayMs * (1L << shift), maxDelayMs);
         state.notBeforeMs = nowMs + delayMs;
         return delayMs;
+    }
+
+    /**
+     * The record at {@code offset} waits until {@code notBeforeMs} for a retry that its poll ran out
+     * of time for (issue #192). It did not fail for good, so unlike {@link #blocked} this does not
+     * count as a further failure: the delay of a later failure at the same offset does not grow.
+     */
+    void deferUntil(TopicPartition tp, long offset, long notBeforeMs) {
+        State state = states.get(tp);
+        if (state == null || state.offset != offset) {
+            state = new State(offset);
+            states.put(tp, state);
+        }
+        state.notBeforeMs = notBeforeMs;
     }
 
     /** @return partitions whose delay has not yet passed */

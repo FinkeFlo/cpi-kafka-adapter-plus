@@ -652,6 +652,8 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
         while (!shutdownRequested) {
             drainCycle++;
 
+            // Kafka's max.poll.interval.ms runs from the poll() call (#192).
+            long pollStartedMs = System.currentTimeMillis();
             ConsumerRecords<byte[], byte[]> records = pollKafkaRecords();
             if (records == null) {
                 break; // wakeup received
@@ -684,7 +686,7 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
             LOG.debug("[CPI-KAFKA-PLUS-DIAG] poll: drainCycle={} records={} totalFetched={} from topic='{}' group='{}'",
                     drainCycle, recordCount, totalRecordsFetched, endpoint.getEffectiveTopic(), endpoint.getGroupId());
 
-            PollProgress progress = new PollProgress(records);
+            PollProgress progress = new PollProgress(records, pollStartedMs, pollTimeLimitMs());
             try {
                 // TODO [tech-debt] SPLIT_EXCHANGES is kept here for backward compatibility with existing
                 //   iFlow channel configs that stored this value before the 1.2.0 metadata removed it
@@ -773,7 +775,8 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
 
     /**
      * Rewinds every partition of a poll to its first unresolved record and starts the retry backoff
-     * of partitions that are blocked at a record that has to be retried.
+     * of partitions that are blocked at a record that has to be retried. A partition whose poll ran
+     * out of time before the next retry of a record waits until that retry is due instead.
      */
     private void settlePoll(PollProgress progress) {
         try {
@@ -793,7 +796,15 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
         Map<TopicPartition, Long> rewindPositions = progress.rewindPositions();
         for (TopicPartition tp : progress.partitions()) {
             Long blockedAt = progress.blockedOffset(tp);
-            if (blockedAt != null) {
+            Long retryDueMs = progress.deferredUntil(tp);
+            if (retryDueMs != null) {
+                // Not a failure: the record's retries continue with a later poll (#192), which
+                // logged consumer.retry.deferred already. The backoff only holds the partition back.
+                backoff.deferUntil(tp, rewindPositions.getOrDefault(tp, blockedAt), retryDueMs);
+                if (retryDueMs > now) {
+                    pauseForBackoff(tp);
+                }
+            } else if (blockedAt != null) {
                 // The partition resumes at its first open record, which can lie before the record that
                 // blocked it, e.g. a failed batch in front of a record whose DLQ write failed (#244).
                 Long resumeAt = rewindPositions.getOrDefault(tp, blockedAt);
@@ -1370,6 +1381,23 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
         return (int) maxPollIntervalMs;
     }
 
+    /** The {@code max.poll.interval.ms} this consumer runs with. */
+    private int maxPollIntervalMs() {
+        // In STREAMING the polling interval is ignored (and no longer validated), so it must not
+        // feed into max.poll.interval.ms either. A continuously greedy consumer only needs the
+        // 10-minute processing headroom that the SCHEDULED branch adds on top of its interval.
+        return computeMaxPollIntervalMs(endpoint.isStreamingMode() ? 0L : endpoint.getPollingIntervalSeconds());
+    }
+
+    /**
+     * How long after a {@code poll()} a record, batch or retry of its records may still be started:
+     * half of {@code max.poll.interval.ms}, so that the last one started has the other half to finish
+     * before the next {@code poll()} is due (#192).
+     */
+    private long pollTimeLimitMs() {
+        return maxPollIntervalMs() / 2L;
+    }
+
     /**
      * Effektiver Camel-Scheduler-Takt: das Minimum aus dem konfigurierten
      * {@code pollingIntervalSeconds} und dem Keep-Alive-Takt. Bei
@@ -1423,11 +1451,7 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
         // client (heartbeat thread, KIP-62) sends a LeaveGroup request between poll()
         // calls and the consumer drops from the group (symptom: State=EMPTY, 0 active
         // consumers, duplicate processing on rejoin). See issue #45.
-        // In STREAMING the polling interval is ignored (and no longer validated), so it must not
-        // feed into max.poll.interval.ms either. A continuously greedy consumer only needs the
-        // 10-minute processing headroom that the SCHEDULED branch adds on top of its interval.
-        long maxPollBasisSeconds = endpoint.isStreamingMode() ? 0L : endpoint.getPollingIntervalSeconds();
-        int maxPollIntervalMs = computeMaxPollIntervalMs(maxPollBasisSeconds);
+        int maxPollIntervalMs = maxPollIntervalMs();
         String maxPollBranch;
         if (maxPollIntervalMs == 22_200_000) {
             maxPollBranch = "HARD_CAP_6H_10MIN";

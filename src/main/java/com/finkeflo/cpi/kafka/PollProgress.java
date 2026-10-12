@@ -45,6 +45,10 @@ import org.apache.kafka.common.TopicPartition;
  * filter handles invalid records before the batches around them), so the commit position is always
  * the first unresolved polled offset, never the highest resolved one.
  *
+ * <p>A poll also has a time limit, half of {@code max.poll.interval.ms}: once it has passed, no
+ * further record, batch or retry is started, and what is still open comes with the next poll
+ * (issue #192).
+ *
  * <p>Single-threaded, like the poll loop that owns it: one instance per poll.
  */
 final class PollProgress {
@@ -53,6 +57,8 @@ final class PollProgress {
         private final List<Long> offsets = new ArrayList<>();
         private final Set<Long> resolved = new HashSet<>();
         private Long blockedAt;
+        /** When the blocked record's next retry is due, if the poll's time ran out before it. */
+        private Long deferredUntilMs;
         private long committedUpTo = -1L;
 
         /** First polled offset that is unresolved or blocked, or {@code null} if there is none. */
@@ -67,13 +73,29 @@ final class PollProgress {
     }
 
     private final Map<TopicPartition, PartitionState> partitions = new LinkedHashMap<>();
+    private final long startedMs;
+    private final long timeLimitMs;
     private boolean stopped;
+    private boolean outOfTime;
     private TopicPartition currentPartition;
     private long currentOffset;
     private int successes;
     private int failuresSinceLastSuccess;
 
+    /** A poll without a time limit. */
     PollProgress(ConsumerRecords<byte[], byte[]> records) {
+        this(records, 0L, Long.MAX_VALUE);
+    }
+
+    /**
+     * @param startedMs   when the {@code poll()} that returned {@code records} was called; Kafka's
+     *                    {@code max.poll.interval.ms} runs from there
+     * @param timeLimitMs how long after {@code startedMs} a new record, batch or retry may still be
+     *                    started
+     */
+    PollProgress(ConsumerRecords<byte[], byte[]> records, long startedMs, long timeLimitMs) {
+        this.startedMs = startedMs;
+        this.timeLimitMs = timeLimitMs;
         for (ConsumerRecord<byte[], byte[]> record : records) {
             TopicPartition tp = new TopicPartition(record.topic(), record.partition());
             PartitionState state = partitions.get(tp);
@@ -113,6 +135,28 @@ final class PollProgress {
         return state != null ? state.blockedAt : null;
     }
 
+    /**
+     * The record at {@code offset} has retries left, but the poll's time ran out before the next
+     * one. The partition is blocked at it like at a failed record, but it is not backed off as a
+     * failure: the consumer pauses it until {@code dueMs}, when the next retry is due.
+     */
+    void deferred(TopicPartition tp, long offset, long dueMs) {
+        PartitionState state = partitions.get(tp);
+        if (state != null && state.blockedAt == null) {
+            state.blockedAt = offset;
+            state.deferredUntilMs = dueMs;
+        }
+    }
+
+    /**
+     * @return when the next retry of the record that {@code tp} is blocked at is due, or {@code null}
+     *         if the partition is not blocked or blocked by a failure
+     */
+    Long deferredUntil(TopicPartition tp) {
+        PartitionState state = partitions.get(tp);
+        return state != null ? state.deferredUntilMs : null;
+    }
+
     /** Shutdown or interrupt: nothing more is processed in this poll. */
     void stop() {
         stopped = true;
@@ -120,6 +164,32 @@ final class PollProgress {
 
     boolean isStopped() {
         return stopped;
+    }
+
+    /** @return the time from which no further record, batch or retry is started in this poll */
+    long deadlineMs() {
+        return timeLimitMs > Long.MAX_VALUE - startedMs ? Long.MAX_VALUE : startedMs + timeLimitMs;
+    }
+
+    long startedMs() {
+        return startedMs;
+    }
+
+    long timeLimitMs() {
+        return timeLimitMs;
+    }
+
+    /**
+     * The poll's time is up: nothing more is started in it. Unlike {@link #stop()}, the consumer
+     * keeps running and commits what was processed; what is still open is rewound and comes with
+     * the next poll.
+     */
+    void outOfTime() {
+        outOfTime = true;
+    }
+
+    boolean isOutOfTime() {
+        return outOfTime;
     }
 
     /** Remembers the record being processed, so a Throwable escaping it can block it. */

@@ -228,7 +228,7 @@ Without a threshold (default 0), drain would continue in iteration 4 and also fe
 
 ### Reduced max.poll.interval.ms risk
 
-Kafka removes a consumer from the group if it does not call `poll()` within `max.poll.interval.ms`. The adapter significantly reduces this risk by polling regularly (including keep-alive polls between emit cycles) and by deriving `max.poll.interval.ms` from **Polling Interval (Seconds)** (`pollingIntervalSeconds`) with an additional processing buffer (capped at 6 h 10 min).
+Kafka removes a consumer from the group if it does not call `poll()` within `max.poll.interval.ms`. The adapter significantly reduces this risk by polling regularly (including keep-alive polls between emit cycles) and by deriving `max.poll.interval.ms` from **Polling Interval (Seconds)** (`pollingIntervalSeconds`) with an additional processing buffer (capped at 6 h 10 min). It also starts no batch later than halfway through `max.poll.interval.ms` after a poll: if the batches of a poll take longer, the remaining records come with the next poll, and the trace shows `consumer.poll.timeLimit`.
 
 ### Limitation: Drain + Auto Commit
 
