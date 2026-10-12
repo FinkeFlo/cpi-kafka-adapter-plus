@@ -91,6 +91,11 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
 
     private volatile boolean initialized = false;
     private volatile boolean helpersInitialized = false;
+    /**
+     * Set by {@code doStop()}, cleared by {@code doStart()}. A send that is still running when the
+     * route stops, or its retry, must not build a new shared producer: nothing would close it.
+     */
+    private volatile boolean stopped = false;
     private volatile int consecutiveSendFailures = 0;
     private volatile int consecutiveTxnSendFailures = 0;
     private volatile int consecutiveInitFailures = 0;
@@ -158,6 +163,7 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
     }
 
     private void doStartInternal() throws Exception {
+        stopped = false;
         // Fail-fast: validate shared configuration (Schema Registry, JSON Schema, SASL)
         endpoint.validateConfiguration();
         ReceiverConfigValidator.validateBeforeStart(endpoint);
@@ -186,6 +192,8 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
     @Override
     protected void doStop() throws Exception {
         LOG.info("[CPI-KAFKA-PLUS-DIAG] Stopping CPI Kafka Producer for topic '{}'", endpoint.getEffectiveTopic());
+        // Before the producer is closed, so that a send which finds it closed cannot build a new one.
+        stopped = true;
         initialized = false;
         helpersInitialized = false;
         consecutiveSendFailures = 0;
@@ -416,7 +424,7 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
      * The shared producer for one send attempt, built when there is none. Callers read it once into
      * a local and keep using that: a rebuild after another send's failure clears the field at any
      * moment, and reading the field again in the middle of a send turned that race into a
-     * {@code NullPointerException} (#246).
+     * {@code NullPointerException} (#246). After the stop no producer is built.
      */
     private KafkaProducer<byte[], byte[]> sharedProducer() {
         KafkaProducer<byte[], byte[]> producer = kafkaProducer;
@@ -424,8 +432,13 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
             return producer;
         }
         // Under the monitor that closeProducerQuietly() detaches under, so a rebuild cannot clear the
-        // producer between building and reading it.
+        // producer between building and reading it, and the stop closes any producer built before it.
         synchronized (this) {
+            if (stopped) {
+                throw new IllegalStateException("The receiver for Kafka topic '" + endpoint.getEffectiveTopic()
+                        + "' was stopped (the integration flow is stopping or was undeployed), so no new Kafka "
+                        + "producer is built and the message is not sent.");
+            }
             ensureInitialized();
             producer = kafkaProducer;
             if (producer == null) {
@@ -813,8 +826,8 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
         int attempt = 0;
 
         for (attempt = 1; attempt <= maxAttempts; attempt++) {
-            // Outside the try: a producer that cannot be built fails the exchange as it does before
-            // the first attempt, with the init failure, not as a send failure.
+            // Outside the try: a producer that cannot be built, or is not built after the stop, fails
+            // the exchange as it does before the first attempt, not as a send failure.
             KafkaProducer<byte[], byte[]> producer = sharedProducer();
             // Stays true when send() itself throws: then nothing was buffered.
             boolean failedBeforeBuffering = true;

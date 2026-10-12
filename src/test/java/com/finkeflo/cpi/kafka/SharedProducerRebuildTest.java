@@ -280,6 +280,54 @@ public class SharedProducerRebuildTest {
         Assert.assertEquals(1, nodeFaultCount(producer));
     }
 
+    // ── a send running into the stop ─────────────────────────────────────────────
+
+    /**
+     * A send still running when the integration flow stops builds no new producer, since nothing
+     * would ever close it: here the stop closes the producer under the first attempt, and the retry
+     * fails instead of building one. A message that arrives after the stop builds none either.
+     */
+    @Test
+    public void aSendRunningIntoTheStopBuildsNoNewProducer() throws Exception {
+        CpiKafkaPlusProducer producer = newProducer("NONE", 2);
+        RacingClient racing = install(producer, new RacingClient());
+        racing.onNextSend(() -> stop(producer));
+        AtomicInteger built = new AtomicInteger();
+        producer.sharedProducerFactory = props -> {
+            built.incrementAndGet();
+            return new AcknowledgingClient();
+        };
+
+        RuntimeException failure = sendExpectingFailure(producer, "payload");
+
+        Assert.assertTrue(failure.getMessage(), failure.getMessage().startsWith("The receiver for Kafka topic "
+                + "'orders' was stopped (the integration flow is stopping or was undeployed), so no new Kafka "
+                + "producer is built and the message is not sent."));
+        Assert.assertEquals(1, racing.sends());
+        Assert.assertEquals("no producer may outlive the stop", 0, built.get());
+        Assert.assertNull(getField(producer, "kafkaProducer"));
+
+        failure = sendExpectingFailure(producer, "late");
+        Assert.assertTrue(failure.getMessage(), failure.getMessage().startsWith("The receiver for Kafka topic "
+                + "'orders' was stopped"));
+        Assert.assertEquals(0, built.get());
+    }
+
+    /** A receiver that is started again after the stop builds its producer again. */
+    @Test
+    public void aRestartedReceiverBuildsItsProducerAgain() throws Exception {
+        CpiKafkaPlusProducer producer = newProducer("NONE", 1);
+        install(producer, new AcknowledgingClient());
+        stop(producer);
+        AcknowledgingClient restarted = new AcknowledgingClient();
+        producer.sharedProducerFactory = props -> restarted;
+
+        producer.doStart();
+        send(producer, "payload");
+
+        Assert.assertEquals(1, restarted.sends());
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────────────
 
     private CpiKafkaPlusProducer newProducer(String batchMode, int maxAttempts) throws Exception {
@@ -290,7 +338,8 @@ public class SharedProducerRebuildTest {
         endpoint.setTopic(TOPIC);
         endpoint.setProducerBatchMode(batchMode);
         endpoint.setProducerRetryMaxAttempts(maxAttempts);
-        endpoint.setProducerRetryDelaySeconds(0); // the 1 s floor is a start check; doStart is not run here
+        // The 1 s floor is a start check of retries; doStart is only run here with retries off.
+        endpoint.setProducerRetryDelaySeconds(0);
         endpoint.setProducerRetryTotalBudgetSeconds(60);
 
         CpiKafkaPlusProducer producer = new CpiKafkaPlusProducer(endpoint);
@@ -314,6 +363,15 @@ public class SharedProducerRebuildTest {
     private static void rebuild(CpiKafkaPlusProducer producer) {
         try {
             invoke(producer, "triggerReconnectWithMeasurement");
+        } catch (Exception e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    /** What Camel does when the integration flow is stopped or undeployed. */
+    private static void stop(CpiKafkaPlusProducer producer) {
+        try {
+            producer.doStop();
         } catch (Exception e) {
             throw new IllegalStateException(e);
         }
