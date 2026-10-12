@@ -156,7 +156,7 @@
                 </GuiLabels>
                 <AttributeReference>
                     <ReferenceName>allowedHeaders</ReferenceName>
-                    <description>Pipe-separated list of headers to send to Kafka (e.g. SAP_*|MyHeader|*). Use * for all. Note: Headers explicitly mapped in a batch payload (JSON/XML) bypass this filter and overwrite exchange headers of the same name.</description>
+                    <description>Pipe-separated list of exchange headers to send to Kafka as record headers, e.g. SAP_*|MyHeader. '*' (default) sends every exchange header except those starting with Camel, org.apache.camel, kafka. or CpiKafkaPlus, so SAP_* headers and any other value a flow keeps in a header as well. Authorization, Proxy-Authorization, Cookie and Set-Cookie are sent only when named exactly, never through a wildcard. Leave empty to send none. Note: Headers explicitly mapped in a batch payload (JSON/XML) bypass this filter and overwrite exchange headers of the same name.</description>
                 </AttributeReference>
             </AttributeGroup>
         </Tab>

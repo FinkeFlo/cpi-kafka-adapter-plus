@@ -20,10 +20,24 @@
  */
 package com.finkeflo.cpi.kafka;
 
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.Locale;
+import java.util.Set;
+
 /**
  * Strategy for filtering headers based on allowed patterns.
  */
 public final class HeaderFilterStrategy {
+
+    /**
+     * Headers that carry credentials. A wildcard pattern, the default {@code *} included, never lets
+     * them through: an access token in a record header can be read by everyone who may read the topic
+     * (#195). A pattern that names one of them exactly still does.
+     */
+    private static final Set<String> CREDENTIAL_HEADERS = Collections.unmodifiableSet(new HashSet<>(
+            Arrays.asList("authorization", "proxy-authorization", "cookie", "set-cookie")));
 
     private HeaderFilterStrategy() {
         // static utility class
@@ -32,7 +46,9 @@ public final class HeaderFilterStrategy {
     /**
      * Checks if a given header name matches the allowed patterns.
      * Patterns can be separated by a pipe '|' character.
-     * Supports exact match, or prefix/suffix matching using '*'.
+     * Supports exact match, or prefix/suffix matching using '*', in any letter case. A credential
+     * header ({@code Authorization}, {@code Proxy-Authorization}, {@code Cookie},
+     * {@code Set-Cookie}) is allowed only by a pattern that names it exactly, never by a wildcard.
      *
      * @param headerName        The name of the header to check.
      * @param allowedPatternStr The pipe-separated pattern string.
@@ -42,36 +58,30 @@ public final class HeaderFilterStrategy {
         if (allowedPatternStr == null || allowedPatternStr.trim().isEmpty()) {
             return false;
         }
+        String headerNameLower = headerName.toLowerCase(Locale.ROOT);
+        boolean credential = CREDENTIAL_HEADERS.contains(headerNameLower);
         if ("*".equals(allowedPatternStr.trim())) {
-            return true;
+            return !credential;
         }
         
-        String headerNameLower = headerName.toLowerCase();
         String[] patterns = allowedPatternStr.split("\\|");
+        boolean wildcardMatch = false;
         
         for (String pattern : patterns) {
-            pattern = pattern.trim().toLowerCase();
+            pattern = pattern.trim().toLowerCase(Locale.ROOT);
             if (pattern.isEmpty()) {
                 continue;
             }
             if (pattern.endsWith("*") && pattern.startsWith("*") && pattern.length() > 2) {
-                if (headerNameLower.contains(pattern.substring(1, pattern.length() - 1))) {
-                    return true;
-                }
+                wildcardMatch |= headerNameLower.contains(pattern.substring(1, pattern.length() - 1));
             } else if (pattern.endsWith("*")) {
-                if (headerNameLower.startsWith(pattern.substring(0, pattern.length() - 1))) {
-                    return true;
-                }
+                wildcardMatch |= headerNameLower.startsWith(pattern.substring(0, pattern.length() - 1));
             } else if (pattern.startsWith("*")) {
-                if (headerNameLower.endsWith(pattern.substring(1))) {
-                    return true;
-                }
-            } else {
-                if (headerNameLower.equals(pattern)) {
-                    return true;
-                }
+                wildcardMatch |= headerNameLower.endsWith(pattern.substring(1));
+            } else if (headerNameLower.equals(pattern)) {
+                return true;
             }
         }
-        return false;
+        return wildcardMatch && !credential;
     }
 }

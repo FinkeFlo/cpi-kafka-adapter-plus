@@ -231,7 +231,9 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
     private boolean transactionV2Enabled = true;
 
     @UriParam(label = "producer", defaultValue = "*",
-            description = "Pipe-separated list of headers to send to Kafka (e.g. SAP_*|MyHeader|*). Use * for all.")
+            description = "Pipe-separated list of exchange headers to send to Kafka (e.g. SAP_*|MyHeader). "
+            + "* sends all but Authorization, Proxy-Authorization, Cookie and Set-Cookie, which are sent only "
+            + "when named exactly. Empty sends none.")
     private String allowedHeaders = "*";
 
     // No "retries" option: deliveryTimeoutSeconds is the effective limit, and with idempotence the
