@@ -65,7 +65,14 @@ Set these headers on the exchange **before** sending to control the producer beh
 | `kafka.OVERRIDE_TIMESTAMP` | `Long` | Record timestamp to use (epoch ms). If absent, the Kafka client uses the current time when the record is sent (`CreateTime`); only a topic configured with `LogAppendTime` gets the broker's time instead. |
 | `CamelKafkaTopic` | `String` | Overrides the topic configured on the endpoint for this single message. A batch receiver's own `CamelKafkaTopic` response header is not treated as an override by a later receiver that has its own topic (see [Producer Batch](producer-batch.md#headers)). |
 
-Any additional headers whose names match the `allowedHeaders` pattern configured on the endpoint are forwarded as **Kafka record headers** on the outgoing message.
+Any additional exchange headers whose names match the **Allowed Headers** (`allowedHeaders`) pattern configured on the endpoint are forwarded as **Kafka record headers** on the outgoing message:
+
+- Patterns are separated by `|` and compared in any letter case: an exact name (`MyHeader`), a prefix (`SAP_*`), a suffix (`*Id`) or a part of the name (`*Order*`). `*` alone, the default, matches every name.
+- Headers whose names start with `Camel`, `org.apache.camel`, `kafka.` or `CpiKafkaPlus`, in exactly this letter case, are never forwarded, whatever the pattern says.
+- `Authorization`, `Proxy-Authorization`, `Cookie` and `Set-Cookie` are forwarded only when the pattern names them exactly, for example `*|Authorization`, never through a wildcard such as `*`. Up to 1.4.1 the default `*` forwarded them, so an access token set for an earlier HTTP call ended up in the topic. Any other secret a flow keeps in a header is still forwarded by `*`: name the headers you need instead.
+- An empty pattern forwards no header.
+- A `byte[]` value is sent as it is, any other value as the UTF-8 bytes of its text. Up to 1.4.1 a `byte[]` value arrived as text such as `[B@1b6d3586`.
+- In batch mode the exchange headers that pass go to every record of the batch. Headers given per record in the batch payload bypass the filter and overwrite exchange headers of the same name (see [Producer Batch](producer-batch.md#input-formats)).
 
 ### Producer Response Headers (set by the adapter after a successful send)
 
