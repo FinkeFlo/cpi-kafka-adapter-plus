@@ -61,9 +61,13 @@ final class ConsumerCircuitBreaker {
      * and returns {@code false}.
      *
      * @param kafkaConsumer the Kafka consumer instance
+     * @param onKeepAliveFailure handles a failed keep-alive poll; the consumer classifies it like a
+     *                           failed emit poll, so rejected credentials or a fenced static member
+     *                           do not stay hidden behind the auto-pause (#243)
      * @return {@code true} if the consumer is still paused and poll() should return 0
      */
-    boolean handlePausedState(Consumer<byte[], byte[]> kafkaConsumer) {
+    boolean handlePausedState(Consumer<byte[], byte[]> kafkaConsumer,
+            java.util.function.Consumer<Throwable> onKeepAliveFailure) {
         if (!endpoint.isAutoPauseEnabled() || pausedUntil <= 0) {
             return false;
         }
@@ -78,8 +82,8 @@ final class ConsumerCircuitBreaker {
                         () -> KeepAlive.pollPausedAndRewind(kafkaConsumer, Duration.ofMillis(100)));
             } catch (WakeupException e) {
                 LOG.info("[CPI-KAFKA-PLUS-DIAG] poll: received wakeup signal during auto-pause");
-            } catch (Exception e) {
-                LOG.debug("[CPI-KAFKA-PLUS-DIAG] poll: keepalive poll failed during auto-pause: {}", e.getMessage());
+            } catch (Throwable t) {
+                onKeepAliveFailure.accept(t);
             }
             LOG.debug("[CPI-KAFKA-PLUS-DIAG] poll: auto-paused, resuming in {}s", (pausedUntil - now) / 1000);
             return true;

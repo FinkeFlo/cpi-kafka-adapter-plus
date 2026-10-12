@@ -243,10 +243,7 @@ public final class DlqProducerHelper implements Closeable {
         String causeClass = cause != null ? cause.getClass().getName() : "unknown";
         String causeMsg = (cause != null && cause.getMessage() != null)
                 ? cause.getMessage() : causeClass;
-        Throwable root = cause;
-        while (root != null && root.getCause() != null && root.getCause() != root) {
-            root = root.getCause();
-        }
+        Throwable root = CauseChain.root(cause);
         String rootClass = (root != null) ? root.getClass().getName() : causeClass;
         String rootMsg = (root != null && root.getMessage() != null) ? root.getMessage() : "";
 

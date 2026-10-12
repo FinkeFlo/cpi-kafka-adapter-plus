@@ -74,6 +74,8 @@ public class RecordProcessorProgressTest {
     private final Set<String> failingTransiently = new HashSet<>();
     /** Fails transiently this many times for the id, then permanently on every further call. */
     private final Map<String, Integer> transientThenPermanent = new HashMap<>();
+    /** Like {@link #failing}, but the exception's cause chain is cyclic: A → B → A (#241). */
+    private final Set<String> failingCyclically = new HashSet<>();
     /** The body of each route call, in the order of {@link #invoked}. */
     private final List<String> bodies = new ArrayList<>();
     /** The headers of each route call, in the order of {@link #invoked}. */
@@ -347,11 +349,10 @@ public class RecordProcessorProgressTest {
         Assert.assertEquals("the two retries left are skipped", Arrays.asList("0:0", "0:0", "0:1"), invoked);
         Assert.assertEquals(1, dlq.history().size());
         Assert.assertEquals("PERMANENT", header(dlq.history().get(0), "CpiKafkaPlusDlqErrorType"));
-        // Pinned as it is: the retry that failed permanently is not counted, so one retry ran but the
-        // count says none.
-        Assert.assertEquals("0", header(dlq.history().get(0), "CpiKafkaPlusDlqRetryCount"));
+        // One retry ran, the one that failed permanently, and it is counted (#244).
+        Assert.assertEquals("1", header(dlq.history().get(0), "CpiKafkaPlusDlqRetryCount"));
         Assert.assertEquals("PERMANENT", tracing.traced.get(0).get("errorType"));
-        Assert.assertEquals("0", tracing.traced.get(0).get("retryAttempts"));
+        Assert.assertEquals("1", tracing.traced.get(0).get("retryAttempts"));
         Assert.assertEquals(2L, committed(consumer, P0));
     }
 
@@ -880,6 +881,144 @@ public class RecordProcessorProgressTest {
         Assert.assertEquals(1L, consumer.position(P0));
     }
 
+    // --- a cyclic cause chain (#241): dead-lettered, not an endless walk on the poll thread ---
+
+    @Test(timeout = 10_000L)
+    public void routeFailureWithACyclicCauseIsDeadLettered() throws Exception {
+        assertCyclicRouteFailureIsDeadLettered(false, true, "PERMANENT");
+    }
+
+    @Test(timeout = 10_000L)
+    public void routeFailureWithACyclicCauseIsDeadLetteredWithoutTransientCheck() throws Exception {
+        assertCyclicRouteFailureIsDeadLettered(false, false, null);
+    }
+
+    @Test(timeout = 10_000L)
+    public void batchRouteFailureWithACyclicCauseIsDeadLettered() throws Exception {
+        assertCyclicRouteFailureIsDeadLettered(true, true, "PERMANENT");
+    }
+
+    @Test(timeout = 10_000L)
+    public void batchRouteFailureWithACyclicCauseIsDeadLetteredWithoutTransientCheck() throws Exception {
+        assertCyclicRouteFailureIsDeadLettered(true, false, null);
+    }
+
+    private void assertCyclicRouteFailureIsDeadLettered(boolean batch, boolean retryOnlyTransientErrors,
+                                                        String errorType) throws Exception {
+        // the batch, then the record the batch fell back to; in single mode only the record
+        failingCyclically.addAll(Arrays.asList("0:0-2", "0:1-1", "0:1"));
+        MockConsumer<byte[], byte[]> consumer = consumerWith(P0, "a", "b", "c");
+        CpiKafkaPlusEndpoint endpoint = batch ? batchEndpoint(true, null) : endpoint(true, null);
+        endpoint.setRetryOnlyTransientErrors(retryOnlyTransientErrors);
+        MockProducer<byte[], byte[]> dlq = okDlqProducer();
+        RecordProcessor processor = processor(endpoint, dlqHelper(dlq), null);
+
+        if (batch) {
+            processBatch(processor, consumer);
+            Assert.assertEquals(Arrays.asList("0:0-2", "0:0-0", "0:1-1", "0:2-2"), invoked);
+        } else {
+            processSingle(processor, consumer);
+            Assert.assertEquals(Arrays.asList("0:0", "0:1", "0:2"), invoked);
+        }
+        Assert.assertEquals(1, dlq.history().size());
+        Assert.assertEquals("1", header(dlq.history().get(0), "CpiKafkaPlusDlqOriginalOffset"));
+        Assert.assertEquals(errorType, header(dlq.history().get(0), "CpiKafkaPlusDlqErrorType"));
+        Assert.assertEquals(3L, committed(consumer, P0));
+    }
+
+    // --- a stop during the route call (#242): the record stays unresolved, it is no poison record ---
+
+    @Test
+    public void stopDuringAPermanentRouteFailureDoesNotDeadLetter() throws Exception {
+        stopAfterFirstRecord.set(true);
+        failing.add("0:0");
+        MockConsumer<byte[], byte[]> consumer = consumerWith(P0, "a", "b");
+        CpiKafkaPlusEndpoint endpoint = endpoint(true, null);
+        endpoint.setDlqMaxRetries(2);
+        MockProducer<byte[], byte[]> dlq = okDlqProducer();
+        RecordingTracingHelper tracing = new RecordingTracingHelper(endpoint);
+        RecordProcessor processor = processor(endpoint, dlqHelper(dlq), null, tracing);
+
+        PollProgress progress = processSingle(processor, consumer);
+
+        Assert.assertEquals(Collections.singletonList("0:0"), invoked);
+        Assert.assertTrue("a route call that fails during a stop is no poison record", dlq.history().isEmpty());
+        Assert.assertTrue("nor a failure to report", tracing.traced.isEmpty());
+        Assert.assertEquals("nor one that counts towards auto-pause", 0, progress.failuresSinceLastSuccess());
+        Assert.assertFalse("a stop starts no retry backoff", progress.isBlocked(P0));
+        Assert.assertTrue(progress.isStopped());
+        Assert.assertEquals(-1L, committed(consumer, P0));
+        Assert.assertEquals(0L, consumer.position(P0));
+    }
+
+    @Test
+    public void stopDuringTheLastAttemptDoesNotDeadLetter() throws Exception {
+        // dlqMaxRetries=0: the first attempt is the last one, so no pause between two retries follows it
+        stopAfterFirstRecord.set(true);
+        failingTransiently.add("0:0");
+        MockConsumer<byte[], byte[]> consumer = consumerWith(P0, "a", "b");
+        MockProducer<byte[], byte[]> dlq = okDlqProducer();
+        RecordProcessor processor = processor(endpoint(true, null), dlqHelper(dlq), null);
+
+        PollProgress progress = processSingle(processor, consumer);
+
+        Assert.assertEquals(Collections.singletonList("0:0"), invoked);
+        Assert.assertTrue(dlq.history().isEmpty());
+        Assert.assertTrue(progress.isStopped());
+        Assert.assertEquals(-1L, committed(consumer, P0));
+        Assert.assertEquals(0L, consumer.position(P0));
+    }
+
+    @Test
+    public void stopDuringAFailedRouteCallDoesNotSkipTheRecord() throws Exception {
+        stopAfterFirstRecord.set(true);
+        failing.add("0:0");
+        MockConsumer<byte[], byte[]> consumer = consumerWith(P0, "a", "b");
+        RecordProcessor processor = processor(skip(endpoint(false, null)), null, null);
+
+        PollProgress progress = processSingle(processor, consumer);
+
+        Assert.assertEquals(Collections.singletonList("0:0"), invoked);
+        Assert.assertTrue(progress.isStopped());
+        Assert.assertEquals("Skip Failed Message must not commit what the stop broke off",
+                -1L, committed(consumer, P0));
+        Assert.assertEquals(0L, consumer.position(P0));
+    }
+
+    @Test
+    public void stopDuringAFailedBatchDoesNotSkipTheBatch() throws Exception {
+        stopAfterFirstRecord.set(true);
+        failing.add("0:0-2");
+        MockConsumer<byte[], byte[]> consumer = consumerWith(P0, "a", "b", "c");
+        RecordProcessor processor = processor(skip(batchEndpoint(false, null)), null, null);
+
+        PollProgress progress = processBatch(processor, consumer);
+
+        Assert.assertEquals(Collections.singletonList("0:0-2"), invoked);
+        Assert.assertEquals(0, progress.failuresSinceLastSuccess());
+        Assert.assertTrue(progress.isStopped());
+        Assert.assertEquals(-1L, committed(consumer, P0));
+        Assert.assertEquals(0L, consumer.position(P0));
+    }
+
+    @Test
+    public void stopDuringAFailedBatchWithDlqDeadLettersNothing() throws Exception {
+        stopAfterFirstRecord.set(true);
+        failing.add("0:0-2");
+        MockConsumer<byte[], byte[]> consumer = consumerWith(P0, "a", "b", "c");
+        MockProducer<byte[], byte[]> dlq = okDlqProducer();
+        RecordProcessor processor = processor(batchEndpoint(true, null), dlqHelper(dlq), null);
+
+        PollProgress progress = processBatch(processor, consumer);
+
+        Assert.assertEquals("no fallback to single records once the consumer stops",
+                Collections.singletonList("0:0-2"), invoked);
+        Assert.assertTrue(dlq.history().isEmpty());
+        Assert.assertTrue(progress.isStopped());
+        Assert.assertEquals(-1L, committed(consumer, P0));
+        Assert.assertEquals(0L, consumer.position(P0));
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────────────
 
     private PollProgress processBatch(RecordProcessor processor, MockConsumer<byte[], byte[]> consumer)
@@ -1010,6 +1149,11 @@ public class RecordProcessorProgressTest {
                         headers.add(new HashMap<>(exchange.getIn().getHeaders()));
                         if (failing.contains(id)) {
                             throw new IllegalStateException("backend rejected " + id);
+                        }
+                        if (failingCyclically.contains(id)) {
+                            IllegalStateException first = new IllegalStateException("backend rejected " + id);
+                            first.initCause(new IllegalArgumentException("retry of " + id, first));
+                            throw first;
                         }
                         Integer transientLeft = transientThenPermanent.get(id);
                         if (failingTransiently.contains(id) || (transientLeft != null && transientLeft > 0)) {

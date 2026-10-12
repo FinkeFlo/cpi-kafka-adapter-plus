@@ -49,7 +49,7 @@ public enum CpiKafkaPlusErrorCode {
     public static CpiKafkaPlusErrorCode fromThrowable(Throwable t) {
         if (t == null) return KP_GEN_001;
         if (KafkaErrorHelper.isMetadataMonitorFault(t)) return KP_META_002;
-        for (Throwable c = t; c != null; c = (c.getCause() == c) ? null : c.getCause()) {
+        for (Throwable c : CauseChain.of(t)) {
             if (c instanceof ProducerFencedException) return KP_TXN_001;
             if (c instanceof OutOfOrderSequenceException) return KP_TXN_002;
             if (c instanceof AuthenticationException) return KP_SEC_001;

@@ -319,8 +319,8 @@ final class BundleClassWarmup {
         }
     }
 
-    private static boolean isWiringGone(Throwable t) {
-        for (Throwable c = t; c != null; c = c.getCause() == c ? null : c.getCause()) {
+    static boolean isWiringGone(Throwable t) {
+        for (Throwable c : CauseChain.of(t)) {
             String msg = c.getMessage();
             if (msg != null && msg.contains("no longer valid")) {
                 return true;

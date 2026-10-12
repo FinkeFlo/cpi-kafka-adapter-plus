@@ -289,14 +289,8 @@ final class RecordProcessor {
      */
     void rewind(Consumer<byte[], byte[]> kafkaConsumer, PollProgress progress) {
         for (Map.Entry<TopicPartition, Long> e : progress.rewindPositions().entrySet()) {
-            try {
-                kafkaConsumer.seek(e.getKey(), e.getValue());
+            if (KeepAlive.seekBack(kafkaConsumer, e.getKey(), e.getValue())) {
                 LOG.debug("[CPI-KAFKA-PLUS-DIAG] rewind: partition {} back to offset {}", e.getKey(), e.getValue());
-            } catch (RuntimeException seekError) {
-                // Typically a partition revoked during this poll; its new owner starts from the
-                // committed offset, which never passes an unresolved record.
-                LOG.warn("[CPI-KAFKA-PLUS-DIAG] rewind: could not seek partition {} back to offset {}: {}",
-                        e.getKey(), e.getValue(), seekError.getMessage());
             }
         }
     }
@@ -306,6 +300,18 @@ final class RecordProcessor {
             progress.stop();
         }
         return progress.isStopped();
+    }
+
+    /**
+     * A route call that fails while the consumer is stopping failed because of the stop: the stop
+     * interrupts the poll thread, and Camel refuses new work during a shutdown. Whatever the
+     * failure says, it is not the record's fault, so the record or batch stays unresolved and is
+     * delivered again after the restart, instead of being dead-lettered or skipped (#242).
+     */
+    private static void logStoppedDuringRoute(String what, ConsumerRecord<byte[], byte[]> first, Exception e) {
+        LOG.info("[CPI-KAFKA-PLUS-DIAG] route call for the {} at offset={} partition={} failed while the consumer "
+                + "is stopping; it stays uncommitted and is delivered again after the restart: {}",
+                what, first.offset(), first.partition(), e.getMessage());
     }
 
     private static TopicPartition partitionOf(ConsumerRecord<byte[], byte[]> record) {
@@ -383,6 +389,10 @@ final class RecordProcessor {
             callback.processExchange(exchange);
             LOG.debug("[CPI-KAFKA-PLUS-DIAG] processOneBatch: process() returned OK");
         } catch (Exception e) {
+            if (stopRequested(progress)) {
+                logStoppedDuringRoute("batch", batch.get(0), e);
+                return 0;
+            }
             int partition = !batch.isEmpty() ? batch.get(0).partition() : -1;
             AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("batch.processing.failed")
                     .with("errorCode", CpiKafkaPlusErrorCode.fromThrowable(e).code())
@@ -474,6 +484,14 @@ final class RecordProcessor {
                 callback.processExchange(exchange);
             } catch (Exception e) {
                 lastError = e;
+                // Counted before a permanent failure breaks off, so the retry that failed
+                // permanently is included (#244).
+                actualRetries = attempt;
+
+                if (stopRequested(progress)) {
+                    logStoppedDuringRoute("record", record, e);
+                    return 0;
+                }
 
                 if (failurePolicy.skipsRetries(e)) {
                     LOG.info("[CPI-KAFKA-PLUS-DIAG] Permanent error detected, "
@@ -483,12 +501,10 @@ final class RecordProcessor {
                     break;
                 }
 
-                actualRetries = attempt;
-
-                if (attempt < maxRetries
-                        && (stopRequested(progress) || !sleepWithBackoff(attempt, record))) {
-                    // A shutdown, not a poison record: leave it unresolved for the next run
-                    // instead of dead-lettering a record that may well succeed.
+                if (attempt < maxRetries && !sleepWithBackoff(attempt, record)) {
+                    // Interrupted between two attempts: a shutdown, not a poison record. Leave it
+                    // unresolved for the next run instead of dead-lettering a record that may well
+                    // succeed.
                     progress.stop();
                     return 0;
                 }

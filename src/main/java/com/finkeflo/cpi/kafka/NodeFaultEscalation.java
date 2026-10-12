@@ -170,12 +170,7 @@ final class NodeFaultEscalation {
         if (cause instanceof Exception) {
             return KafkaErrorHelper.extractKafkaCause((Exception) cause);
         }
-
-        Throwable current = cause;
-        while (current.getCause() != null && current.getCause() != current) {
-            current = current.getCause();
-        }
-        return current;
+        return CauseChain.root(cause);
     }
 
     /**

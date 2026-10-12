@@ -39,8 +39,7 @@ final class ClassSpaceFaults {
      * "bundle wiring ... no longer valid" text. Unambiguous on its own.
      */
     static boolean isWiringInvalid(Throwable failure) {
-        Throwable current = failure;
-        while (current != null) {
+        for (Throwable current : CauseChain.of(failure)) {
             boolean classLoadingFault = current instanceof NoClassDefFoundError
                     || current instanceof ClassNotFoundException
                     || current instanceof LinkageError;
@@ -51,11 +50,6 @@ final class ClassSpaceFaults {
             if (classLoadingFault && wiringSignature) {
                 return true;
             }
-            Throwable next = current.getCause();
-            if (next == current) {
-                break;
-            }
-            current = next;
         }
         return false;
     }
@@ -68,8 +62,7 @@ final class ClassSpaceFaults {
      * class}.
      */
     static boolean hasFaultSignature(Throwable failure) {
-        Throwable current = failure;
-        while (current != null) {
+        for (Throwable current : CauseChain.of(failure)) {
             if (current instanceof LinkageError
                     || current instanceof ClassNotFoundException
                     || (current instanceof Error
@@ -77,11 +70,6 @@ final class ClassSpaceFaults {
                         && !(current instanceof ThreadDeath))) {
                 return true;
             }
-            Throwable next = current.getCause();
-            if (next == current) {
-                break;
-            }
-            current = next;
         }
         return false;
     }
