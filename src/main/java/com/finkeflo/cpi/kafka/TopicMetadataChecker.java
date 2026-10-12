@@ -98,23 +98,32 @@ final class TopicMetadataChecker {
     private final java.util.Set<String> verifiedTopics =
             java.util.Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap<String, Boolean>());
     /**
-     * Topics whose metadata this producer instance has already tried to fetch up front. Cleared
-     * whenever the producer is replaced, because a new client starts with an empty metadata cache.
+     * Topics whose metadata the current producer instance has fetched up front. Cleared whenever the
+     * producer is replaced, because a new client starts with an empty metadata cache; changed only
+     * under {@link #prewarmLock}, so a pre-warm that finishes on the replaced client cannot mark a
+     * topic for the new one.
      */
     private final java.util.Set<String> prewarmedTopics =
             java.util.Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap<String, Boolean>());
     /**
-     * Topics currently being pre-warmed. Keeps concurrent sender threads from issuing duplicate
-     * metadata fetches for the same topic while still allowing retries after a failed attempt.
+     * Topics currently being pre-warmed, with the client that fetches them. Keeps concurrent sender
+     * threads from issuing duplicate metadata fetches for the same topic while still allowing retries
+     * after a failed attempt. Claimed only for the current client, under {@link #prewarmLock}, and
+     * released only by the pre-warm that claimed it: a claim for a replaced client would hold back
+     * the new client's pre-warm, and a pre-warm still running on a replaced client must not release
+     * the new client's claim.
      */
-    private final java.util.Set<String> prewarmingTopics =
-            java.util.Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap<String, Boolean>());
+    private final java.util.concurrent.ConcurrentHashMap<String, KafkaProducer<byte[], byte[]>> prewarmingTopics =
+            new java.util.concurrent.ConcurrentHashMap<>();
+    private final Object prewarmLock = new Object();
     /**
-     * Why the last topic probe could not reach the broker, kept so that the send failure which
-     * follows can name a cause instead of reporting a bare metadata timeout. Only set for
-     * inconclusive <em>connectivity</em> failures; cleared as soon as a probe succeeds.
+     * Why the last probe of each topic could not reach the broker, kept so that the send failure
+     * which follows can name a cause instead of reporting a bare metadata timeout. Only set for
+     * inconclusive <em>connectivity</em> failures; cleared as soon as a probe of the same topic
+     * succeeds. Per topic, so that one topic's probe neither lends its cause to another topic's
+     * send error nor clears it (#246). Bounded like {@link #verifiedTopics}.
      */
-    private volatile Throwable lastProbeFailure = null;
+    private final java.util.Map<String, Throwable> probeFailures = new java.util.concurrent.ConcurrentHashMap<>();
     /**
      * Asks the broker whether a topic exists; {@link #checkTopicExists(String)} outside tests. A
      * field rather than a direct call, like {@link CpiKafkaPlusProducer#txnProducerFactory}: it is the seam through which
@@ -134,15 +143,31 @@ final class TopicMetadataChecker {
         this.resolvedClientId = resolvedClientId;
     }
 
-    /** The cause of the last inconclusive probe, for the send error; {@code null} when there is none. */
-    Throwable lastProbeFailure() {
-        return lastProbeFailure;
+    /**
+     * The cause of the last inconclusive probe of {@code topic}, for the send error; {@code null}
+     * when there is none.
+     */
+    Throwable lastProbeFailure(String topic) {
+        return topic == null ? null : probeFailures.get(topic);
     }
 
-    /** Forgets the pre-warmed topics: a replacement producer starts with an empty metadata cache. */
+    /**
+     * Forgets the pre-warmed topics: a replacement producer starts with an empty metadata cache.
+     * Called after the producer field has been cleared or replaced.
+     */
     void onProducerReplaced() {
-        prewarmedTopics.clear();
-        prewarmingTopics.clear();
+        synchronized (prewarmLock) {
+            prewarmedTopics.clear();
+            prewarmingTopics.clear();
+        }
+    }
+
+    private void rememberProbeFailure(String topic, Throwable cause) {
+        if (cause == null) {
+            probeFailures.remove(topic);
+        } else if (probeFailures.containsKey(topic) || probeFailures.size() < VERIFIED_TOPICS_CACHE_LIMIT) {
+            probeFailures.put(topic, cause);
+        }
     }
 
     /**
@@ -163,14 +188,19 @@ final class TopicMetadataChecker {
      * and reports a far more precise error than this method could.
      */
     void prewarmTopicMetadata(String topic) {
-        if (kafkaProducer.get() == null || topic == null || topic.isEmpty()) {
+        // Fetch from the client read here, never from the field again: a rebuild may clear or replace
+        // the producer at any moment, and the claim, the fetch and the mark all belong to this one
+        // client. Reading the field again for the fetch turned that race into a
+        // NullPointerException (#246).
+        KafkaProducer<byte[], byte[]> producer = kafkaProducer.get();
+        if (producer == null || topic == null || topic.isEmpty()) {
             return;
         }
         // Bounded like verifiedTopics, so a flow with unbounded dynamic topics cannot grow this set
         // without limit. Beyond the limit the pre-warm is simply skipped; the send path still works.
         if (prewarmedTopics.contains(topic)
                 || prewarmedTopics.size() >= VERIFIED_TOPICS_CACHE_LIMIT
-                || !prewarmingTopics.add(topic)) {
+                || !claimPrewarm(topic, producer)) {
             return;
         }
 
@@ -189,14 +219,12 @@ final class TopicMetadataChecker {
             // A short retry deadline on purpose: the monitor fault throws immediately and is worth
             // retrying, while a genuine metadata timeout has already consumed max.block.ms and must
             // not be multiplied by retrying it.
-            MonitorFaultRetry.execute(() -> kafkaProducer.get().partitionsFor(topic),
+            MonitorFaultRetry.execute(() -> producer.partitionsFor(topic),
                     new MonitorFaultRetry.Budget(),
                     System.currentTimeMillis() + PREWARM_RETRY_WINDOW_MS,
                     topic, -1);
 
-            if (prewarmedTopics.size() < VERIFIED_TOPICS_CACHE_LIMIT) {
-                prewarmedTopics.add(topic);
-            }
+            markPrewarmed(topic, producer);
 
             long metadataWaitMs = System.currentTimeMillis() - metadataStartMs;
             // Only log slow pre-warms to avoid log noise on the success path.
@@ -207,6 +235,14 @@ final class TopicMetadataChecker {
             }
         } catch (Exception e) {
             long metadataWaitMs = System.currentTimeMillis() - metadataStartMs;
+            if (kafkaProducer.get() != producer) {
+                // A rebuild (reported with its own cause) or a stop closed the client under the
+                // fetch. Nothing is wrong with the topic, and the next send pre-warms the new client.
+                LOG.info("[CPI-KAFKA-PLUS-DIAG] Metadata pre-warm of topic '{}' abandoned after {} ms: the "
+                        + "producer was replaced while it ran ({})", topic, metadataWaitMs,
+                        KafkaErrorHelper.describeChain(e));
+                return;
+            }
             AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("producer.metadata.prewarm")
                     .with("outcome", "FAILED")
                     .with("topic", topic)
@@ -215,7 +251,33 @@ final class TopicMetadataChecker {
                     .withOptional("clientId", resolvedClientId.get())
                     .with("thread", Thread.currentThread().getName()), e);
         } finally {
-            prewarmingTopics.remove(topic);
+            prewarmingTopics.remove(topic, producer);
+        }
+    }
+
+    /**
+     * Claims the pre-warm of {@code topic} for {@code producer}, unless another sender is pre-warming
+     * it or {@code producer} has been replaced since it was read. Under the lock that
+     * {@link #onProducerReplaced()} clears under, which runs after the producer field has changed,
+     * so no claim for a replaced client survives the replacement.
+     */
+    private boolean claimPrewarm(String topic, KafkaProducer<byte[], byte[]> producer) {
+        synchronized (prewarmLock) {
+            return kafkaProducer.get() == producer && prewarmingTopics.putIfAbsent(topic, producer) == null;
+        }
+    }
+
+    /**
+     * Marks {@code topic} as pre-warmed, unless {@code producer} has been replaced meanwhile: the
+     * fetch filled the replaced client's cache, not the new one's (#246). Under the lock that
+     * {@link #onProducerReplaced()} clears under, so the check and the mark cannot straddle a
+     * replacement.
+     */
+    private void markPrewarmed(String topic, KafkaProducer<byte[], byte[]> producer) {
+        synchronized (prewarmLock) {
+            if (kafkaProducer.get() == producer && prewarmedTopics.size() < VERIFIED_TOPICS_CACHE_LIMIT) {
+                prewarmedTopics.add(topic);
+            }
         }
     }
 
@@ -266,8 +328,8 @@ final class TopicMetadataChecker {
      *
      * <p>An inconclusive probe that merely timed out does <em>not</em> fail the exchange — a short
      * broker hiccup must not turn into a message failure when the send itself may still succeed
-     * within {@code max.block.ms}. Its cause is remembered in {@link #lastProbeFailure} instead and
-     * folded into the send error if the send does go on to fail.
+     * within {@code max.block.ms}. Its cause is remembered for the topic in {@link #probeFailures}
+     * instead and folded into the send error if the send does go on to fail.
      *
      * <p>A single {@code MISSING} answer is likewise not treated as proof: {@code createTopics}
      * returns once the controller has accepted the request, and the topic can be absent from broker
@@ -295,7 +357,7 @@ final class TopicMetadataChecker {
                     + "(auto-create may be disabled on this cluster).");
         }
         if (result.state == TopicCheck.EXISTS) {
-            lastProbeFailure = null;
+            probeFailures.remove(topic);
             if (verifiedTopics.size() < VERIFIED_TOPICS_CACHE_LIMIT) {
                 verifiedTopics.add(topic);
             }
@@ -309,7 +371,7 @@ final class TopicMetadataChecker {
                     + ". Please check Security Protocol, Credential Alias and SSL Keystore Alias.",
                     result.cause);
         }
-        lastProbeFailure = result.cause;
+        rememberProbeFailure(topic, result.cause);
     }
 
     /**
@@ -369,7 +431,7 @@ final class TopicMetadataChecker {
             return;
         }
         if (result.state == TopicCheck.EXISTS) {
-            lastProbeFailure = null;
+            probeFailures.remove(topic);
             if (verifiedTopics.size() < VERIFIED_TOPICS_CACHE_LIMIT) {
                 verifiedTopics.add(topic);
             }

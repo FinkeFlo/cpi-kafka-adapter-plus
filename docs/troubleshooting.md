@@ -78,6 +78,20 @@ the failure line), because an unrecognised failure may have left it unusable, an
 the node-fault escalation. It is never retried by
 the producer retry, apart from the KAFKA-10902 monitor fault below.
 
+One unrecognised failure is reported as `RETRIABLE` instead: a receiver send whose shared producer
+was closed while the send was using it, by the rebuild after another message's failure or because
+the integration flow was stopping. Kafka refuses such a send ("Cannot perform operation after
+producer has been closed", "Producer is closed forcefully"), and the adapter puts "The shared Kafka
+producer was closed while this send was using it …" in front of that message. The send lost a race
+against the replacement of the client; that says nothing about the broker or the record, so it
+triggers no second rebuild and does not count towards the node-fault escalation. The next message
+uses a new producer, and with the [producer retry](features/producer-retry.md) on, a single message
+that Kafka refused before buffering it is sent again on the new producer. A stopping integration
+flow builds no new producer, so there the message fails with "The receiver for Kafka topic '…' was
+stopped (the integration flow is stopping or was undeployed), so no new Kafka producer is built and
+the message is not sent." Up to 1.4.1 such a send was reported as `UNKNOWN_FATAL`, or failed with a
+`NullPointerException` when the rebuild had already discarded the producer.
+
 ## Finding the adapter's lines
 
 Every line the adapter writes carries one marker and only one:
@@ -140,7 +154,7 @@ names in its own exception messages and those messages end up inside `error=`.
 | `consecutiveFailures` | Consecutive failures on this producer. Governs reconnect only, never whether something is logged |
 | `classification` | One of `RETRIABLE`, `FATAL_PRODUCER_UNUSABLE`, `FATAL_DATA_ERROR`, `UNKNOWN_FATAL` (see above) |
 | `errorCode` | Stable error code, e.g. `KP-PROD-002` (see above) |
-| `producerRecreated`, `durationMs`, `attemptsSinceLastSuccess` | Emitted on the separate `producer.rebuild.outcome` line, not on the failure line. A rebuild is not reported inline — correlate by `clientId`, then look for `producer.rebuild.effect` with `outcome=RECOVERED` to see whether it actually helped |
+| `producerDiscarded`, `consequence`, `durationMs`, `attemptsSinceLastSuccess` | Emitted on the separate `producer.rebuild.outcome` line, not on the failure line (see [Producer rebuild tracking](#producer-rebuild-tracking)). A rebuild is not reported inline — correlate by `clientId`, then look for `producer.rebuild.effect` with `outcome=RECOVERED` to see whether it actually helped |
 | `retryOutcome`, `retryCount`, `batchRetriesLeft`, `stopReason` | Outcome of the bounded retry described below |
 | `error` | Serialised exception: class, message, frames, then `CAUSED_BY` per cause level and `SUPPRESSED` where present |
 
@@ -234,18 +248,23 @@ escalate.
 
 ## Producer rebuild tracking
 
-When the adapter rebuilds its producer (after a `FATAL_PRODUCER_UNUSABLE` classification or repeated
-failures), two events report the outcome:
+When the adapter rebuilds the receiver's shared producer (after a `FATAL_PRODUCER_UNUSABLE` or
+`UNKNOWN_FATAL` classification, at most once per 30-second rebuild backoff), two events report the
+outcome:
 
-- `producer.rebuild.outcome` — emitted immediately after the rebuild attempt, reporting whether a
-  new producer was successfully constructed (`producerRecreated=true/false`), how long it took
+- `producer.rebuild.outcome` — emitted right after the rebuild. The rebuild closes and discards the
+  producer, and the next send builds a new one, which the line states in `consequence`. It reports
+  whether there was a producer to discard (`producerDiscarded`; `false` when another message's
+  rebuild or a stop of the integration flow had discarded it already), how long closing it took
   (`durationMs`), and how many rebuild attempts have occurred since the last successful send
-  (`attemptsSinceLastSuccess`).
+  (`attemptsSinceLastSuccess`). Up to 1.4.1 the line carried `producerRecreated` instead, which was
+  always `false`: at that moment no new producer exists yet.
 
 - `producer.rebuild.effect` — emitted on the **next successful send** after a rebuild, confirming
   that the rebuild actually helped (`outcome=RECOVERED`).
 
-If a `producer.rebuild.outcome` is followed immediately by another failure (rather than by a
+If the new producer cannot be built, the next send logs `producer.init.failed` with the cause. If a
+`producer.rebuild.outcome` is followed by another send failure (rather than by a
 `producer.rebuild.effect`), the rebuild did not help. Check the error code and classification on the
 subsequent failure line.
 
@@ -411,6 +430,11 @@ an unreachable broker.
 The up-front metadata fetch did not succeed. This is not itself a failure: the send path performs the
 same fetch and will report a more precise error. Treat it as a hint that the broker was slow or
 unreachable at that moment.
+
+A pre-warm whose producer is rebuilt or closed while it runs is not reported here. It is abandoned
+with an INFO line ("Metadata pre-warm of topic '…' abandoned after … ms: the producer was replaced
+while it ran (…)"), and the next send pre-warms the new producer. Up to 1.4.1 that race could appear
+here as a `NullPointerException`.
 
 ## Message Processing Log enrichment
 

@@ -84,7 +84,8 @@ doesn't round-trip cleanly through CPI's own converters.
 - `<key>` is optional; missing = null key, empty = explicit empty-string key
 - `<headers>` is optional; contains `<header name="key">value</header>` elements; these bypass the exchange filter and override exchange-level headers
 - An empty `<value/>` produces a tombstone message
-- For XML content as a value: CDATA is optional. If you provide nested XML elements (e.g. `<value><order>...</order></value>`), the adapter automatically re-serializes them to an XML string for the Kafka message.
+- For XML content as a value: CDATA is optional. If you provide nested XML elements (e.g. `<value><order>...</order></value>`), the adapter automatically re-serializes the content of `<value>` to an XML string for the Kafka message: the elements together with any text, CDATA sections, comments and processing instructions next to them, so `<value>Price: <b>10</b> EUR</value>` is sent as `Price: <b>10</b> EUR`. Whitespace-only text between the elements of a value without other text is taken as indentation and dropped. The value is always written as XML, also when an element is called `html`: `<br/>` stays `<br/>`.
+- Namespaces declared outside the value, on `<kafkaRecords>`, `<record>` or `<value>` itself, are declared again on each top-level element of the value, the default namespace included, so the value is the same XML on its own: under `<kafkaRecords xmlns:ns="urn:x">`, `<value><ns:order>1</ns:order></value>` is sent as `<ns:order xmlns:ns="urn:x">1</ns:order>`. A namespace prefix that is declared nowhere in the document makes the whole batch fail to parse.
 - Unknown elements are ignored (round-trip symmetry with the consumer)
 
 ## Key handling
@@ -258,7 +259,7 @@ def Message processData(Message message) {
 
 If you want to send XML payloads as the Kafka message value, you have two options:
 
-1. **Native XML (Recommended):** Just nest the XML elements directly inside `<value>`. The adapter's batch parser detects child elements and automatically re-serializes them into an XML string. This is often the easiest approach when using standard CPI message mappings.
+1. **Native XML (Recommended):** Just nest the XML elements directly inside `<value>`. The adapter's batch parser detects child elements and automatically re-serializes the content of `<value>` into an XML string, text between the elements and namespaces declared further up included (see the rules under [XML List](#xml-list-xml_list)). This is often the easiest approach when using standard CPI message mappings.
 2. **CDATA:** Wrap the XML string in `<![CDATA[...]]>`. The parser will read it as a raw string.
    - **XSLT:** `cdata-section-elements="value"` in `<xsl:output>`
    - **Groovy:** insert `<![CDATA[...]]>` manually

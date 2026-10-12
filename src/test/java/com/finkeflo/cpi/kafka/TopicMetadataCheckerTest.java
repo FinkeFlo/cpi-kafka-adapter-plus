@@ -143,6 +143,137 @@ public class TopicMetadataCheckerTest {
         Assert.assertFalse("the old client's pre-warm did not finish", oldPreWarm.isAlive());
     }
 
+    /**
+     * A rebuild that clears the producer right after the pre-warm read it is no pre-warm failure.
+     * The pre-warm used to read the producer a second time for the fetch and reported that race as
+     * a failed pre-warm with a {@code NullPointerException} (#246).
+     */
+    @Test
+    public void aRebuildRightAfterThePreWarmReadTheProducerIsNoPreWarmFailure() throws Exception {
+        StubClient first = stub();
+        AtomicReference<KafkaProducer<byte[], byte[]>> client = new AtomicReference<>(first);
+        TopicMetadataChecker checker = checker(() -> "orders", Properties::new,
+                () -> client.getAndSet(null), () -> null);
+
+        String logged = ownLines(capture(() -> checker.prewarmTopicMetadata("orders")));
+
+        Assert.assertFalse(logged, logged.contains("outcome=FAILED"));
+        Assert.assertFalse(logged, logged.contains("NullPointerException"));
+    }
+
+    /**
+     * A pre-warm that read the client just before a rebuild replaced it does not claim the topic for
+     * the replaced client. Such a claim outlived the replacement and held back the new client's
+     * pre-warm for as long as the fetch on the replaced client took.
+     */
+    @Test
+    public void aPreWarmDoesNotClaimTheTopicForAClientReplacedBeforeTheClaim() throws Exception {
+        StubClient first = stub();
+        StubClient second = stub();
+        CountDownLatch releaseFirst = first.holdNextPartitionsFor();
+        AtomicReference<KafkaProducer<byte[], byte[]>> client = new AtomicReference<>(first);
+        AtomicReference<TopicMetadataChecker> self = new AtomicReference<>();
+        TopicMetadataChecker checker = checker(() -> "orders", Properties::new, () -> {
+            KafkaProducer<byte[], byte[]> current = client.get();
+            if (current == first) {
+                // The rebuild, right after this read.
+                replace(self.get(), client, second);
+            }
+            return current;
+        }, () -> null);
+        self.set(checker);
+        Thread oldPreWarm = new Thread(() -> checker.prewarmTopicMetadata("orders"), "old-client-pre-warm");
+        try {
+            oldPreWarm.start();
+            oldPreWarm.join(TimeUnit.SECONDS.toMillis(WAIT_SECONDS));
+            checker.prewarmTopicMetadata("orders");
+
+            Assert.assertEquals("the new client is pre-warmed", 1, second.partitionsForCalls());
+            Assert.assertEquals("nothing is fetched from the replaced client", 0, first.partitionsForCalls());
+        } finally {
+            releaseFirst.countDown();
+            oldPreWarm.join(TimeUnit.SECONDS.toMillis(WAIT_SECONDS));
+        }
+        Assert.assertFalse("the old client's pre-warm did not finish", oldPreWarm.isAlive());
+    }
+
+    /**
+     * A pre-warm that ends after its client was replaced filled the cache of the replaced client, so
+     * it does not count for the new one (#246): the next send pre-warms the new client.
+     */
+    @Test
+    public void aPreWarmThatEndsOnAReplacedClientDoesNotCountForTheNewOne() {
+        StubClient first = stub();
+        StubClient second = stub();
+        AtomicReference<KafkaProducer<byte[], byte[]>> client = new AtomicReference<>(first);
+        TopicMetadataChecker checker = checker(() -> "orders", Properties::new, client::get, () -> null);
+        first.onNextPartitionsFor(() -> replace(checker, client, second));
+
+        checker.prewarmTopicMetadata("orders");
+        checker.prewarmTopicMetadata("orders");
+
+        Assert.assertEquals(1, first.partitionsForCalls());
+        Assert.assertEquals("the new client is pre-warmed", 1, second.partitionsForCalls());
+    }
+
+    /**
+     * A pre-warm whose client the rebuild closed under it is abandoned without an error: the rebuild
+     * reported its own cause, and the new client is pre-warmed on the next send.
+     */
+    @Test
+    public void aPreWarmWhoseClientIsClosedUnderItIsAbandonedQuietly() throws Exception {
+        StubClient first = stub();
+        AtomicReference<KafkaProducer<byte[], byte[]>> client = new AtomicReference<>(first);
+        TopicMetadataChecker checker = checker(() -> "orders", Properties::new, client::get, () -> null);
+        first.onNextPartitionsFor(() -> replace(checker, client, null));
+        first.failNextPartitionsFor(new IllegalStateException("Cannot perform operation after producer has been closed"));
+
+        String logged = ownLines(capture(() -> checker.prewarmTopicMetadata("orders")));
+
+        Assert.assertFalse(logged, logged.contains("ERROR"));
+        Assert.assertTrue(logged, logged.contains("INFO " + PRODUCER_CATEGORY + " - [CPI-KAFKA-PLUS-DIAG] Metadata "
+                + "pre-warm of topic 'orders' abandoned after "));
+        Assert.assertTrue(logged, logged.contains(" ms: the producer was replaced while it ran (IllegalStateException: "
+                + "Cannot perform operation after producer has been closed)"));
+    }
+
+    /**
+     * A pre-warm on a replaced client that ends while the new client's pre-warm is in flight leaves
+     * the new one's marker alone, so a third sender does not fetch the topic a second time.
+     */
+    @Test
+    public void aPreWarmOnAReplacedClientLeavesTheNewClientsMarkerAlone() throws Exception {
+        StubClient first = stub();
+        StubClient second = stub();
+        CountDownLatch releaseFirst = first.holdNextPartitionsFor();
+        first.failNextPartitionsFor(new IllegalStateException("Cannot perform operation after producer has been closed"));
+        CountDownLatch releaseSecond = second.holdNextPartitionsFor();
+        AtomicReference<KafkaProducer<byte[], byte[]>> client = new AtomicReference<>(first);
+        TopicMetadataChecker checker = checker(() -> "orders", Properties::new, client::get, () -> null);
+        Thread oldPreWarm = new Thread(() -> checker.prewarmTopicMetadata("orders"), "old-client-pre-warm");
+        Thread newPreWarm = new Thread(() -> checker.prewarmTopicMetadata("orders"), "new-client-pre-warm");
+        oldPreWarm.start();
+        try {
+            Assert.assertTrue("the old client's pre-warm did not start", first.awaitPartitionsFor(WAIT_SECONDS));
+            replace(checker, client, second);
+            newPreWarm.start();
+            Assert.assertTrue("the new client's pre-warm did not start", second.awaitPartitionsFor(WAIT_SECONDS));
+
+            releaseFirst.countDown();
+            oldPreWarm.join(TimeUnit.SECONDS.toMillis(WAIT_SECONDS));
+            Assert.assertFalse("the old client's pre-warm did not finish", oldPreWarm.isAlive());
+            checker.prewarmTopicMetadata("orders");
+
+            Assert.assertEquals("the new client's pre-warm is still in flight", 1, second.partitionsForCalls());
+        } finally {
+            releaseFirst.countDown();
+            releaseSecond.countDown();
+            oldPreWarm.join(TimeUnit.SECONDS.toMillis(WAIT_SECONDS));
+            newPreWarm.join(TimeUnit.SECONDS.toMillis(WAIT_SECONDS));
+        }
+        Assert.assertFalse("the new client's pre-warm did not finish", newPreWarm.isAlive());
+    }
+
     /** A failed pre-warm names the client id the producer has at that moment, and none while it has none. */
     @Test
     public void aFailedPreWarmNamesTheClientIdOfTheMoment() throws Exception {
@@ -262,14 +393,14 @@ public class TopicMetadataCheckerTest {
         });
 
         Assert.assertEquals("asked again on the second send", 2, builds.get());
-        Assert.assertSame(unavailable, checker.lastProbeFailure());
+        Assert.assertSame(unavailable, checker.lastProbeFailure("orders"));
         Assert.assertTrue(logged, logged.contains("WARN " + PRODUCER_CATEGORY + " - [CPI-KAFKA-PLUS-DIAG] "
                 + "Could not build AdminClient configuration to check topic 'orders' "
                 + "(IllegalStateException: Secure Store unavailable). Skipping the check."));
 
         checker.topicProbe = topic -> TopicCheckResult.EXISTS;
         checker.assertTopicExists("orders");
-        Assert.assertNull("a confirmation forgets the cause", checker.lastProbeFailure());
+        Assert.assertNull("a confirmation forgets the cause", checker.lastProbeFailure("orders"));
     }
 
     // ── helpers ──────────────────────────────────────────────────────────────────
@@ -280,6 +411,25 @@ public class TopicMetadataCheckerTest {
                                                 Supplier<String> clientId) {
         return new TopicMetadataChecker(topic, () -> BOOTSTRAP, () -> "PLAINTEXT", producerConfig, client,
                 clientId);
+    }
+
+    /** What a rebuild does: the producer's field changes first, then the checker forgets its client. */
+    private static void replace(TopicMetadataChecker checker, AtomicReference<KafkaProducer<byte[], byte[]>> client,
+                                KafkaProducer<byte[], byte[]> replacement) {
+        client.set(replacement);
+        checker.onProducerReplaced();
+    }
+
+    /** The lines the test's own thread logged; clients left behind by other tests log on theirs. */
+    private static String ownLines(String logged) {
+        String own = "[" + Thread.currentThread().getName() + "] ";
+        StringBuilder lines = new StringBuilder();
+        for (String line : logged.split("\\R")) {
+            if (line.startsWith(own)) {
+                lines.append(line).append('\n');
+            }
+        }
+        return lines.toString();
     }
 
     private static RecordingProbe probe(TopicMetadataChecker checker, TopicCheckResult verdict) {
@@ -354,15 +504,24 @@ public class TopicMetadataCheckerTest {
         }
     }
 
-    /** A client that never connects: counts metadata fetches, and can fail or hold the next one. */
+    /**
+     * A client that never connects: counts metadata fetches, and can run a hook in, hold or fail the
+     * next one, in that order.
+     */
     private static final class StubClient extends KafkaProducer<byte[], byte[]> {
         private final AtomicInteger partitionsForCalls = new AtomicInteger();
         private final CountDownLatch partitionsForEntered = new CountDownLatch(1);
+        private volatile Runnable nextHook;
         private volatile RuntimeException nextFailure;
         private volatile CountDownLatch nextHold;
 
         StubClient() {
             super(stubProps(), new ByteArraySerializer(), new ByteArraySerializer());
+        }
+
+        /** Runs {@code hook} inside the next fetch, for a rebuild that happens while it runs. */
+        void onNextPartitionsFor(Runnable hook) {
+            nextHook = hook;
         }
 
         void failNextPartitionsFor(RuntimeException failure) {
@@ -387,10 +546,10 @@ public class TopicMetadataCheckerTest {
         public List<PartitionInfo> partitionsFor(String topic) {
             partitionsForCalls.incrementAndGet();
             partitionsForEntered.countDown();
-            RuntimeException failure = nextFailure;
-            if (failure != null) {
-                nextFailure = null;
-                throw failure;
+            Runnable hook = nextHook;
+            if (hook != null) {
+                nextHook = null;
+                hook.run();
             }
             CountDownLatch hold = nextHold;
             if (hold != null) {
@@ -400,6 +559,11 @@ public class TopicMetadataCheckerTest {
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                 }
+            }
+            RuntimeException failure = nextFailure;
+            if (failure != null) {
+                nextFailure = null;
+                throw failure;
             }
             return Collections.emptyList();
         }

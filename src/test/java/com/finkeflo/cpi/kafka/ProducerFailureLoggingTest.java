@@ -83,8 +83,16 @@ public class ProducerFailureLoggingTest {
         return ctx;
     }
 
+    /**
+     * ERROR lines with the marker that the test's own thread wrote. {@code System.err} is global, and
+     * threads left behind by earlier tests (the start-up topic check, Kafka clients) keep logging
+     * into the capture.
+     */
     private static long countErrorLines(String logged) {
-        return logged.lines().filter(l -> l.contains("ERROR") && l.contains(AdapterDiagnostics.MARKER)).count();
+        String own = "[" + Thread.currentThread().getName() + "] ";
+        return logged.lines()
+                .filter(l -> l.startsWith(own) && l.contains("ERROR") && l.contains(AdapterDiagnostics.MARKER))
+                .count();
     }
 
     @Test

@@ -23,6 +23,7 @@ package com.finkeflo.cpi.kafka;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.Properties;
@@ -35,7 +36,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.apache.camel.Exchange;
-import org.apache.camel.Message;
 import org.apache.camel.impl.DefaultCamelContext;
 import org.apache.camel.support.DefaultExchange;
 import org.apache.kafka.clients.producer.KafkaProducer;
@@ -109,7 +109,8 @@ public class ProducerLifecycleTest {
             invoke(producer, "ensureInitialized");
 
             byte[] value = (byte[]) invoke(producer, "serializeValue",
-                    new Class<?>[] { String.class, Message.class }, "orders", message("{\"id\":\"42\"}"));
+                    new Class<?>[] { String.class, byte[].class }, "orders",
+                    "{\"id\":\"42\"}".getBytes(StandardCharsets.UTF_8));
 
             Assert.assertEquals("expected the Confluent magic byte, i.e. an Avro record, not raw JSON",
                     0x00, value[0]);
@@ -148,13 +149,46 @@ public class ProducerLifecycleTest {
                 0, transactionalProducers.get());
     }
 
+    /**
+     * A serialization helper that cannot be built fails the message before any Kafka producer is
+     * built. The producer used to be built first, then closed again when the helper failed, for
+     * every message and under the monitor that every other sender waits on (#246).
+     */
+    @Test
+    public void aHelperThatCannotBeBuiltCostsNoKafkaProducer() throws Exception {
+        CpiKafkaPlusEndpoint endpoint = avroEndpoint("NONE", false);
+        endpoint.setSchemaRegistryCredentialAlias("sr-alias");
+        CredentialHelper.setCredentialResolver(alias -> {
+            throw new IllegalStateException("Secure Store unavailable");
+        });
+        CpiKafkaPlusProducer producer = newProducer(endpoint);
+        AtomicInteger sharedProducers = new AtomicInteger();
+        producer.sharedProducerFactory = props -> {
+            sharedProducers.incrementAndGet();
+            return new AcknowledgingProducer();
+        };
+
+        for (int message = 1; message <= 2; message++) {
+            Exchange exchange = new DefaultExchange(ctx);
+            exchange.getIn().setBody("{\"id\": \"" + message + "\"}");
+            try {
+                producer.doProcess(exchange);
+                Assert.fail("expected the exchange to fail while the Avro serializer cannot be built");
+            } catch (IllegalStateException e) {
+                Assert.assertTrue(e.getMessage(), e.getMessage().contains("Secure Store unavailable"));
+            }
+        }
+        Assert.assertEquals(0, sharedProducers.get());
+    }
+
     @Test
     public void singleSendRefusesRawBodyWhenAvroHelperIsMissing() throws Exception {
         CpiKafkaPlusProducer producer = newProducer(avroEndpoint("NONE", false));
 
         try {
             invoke(producer, "serializeValue",
-                    new Class<?>[] { String.class, Message.class }, "orders", message("{\"id\":\"42\"}"));
+                    new Class<?>[] { String.class, byte[].class }, "orders",
+                    "{\"id\":\"42\"}".getBytes(StandardCharsets.UTF_8));
             Assert.fail("expected a configured but missing Avro serializer to fail the send");
         } catch (IllegalStateException expected) {
             // expected
@@ -238,12 +272,6 @@ public class ProducerLifecycleTest {
         // Normally assigned in doStart(); injected so the lifecycle can run without a broker.
         setField(producer, "tracingHelper", new AdapterTracingHelper(endpoint));
         return producer;
-    }
-
-    private Message message(String body) {
-        Exchange exchange = new DefaultExchange(ctx);
-        exchange.getIn().setBody(body);
-        return exchange.getIn();
     }
 
     @SuppressWarnings("unchecked")

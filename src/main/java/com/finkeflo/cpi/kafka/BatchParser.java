@@ -23,8 +23,11 @@ package com.finkeflo.cpi.kafka;
 import java.io.StringReader;
 import java.io.StringWriter;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
+import javax.xml.XMLConstants;
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
 import javax.xml.transform.OutputKeys;
@@ -35,6 +38,7 @@ import javax.xml.transform.stream.StreamResult;
 
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
+import org.w3c.dom.NamedNodeMap;
 import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
 import org.xml.sax.InputSource;
@@ -191,6 +195,8 @@ public final class BatchParser {
         try {
             DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
             factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+            // Namespace-aware, so that a value can take along the declarations it was written under.
+            factory.setNamespaceAware(true);
             DocumentBuilder builder = factory.newDocumentBuilder();
             doc = builder.parse(new InputSource(new StringReader(body)));
         } catch (IllegalArgumentException e) {
@@ -283,34 +289,53 @@ public final class BatchParser {
 
     /**
      * Extract the content of a value element.
-     * If it has child elements (not CDATA/text), re-serialize them to XML string.
-     * If it has only text content, return the text.
-     * Empty element returns null (tombstone).
+     * Without child elements the value is its text (CDATA included); an empty element is a
+     * tombstone. With child elements every child node is re-serialized as XML, the text between
+     * the elements included: serializing only the elements turned {@code Preis: <b>10</b> EUR}
+     * into {@code <b>10</b>} (#247). Whitespace-only text in a value that has no other text is
+     * indentation between the elements and stays dropped, as before.
      */
     private static String extractValueContent(Element valueEl) {
-        // Check for child elements
         NodeList children = valueEl.getChildNodes();
         boolean hasElementChildren = false;
+        boolean hasText = false;
         for (int i = 0; i < children.getLength(); i++) {
-            if (children.item(i).getNodeType() == Node.ELEMENT_NODE) {
+            Node child = children.item(i);
+            if (child.getNodeType() == Node.ELEMENT_NODE) {
                 hasElementChildren = true;
-                break;
+            } else if (child.getNodeType() == Node.CDATA_SECTION_NODE
+                    || (child.getNodeType() == Node.TEXT_NODE && !isXmlWhitespace(child.getNodeValue()))) {
+                hasText = true;
             }
         }
 
         if (hasElementChildren) {
-            // Re-serialize child elements to XML string
+            Map<String, String> namespaces = inScopeNamespaces(valueEl);
             StringBuilder sb = new StringBuilder();
             try {
                 Transformer transformer = TransformerFactory.newInstance().newTransformer();
                 transformer.setOutputProperty(OutputKeys.OMIT_XML_DECLARATION, "yes");
+                Transformer xmlTransformer = null;
                 for (int i = 0; i < children.getLength(); i++) {
                     Node child = children.item(i);
-                    if (child.getNodeType() == Node.ELEMENT_NODE) {
-                        StringWriter writer = new StringWriter();
-                        transformer.transform(new DOMSource(child), new StreamResult(writer));
-                        sb.append(writer.toString());
+                    if (child.getNodeType() == Node.TEXT_NODE && !hasText) {
+                        continue;
                     }
+                    Transformer serializer = transformer;
+                    if (child.getNodeType() == Node.ELEMENT_NODE) {
+                        declareNamespaces((Element) child, namespaces);
+                        if (isHtmlWithoutNamespace(child)) {
+                            if (xmlTransformer == null) {
+                                xmlTransformer = TransformerFactory.newInstance().newTransformer();
+                                xmlTransformer.setOutputProperty(OutputKeys.METHOD, "xml");
+                                xmlTransformer.setOutputProperty(OutputKeys.OMIT_XML_DECLARATION, "yes");
+                            }
+                            serializer = xmlTransformer;
+                        }
+                    }
+                    StringWriter writer = new StringWriter();
+                    serializer.transform(new DOMSource(child), new StreamResult(writer));
+                    sb.append(writer.toString());
                 }
             } catch (Exception e) {
                 throw new IllegalArgumentException(
@@ -325,6 +350,77 @@ public final class BatchParser {
             return null; // tombstone
         }
         return text;
+    }
+
+    /**
+     * An element called {@code html}, in any case, in no namespace. Left to its default, the
+     * transformer writes such an element with the HTML output method: {@code <br>} instead of
+     * {@code <br/>}, which no XML parser reads, a {@code META} element added to {@code <head>}, and
+     * indented. Only these elements get the XML method explicitly: under it the namespace
+     * declarations of other elements would come out in a different order than they always did.
+     */
+    private static boolean isHtmlWithoutNamespace(Node element) {
+        String namespace = element.getNamespaceURI();
+        return "html".equalsIgnoreCase(element.getLocalName()) && (namespace == null || namespace.isEmpty());
+    }
+
+    private static boolean isXmlWhitespace(String text) {
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c != ' ' && c != '\t' && c != '\n' && c != '\r') {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * The namespace declarations in scope at {@code valueEl}, by prefix ({@code ""} for the default
+     * namespace); the declaration nearest to the value wins. The value is serialized without its
+     * ancestors, so declarations made on {@code <kafkaRecords>}, {@code <record>} or {@code <value>}
+     * would otherwise be lost (#247).
+     */
+    private static Map<String, String> inScopeNamespaces(Element valueEl) {
+        Map<String, String> namespaces = new LinkedHashMap<>();
+        for (Node node = valueEl; node != null && node.getNodeType() == Node.ELEMENT_NODE;
+                node = node.getParentNode()) {
+            NamedNodeMap attributes = node.getAttributes();
+            for (int i = 0; i < attributes.getLength(); i++) {
+                Node attribute = attributes.item(i);
+                if (!XMLConstants.XMLNS_ATTRIBUTE_NS_URI.equals(attribute.getNamespaceURI())) {
+                    continue;
+                }
+                String prefix = XMLConstants.XMLNS_ATTRIBUTE.equals(attribute.getNodeName())
+                        ? XMLConstants.DEFAULT_NS_PREFIX : attribute.getLocalName();
+                if (!namespaces.containsKey(prefix)) {
+                    namespaces.put(prefix, attribute.getNodeValue());
+                }
+            }
+        }
+        return namespaces;
+    }
+
+    /**
+     * Declares the namespaces in scope at the value on one of its top-level elements, as an XSLT
+     * {@code copy-of} would, so the value is the same XML on its own as it was inside the batch.
+     * A declaration the element makes itself takes precedence.
+     */
+    private static void declareNamespaces(Element element, Map<String, String> namespaces) {
+        for (Map.Entry<String, String> namespace : namespaces.entrySet()) {
+            String prefix = namespace.getKey();
+            // An empty URI only undeclares an outer default namespace, which the serialized value
+            // does not have anyway; the xml prefix is bound without a declaration.
+            if (namespace.getValue().isEmpty() || XMLConstants.XML_NS_PREFIX.equals(prefix)) {
+                continue;
+            }
+            boolean isDefault = prefix.isEmpty();
+            if (!element.hasAttributeNS(XMLConstants.XMLNS_ATTRIBUTE_NS_URI,
+                    isDefault ? XMLConstants.XMLNS_ATTRIBUTE : prefix)) {
+                element.setAttributeNS(XMLConstants.XMLNS_ATTRIBUTE_NS_URI,
+                        isDefault ? XMLConstants.XMLNS_ATTRIBUTE : XMLConstants.XMLNS_ATTRIBUTE + ":" + prefix,
+                        namespace.getValue());
+            }
+        }
     }
 
     private static void extractCpiJsonHeader(JsonNode node, java.util.Map<String, String> headers) {
