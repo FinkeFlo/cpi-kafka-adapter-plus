@@ -341,7 +341,9 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
     private boolean autoPauseEnabled = false;
 
     @UriParam(label = "errorHandling", defaultValue = "5",
-            description = "Number of consecutive processing errors before auto-pause activates")
+            description = "Number of consecutive failed records (or failed batches without a DLQ) before "
+                    + "auto-pause activates. A record counts once after its last attempt, also when it is then "
+                    + "dead-lettered; JSON Schema violations do not count.")
     private int autoPauseErrorThreshold = 5;
 
     @UriParam(label = "errorHandling", defaultValue = "60",

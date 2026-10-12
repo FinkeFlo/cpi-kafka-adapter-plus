@@ -124,7 +124,7 @@ For details on Avro integration, see [Avro / Schema Registry](features/avro-sche
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `autoPauseEnabled` | `false` | Automatically pause the consumer after consecutive processing errors. |
-| `autoPauseErrorThreshold` | `5` | Consecutive processing errors required to activate auto-pause. Every failed IFlow call counts, including records that end up in the DLQ. |
+| `autoPauseErrorThreshold` | `5` | Consecutive failed records required to activate auto-pause. A record, including one that cannot be deserialized, counts once after its last attempt, also when it is then written to the DLQ; the retries before it do not count separately. Without a DLQ a failed batch counts once; with a DLQ it is retried record by record and its failing records count. With `errorHandling` `RETRY` every new attempt on a later poll counts again. Records rejected by JSON Schema validation do not count, nor does a failure caused by stopping the integration flow. A successful record or batch resets the count. |
 | `autoPauseCooldownSeconds` | `60` | Initial auto-pause duration in seconds; doubles after subsequent failures, capped at 900 seconds. |
 
 For details on DLQ and retry behavior, see [Dead Letter Queue](features/dead-letter-queue.md).

@@ -418,7 +418,7 @@
                 </AttributeReference>
                 <AttributeReference>
                     <ReferenceName>autoPauseErrorThreshold</ReferenceName>
-                    <description>Number of consecutive processing errors before the consumer pauses. Default: 5.</description>
+                    <description>Number of consecutive failed records (or failed batches without a Dead Letter Queue) before the consumer pauses. A record counts once after its last attempt, also when it is then written to the Dead Letter Queue; with Retry Failed Message, every new attempt on a later poll counts again. Records that fail JSON Schema validation do not count, and a successful record or batch resets the count. Default: 5.</description>
                     <ErrorMessage>Please enter a positive number (e.g. 5)</ErrorMessage>
                     <EditCondition>
                         <AttributeName>autoPauseEnabled</AttributeName>

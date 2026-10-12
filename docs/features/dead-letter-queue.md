@@ -53,6 +53,12 @@ Record consumed from Kafka
 
 If any attempt succeeds, the offset is committed immediately and processing continues with the next record.
 
+A record that ends up in the DLQ still counts as one failure for **Auto-Pause on Errors**
+(`autoPauseEnabled`): once, after its last attempt, while the retries before it do not count
+separately. With the default **Consecutive Error Threshold** of 5, five dead-lettered records in a row
+pause the consumer, although the DLQ took each of them. A successful record resets the count, and
+records rejected by JSON Schema validation do not count.
+
 If the integration flow is stopped or undeployed while an attempt runs or while the consumer waits for the next
 one, the record is neither sent to the DLQ nor skipped: it stays uncommitted and is delivered again after the
 restart. An attempt that fails during the stop usually fails because of the stop, not because of the record.
