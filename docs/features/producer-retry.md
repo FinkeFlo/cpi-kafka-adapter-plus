@@ -37,8 +37,8 @@ gets committed. That is why the adapter tracks the transaction phase explicitly 
 retry from `COMMIT` onwards, with `stopReason=COMMIT_OUTCOME_UNKNOWN`.
 
 If `producerRetryMaxAttempts > 1` is configured on a non-transactional batch channel, the adapter
-writes a warning at start-up saying the setting has no effect there. Enable transactions to use the
-retry for batches.
+logs `producer.config.ineffective` at start-up (ERROR, so that it reaches the tenant trace) saying the
+setting has no effect there. Enable transactions to use the retry for batches.
 
 ## Parameters
 
@@ -178,8 +178,9 @@ undeployable for exactly the channels the retry was built for. The remaining bou
 The retry loop runs **inside** the transaction slot it acquired, because every attempt must use the
 same `transactional.id`. During a broker outage all sending threads therefore hold their slot for
 the whole retry duration, and the adapter blocks more broadly than it does today. With
-`maxConcurrentTransactions=1` a single retry blocks every other send on the node; the adapter warns
-about that combination at start-up. Size `maxConcurrentTransactions` accordingly.
+`maxConcurrentTransactions=1` a single retry blocks every other send on the node; the adapter logs
+`producer.config.ineffective` for that combination at start-up. Size `maxConcurrentTransactions`
+accordingly.
 
 The same applies one level up: the retry blocks the HTTP worker thread, not just the slot. For
 callers that cannot tolerate the delay, the right answer is a decoupling buffer (a JMS queue in

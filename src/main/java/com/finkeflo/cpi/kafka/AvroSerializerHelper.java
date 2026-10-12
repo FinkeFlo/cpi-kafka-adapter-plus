@@ -70,7 +70,7 @@ public class AvroSerializerHelper implements Closeable {
 
         CredentialHelper.UserCredentials creds = CredentialHelper.requireUserCredential(
                 endpoint.getSchemaRegistryCredentialAlias(),
-                "'Schema Registry Credential Alias' (schemaRegistryCredentialAlias)");
+                UiLabels.field("schemaRegistryCredentialAlias"));
         String username = creds != null ? creds.username() : null;
         String password = creds != null ? creds.password() : null;
 
@@ -163,7 +163,8 @@ public class AvroSerializerHelper implements Closeable {
             if (e.getHttpStatus() == 404) {
                 throw new RuntimeException(
                         "Schema subject '" + subject + "' not found in Schema Registry. "
-                        + "Create the schema in the registry or enable 'Auto Register Schemas'.", e);
+                        + "Create the schema in the registry or switch on "
+                        + UiLabels.field("autoRegisterSchemas") + ".", e);
             }
             throw e;
         }
@@ -173,8 +174,9 @@ public class AvroSerializerHelper implements Closeable {
     // Subject name strategy
     // -----------------------------------------------------------------------
 
+    /** Case-insensitive, like the start check in {@link ReceiverConfigValidator} (#261). */
     private String resolveSubject(String topic) {
-        if (TOPIC_NAME_STRATEGY.equals(strategyName)) {
+        if (TOPIC_NAME_STRATEGY.equalsIgnoreCase(strategyName)) {
             return topic + "-value";
         }
         throw new IllegalStateException(

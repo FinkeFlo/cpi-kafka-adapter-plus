@@ -89,8 +89,7 @@ public class MetadataLintTest {
             KNOWN_VIOLATIONS.put("error-message-without-restriction sender." + field, "#206");
         }
         for (String field : Arrays.asList("deliveryTimeoutSeconds", "transactionalIdPrefix",
-                "maxConcurrentTransactions", "maxRequestSizeKb", "producerBatchSizeKb", "bufferMemoryKb",
-                "schemaRegistryUrl")) {
+                "maxConcurrentTransactions", "schemaRegistryUrl")) {
             KNOWN_VIOLATIONS.put("error-message-without-restriction receiver." + field, "#206");
         }
         // Whether the UI checks a Restriction against an externalized {{parameter}} literally is a
@@ -118,6 +117,10 @@ public class MetadataLintTest {
                 "producerRetryTotalBudgetSeconds", "900"));
         RANGES.put("receiver.producerRetryTotalBudgetSeconds", new RangeSpec(5, 900,
                 "producerRetryMaxAttempts", "2", "deliveryTimeoutSeconds", "1", "producerRetryDelaySeconds", "1"));
+        // Open ranges: every value of the type from the minimum on (#261).
+        RANGES.put("receiver.maxRequestSizeKb", RangeSpec.atLeast(1));
+        RANGES.put("receiver.producerBatchSizeKb", RangeSpec.atLeast(0));
+        RANGES.put("receiver.bufferMemoryKb", RangeSpec.atLeast(1));
     }
 
     /** Text Restrictions: one value the pattern must accept and one it must reject. */
@@ -137,6 +140,12 @@ public class MetadataLintTest {
                 "schemaRegistryUrl", "http://localhost:1"));
         ACTIVATION.put("batchOutputFormat", params("batchMode", "true"));
         ACTIVATION.put("acks", params("enableIdempotence", "false"));
+    }
+
+    /** Settings a switched-on feature needs before the channel starts at all, per switch. */
+    private static final Map<String, Map<String, String>> PREREQUISITES = new LinkedHashMap<>();
+    static {
+        PREREQUISITES.put("dlqEnabled=true", params("dlqTopic", "orders-dlq"));
     }
 
     private static Map<Direction, Metadata> currentLine;
@@ -159,6 +168,9 @@ public class MetadataLintTest {
     }
 
     private static final class RangeSpec {
+        /** The upper bound of an open range: the largest value of the field's type. */
+        static final long TYPE_MAX = Long.MAX_VALUE;
+
         final long lo;
         final long hi;
         final Map<String, String> activation;
@@ -167,6 +179,15 @@ public class MetadataLintTest {
             this.lo = lo;
             this.hi = hi;
             this.activation = params(activation);
+        }
+
+        static RangeSpec atLeast(long lo, String... activation) {
+            return new RangeSpec(lo, TYPE_MAX, activation);
+        }
+
+        /** The largest value in range of a field of {@code dataType}. */
+        long hi(String dataType) {
+            return hi == TYPE_MAX && "xsd:integer".equals(dataType) ? Integer.MAX_VALUE : hi;
         }
     }
 
@@ -287,7 +308,7 @@ public class MetadataLintTest {
                     RangeSpec range = RANGES.get(key);
                     String[] text = TEXT_RESTRICTIONS.get(key);
                     if (range != null) {
-                        checkRange(direction, line.getValue(), a, pattern, range, violations);
+                        checkRange(direction, a, pattern, range, violations);
                     } else if (text != null) {
                         if (!pattern.matcher(text[0]).find() || pattern.matcher(text[1]).find()) {
                             violations.add("restriction-text-mismatch " + key + " (accepts '" + text[0]
@@ -325,6 +346,44 @@ public class MetadataLintTest {
             }
         }
         assertOnlyKnownViolations("fixed-value-rejected", violations);
+    }
+
+    /**
+     * A hidden field keeps whatever value it had, and an externalized one whatever its parameter
+     * holds. If a start check still looked at it, the operator could neither see nor fix what blocks
+     * the deployment (#174). So every offered field with a visibility condition gets values its own
+     * check would reject, while its condition hides it, and the channel must still start.
+     */
+    @Test
+    public void hiddenFieldNeverBlocksStart() throws Exception {
+        Set<String> violations = new TreeSet<>();
+        for (Map.Entry<Direction, Metadata> line : currentLine.entrySet()) {
+            Direction direction = line.getKey();
+            for (Attribute a : line.getValue().offered()) {
+                if (a.condition == null) {
+                    continue;
+                }
+                String key = direction.id + "." + a.name;
+                Map<String, String> hidden = new LinkedHashMap<>();
+                for (Map.Entry<String, String> setting : conditionAssignment(a.condition, false, line.getValue()).entrySet()) {
+                    hidden.putAll(PREREQUISITES.getOrDefault(setting.getKey() + "=" + setting.getValue(),
+                            Collections.emptyMap()));
+                    hidden.put(setting.getKey(), setting.getValue());
+                }
+                Assert.assertNull(key + " is hidden by " + hidden + ", which does not start on its own; "
+                        + "add what it needs to PREREQUISITES", startRejection(direction, hidden));
+                for (String value : unusableValues(key, a)) {
+                    Map<String, String> params = new LinkedHashMap<>(hidden);
+                    params.put(a.name, value);
+                    String rejection = startRejection(direction, params);
+                    if (rejection != null) {
+                        violations.add("hidden-blocks-start " + key + " ('" + value + "' with " + hidden + ": "
+                                + rejection + ")");
+                    }
+                }
+            }
+        }
+        assertOnlyKnownViolations("hidden-", violations);
     }
 
     /**
@@ -396,12 +455,17 @@ public class MetadataLintTest {
     // Restriction ranges and runtime acceptance
     // ---------------------------------------------------------------------------------------------
 
-    private static void checkRange(Direction direction, Metadata metadata, Attribute a, Pattern pattern,
+    private static void checkRange(Direction direction, Attribute a, Pattern pattern,
                                    RangeSpec range, Set<String> violations) throws Exception {
         String name = a.name;
         String key = direction.id + "." + name;
-        for (long value : new long[] {range.lo - 1, range.lo, range.hi, range.hi + 1}) {
-            boolean inRange = value >= range.lo && value <= range.hi;
+        long hi = range.hi(a.dataType);
+        // Above the largest value of its type a field cannot even be bound, so an open range ends there.
+        long[] values = range.hi == RangeSpec.TYPE_MAX
+                ? new long[] {range.lo - 1, range.lo, hi}
+                : new long[] {range.lo - 1, range.lo, hi, hi + 1};
+        for (long value : values) {
+            boolean inRange = value >= range.lo && value <= hi;
             if (pattern.matcher(String.valueOf(value)).find() != inRange) {
                 violations.add("restriction-range-mismatch " + key + "=" + value + " (pattern "
                         + (inRange ? "rejects" : "accepts") + " it)");
@@ -417,62 +481,117 @@ public class MetadataLintTest {
         if (!pattern.matcher(PARAMETER_PLACEHOLDER).find()) {
             violations.add("restriction-rejects-parameter " + key);
         }
-        if (a.condition != null) {
-            // A hidden field keeps whatever value it had. If the start check still looked at it, the
-            // operator could neither see nor fix what blocks the deployment (#174).
-            Map<String, String> params = new LinkedHashMap<>(range.activation);
-            params.putAll(conditionAssignment(a.condition, false, metadata));
-            params.put(name, String.valueOf(range.hi + 1));
-            String rejection = startRejection(direction, params);
-            if (rejection != null) {
-                violations.add("restriction-hidden-blocks-start " + key + " (" + params + ": " + rejection + ")");
+    }
+
+    /**
+     * Values the field's own start check would reject if it looked at them: out of range, empty,
+     * malformed or too long, or both states of a switch that could turn a check on.
+     */
+    private static List<String> unusableValues(String key, Attribute a) {
+        Set<String> values = new LinkedHashSet<>();
+        RangeSpec range = RANGES.get(key);
+        if (range != null) {
+            values.add(String.valueOf(range.lo - 1));
+            if (range.hi != RangeSpec.TYPE_MAX) {
+                values.add(String.valueOf(range.hi + 1));
             }
         }
+        if ("xsd:boolean".equals(a.dataType)) {
+            values.add("true");
+            values.add("false");
+        } else if ("xsd:integer".equals(a.dataType)) {
+            values.add("-1");
+            values.add("0");
+            values.add(String.valueOf(Integer.MAX_VALUE));
+        } else if ("xsd:long".equals(a.dataType)) {
+            values.add("-1");
+            values.add("0");
+            values.add(String.valueOf(Long.MAX_VALUE));
+        } else if (!a.fixedValues.isEmpty()) {
+            values.add("");
+            values.add("UNKNOWN");
+        } else {
+            values.add("");
+            values.add(" no such value {");
+            values.add(new String(new char[300]).replace('\0', 'x'));
+        }
+        return new ArrayList<>(values);
     }
 
     /** Settings that make a visibility condition evaluate to {@code value}. */
     private static Map<String, String> conditionAssignment(Element condition, boolean value, Metadata metadata) {
+        Map<String, String> out = new LinkedHashMap<>();
+        Map<String, Set<String>> excluded = new LinkedHashMap<>();
+        collectAssignment(condition, value, out, excluded);
+        for (Map.Entry<String, Set<String>> e : excluded.entrySet()) {
+            if (!out.containsKey(e.getKey())) {
+                out.put(e.getKey(), otherValue(metadata.attributes.get(e.getKey()), e.getValue()));
+            }
+        }
+        return out;
+    }
+
+    /**
+     * Collects the value an attribute must have, or the values it must not have, for the condition
+     * to be {@code value}. A false Or over one attribute (securityProtocol is SASL_SSL or
+     * SASL_PLAINTEXT) must avoid every value it lists, not only the last one.
+     */
+    private static void collectAssignment(Element condition, boolean value, Map<String, String> required,
+                                          Map<String, Set<String>> excluded) {
         List<Element> children = new ArrayList<>();
         for (Node child = condition.getFirstChild(); child != null; child = child.getNextSibling()) {
             if (child instanceof Element && ((Element) child).getTagName().endsWith("Condition")) {
                 children.add((Element) child);
             }
         }
-        Map<String, String> out = new LinkedHashMap<>();
         switch (condition.getTagName()) {
             case "EditCondition": {
                 String attribute = childText(condition, "AttributeName");
                 String expected = childText(condition, "AttributeValue");
-                out.put(attribute, value ? expected : otherValue(metadata.attributes.get(attribute), expected));
-                return out;
+                if (value) {
+                    required.put(attribute, expected);
+                } else {
+                    excluded.computeIfAbsent(attribute, k -> new LinkedHashSet<>()).add(expected);
+                }
+                return;
             }
             case "NotCondition":
-                return conditionAssignment(children.get(0), !value, metadata);
+                collectAssignment(children.get(0), !value, required, excluded);
+                return;
             case "OrCondition":
             case "AndCondition": {
                 // An Or is true through any one child and false only if all are; an And the reverse.
                 boolean all = value == "AndCondition".equals(condition.getTagName());
                 for (Element child : all ? children : children.subList(0, 1)) {
-                    out.putAll(conditionAssignment(child, value, metadata));
+                    collectAssignment(child, value, required, excluded);
                 }
-                return out;
+                return;
             }
             default:
                 throw new AssertionError("unknown condition " + condition.getTagName());
         }
     }
 
-    private static String otherValue(Attribute attribute, String value) {
+    /** A value of the attribute that is none of {@code values}. */
+    private static String otherValue(Attribute attribute, Set<String> values) {
         Assert.assertNotNull("a condition refers to an attribute without metadata", attribute);
         for (String fixed : attribute.fixedValues) {
-            if (!fixed.equals(value)) {
+            if (!values.contains(fixed)) {
                 return fixed;
             }
         }
         if ("xsd:boolean".equals(attribute.dataType)) {
-            return String.valueOf(!Boolean.parseBoolean(value));
+            return String.valueOf(values.contains("false"));
         }
-        return value.matches("-?\\d+") ? String.valueOf(Long.parseLong(value) + 1) : value + "-other";
+        String value = values.iterator().next();
+        if (!value.matches("-?\\d+")) {
+            return value + "-other";
+        }
+        long other = Long.parseLong(value) + 1;
+        while (values.contains(String.valueOf(other))) {
+            other++;
+        }
+        return String.valueOf(other);
     }
 
     /** Why the runtime of the direction refuses the settings, or {@code null} if it takes them. */

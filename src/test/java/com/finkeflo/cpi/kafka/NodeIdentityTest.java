@@ -106,21 +106,23 @@ public class NodeIdentityTest {
 
     @Test
     public void producerBuildsTransactionalIdFromTopicHashAndMemberSuffix() throws Exception {
-        // A prefix this long fails the length check, whose message carries the example id.
+        // A prefix this long fails the length check, whose message carries the id of the last slot,
+        // with a single slot the id of slot 0.
         String prefix = new String(new char[240]).replace('\0', 'x');
         try (DefaultCamelContext ctx = new DefaultCamelContext()) {
             ctx.addComponent("cpi-kafka-plus", new CpiKafkaPlusComponent());
             ctx.start();
             CpiKafkaPlusEndpoint endpoint = (CpiKafkaPlusEndpoint) ctx.getEndpoint(
                     "cpi-kafka-plus:test-topic?bootstrapServers=localhost:9999&securityProtocol=PLAINTEXT"
-                    + "&producerBatchMode=JSON_ARRAY&enableTransactions=true&transactionalIdPrefix=" + prefix);
+                    + "&producerBatchMode=JSON_ARRAY&enableTransactions=true&maxConcurrentTransactions=1"
+                    + "&transactionalIdPrefix=" + prefix);
             CpiKafkaPlusProducer producer = new CpiKafkaPlusProducer(endpoint);
             try {
                 producer.doStart();
                 fail("Expected the length check to reject the transactional.id");
             } catch (IllegalArgumentException e) {
                 String message = e.getMessage();
-                int start = message.indexOf('\'') + 1;
+                int start = message.indexOf("of the last slot, '") + "of the last slot, '".length();
                 String id = message.substring(start, message.indexOf('\'', start));
                 assertTrue(id, id.startsWith(prefix + "-c6fb053c-"));
                 assertTrue(id, id.endsWith("-0"));

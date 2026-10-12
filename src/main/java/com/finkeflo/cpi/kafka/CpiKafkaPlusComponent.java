@@ -20,9 +20,13 @@
  */
 package com.finkeflo.cpi.kafka;
 
+import java.lang.reflect.Field;
 import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
 
 import org.apache.camel.Endpoint;
+import org.apache.camel.spi.UriParam;
 import org.apache.camel.support.DefaultComponent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -30,6 +34,13 @@ import org.slf4j.LoggerFactory;
 public class CpiKafkaPlusComponent extends DefaultComponent {
 
     private static final Logger LOG = LoggerFactory.getLogger(CpiKafkaPlusComponent.class);
+
+    /**
+     * The options whose value is a number or a switch, matched in any case as Camel binds them. A
+     * space around such a value can never be meant, and Camel failed to bind it with a message that
+     * names no UI label (#261).
+     */
+    private static final Set<String> NUMBER_AND_SWITCH_OPTIONS = numberAndSwitchOptions();
 
     public CpiKafkaPlusComponent() {
         // Earliest hook this bundle gets: pre-load the whole class space before a later adapter
@@ -44,40 +55,36 @@ public class CpiKafkaPlusComponent extends DefaultComponent {
     }
 
     @Override
-    public Endpoint createEndpoint(String uri) throws Exception {
-        // Trim whitespace from all query parameter values before Camel parses the URI.
-        // SAP CPI does not URL-encode adapter field values, so a leading/trailing space
-        // in e.g. the topic field produces an illegal URI character and a cryptic
-        // "Illegal character in opaque part" error. Trimming here gives a clean
-        // startup error or transparent fix for accidental spaces.
-        return super.createEndpoint(trimQueryParamValues(uri));
-    }
-
-    static String trimQueryParamValues(String uri) {
-        int queryStart = uri.indexOf('?');
-        if (queryStart < 0) return uri;
-        String base  = uri.substring(0, queryStart + 1);
-        String query = uri.substring(queryStart + 1);
-        String[] pairs = query.split("&", -1);
-        StringBuilder sb = new StringBuilder(base);
-        for (int i = 0; i < pairs.length; i++) {
-            if (i > 0) sb.append('&');
-            int eq = pairs[i].indexOf('=');
-            if (eq >= 0) {
-                sb.append(pairs[i], 0, eq + 1);
-                sb.append(pairs[i].substring(eq + 1).trim());
-            } else {
-                sb.append(pairs[i]);
-            }
-        }
-        return sb.toString();
-    }
-
-    @Override
     protected Endpoint createEndpoint(String uri, String remaining, Map<String, Object> parameters) throws Exception {
         LOG.info("Creating CPI Kafka Plus endpoint: {}", uri);
         CpiKafkaPlusEndpoint endpoint = new CpiKafkaPlusEndpoint(uri, remaining, this);
+        trimNumbersAndSwitches(parameters);
         setProperties(endpoint, parameters);
         return endpoint;
+    }
+
+    /**
+     * Trims the value of every number and switch option before Camel binds it. Text values are bound
+     * as they are: the endpoint's setters trim those where a space can never be meant, and leave the
+     * others, such as the consumer group ID, exactly as configured.
+     */
+    static void trimNumbersAndSwitches(Map<String, Object> parameters) {
+        for (Map.Entry<String, Object> parameter : parameters.entrySet()) {
+            if (parameter.getValue() instanceof String && NUMBER_AND_SWITCH_OPTIONS.contains(parameter.getKey())) {
+                parameter.setValue(((String) parameter.getValue()).trim());
+            }
+        }
+    }
+
+    private static Set<String> numberAndSwitchOptions() {
+        Set<String> options = new TreeSet<>(String.CASE_INSENSITIVE_ORDER);
+        for (Field field : CpiKafkaPlusEndpoint.class.getDeclaredFields()) {
+            Class<?> type = field.getType();
+            if (field.isAnnotationPresent(UriParam.class)
+                    && (type.isPrimitive() || Number.class.isAssignableFrom(type) || type == Boolean.class)) {
+                options.add(field.getName());
+            }
+        }
+        return options;
     }
 }

@@ -604,12 +604,14 @@ public class DlqRoutingIT {
 
         CpiKafkaPlusEndpoint endpoint = (CpiKafkaPlusEndpoint) ctx.getEndpoint(
                 KafkaTestInfrastructure.buildEndpointUri(topic, group, params));
-        // A name Kafka rejects: every DLQ write fails, like a missing topic or a missing ACL.
-        endpoint.setDlqTopic("not a valid topic");
         CpiKafkaPlusConsumer consumer = new CpiKafkaPlusConsumer(endpoint, processor);
 
         try {
             consumer.doStart();
+            // A name Kafka rejects: every DLQ write fails, like a missing topic or a missing ACL. The
+            // start check refuses such a name (#261), so it is set after the start; the DLQ producer is
+            // only built at the first poll and takes it from there.
+            endpoint.setDlqTopic("not a valid topic");
             Method pollMethod = CpiKafkaPlusConsumer.class.getDeclaredMethod("poll");
             pollMethod.setAccessible(true);
 

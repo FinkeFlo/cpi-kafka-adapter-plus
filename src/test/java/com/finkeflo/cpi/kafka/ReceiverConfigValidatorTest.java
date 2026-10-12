@@ -58,7 +58,7 @@ public class ReceiverConfigValidatorTest {
         ReceiverConfigValidator.validateTransactional(e);
         ReceiverConfigValidator.validateRetry(e);
         assertRejected(() -> ReceiverConfigValidator.validateBeforeStart(e),
-                "Unknown 'Batch Send Mode' (producerBatchMode): CSV. Supported: NONE, JSON_ARRAY, XML_LIST");
+                "'Batch Send Mode' (producerBatchMode) must be NONE, JSON_ARRAY or XML_LIST, got: 'CSV'");
     }
 
     @Test
@@ -70,8 +70,8 @@ public class ReceiverConfigValidatorTest {
         ReceiverConfigValidator.validateBeforeStart(e);
         ReceiverConfigValidator.validateRetry(e);
         assertRejected(() -> ReceiverConfigValidator.validateTransactional(e),
-                "Please configure transactionalIdPrefix — it is required whenever transactional batching is "
-                        + "switched on");
+                "'Transactional ID Prefix' (transactionalIdPrefix) must not be empty while 'Enable Transactions' "
+                        + "(enableTransactions) is on, got: ''");
     }
 
     @Test
@@ -82,8 +82,9 @@ public class ReceiverConfigValidatorTest {
         ReceiverConfigValidator.validateBeforeStart(e);
         ReceiverConfigValidator.validateTransactional(e);
         assertRejected(() -> ReceiverConfigValidator.validateRetry(e),
-                "Please set producerRetryMaxAttempts between 1 and 5 (configured value: 6). This is the total "
-                        + "number of attempts, not the number of additional ones; 1 switches the retry off.");
+                "'Send Attempts (total, 1 = off)' (producerRetryMaxAttempts) must be between 1 and 5, got: 6. "
+                        + "This is the total number of attempts, not the number of additional ones; 1 switches the "
+                        + "retry off.");
     }
 
     /**
@@ -113,16 +114,35 @@ public class ReceiverConfigValidatorTest {
     }
 
     @Test
-    public void theRetryWarningsAreLoggedUnderTheProducerCategory() throws Exception {
+    public void ineffectiveJsonSchemaValidationIsLoggedOnceAtStart() throws Exception {
+        CpiKafkaPlusEndpoint batch = endpoint();
+        batch.setProducerBatchMode("JSON_ARRAY");
+        batch.setJsonSchemaValidation(true);
+
+        String logged = capture(() -> ReceiverConfigValidator.validateBeforeStart(batch));
+
+        assertLoggedOnce(logged, "ERROR " + PRODUCER + " - [CPI-KAFKA-PLUS-DIAG] producer.config.ineffective "
+                + "parameter=jsonSchemaValidation producerBatchMode=JSON_ARRAY reason='the JSON Schema applies "
+                + "to single messages only; batches are sent without validation'");
+
+        CpiKafkaPlusEndpoint single = endpoint();
+        single.setJsonSchemaValidation(true);
+        single.setJsonSchema("{\"type\": \"object\"}");
+        Assert.assertEquals("", capture(() -> ReceiverConfigValidator.validateBeforeStart(single)));
+    }
+
+    /** ERROR, because nothing below WARN reaches the tenant trace (#255). */
+    @Test
+    public void theRetryLinesAreErrorsUnderTheProducerCategory() throws Exception {
         CpiKafkaPlusEndpoint batch = endpoint();
         batch.setProducerBatchMode("XML_LIST");
         batch.setProducerRetryMaxAttempts(3);
 
         assertLoggedOnce(capture(() -> ReceiverConfigValidator.validateRetry(batch)),
-                "WARN " + PRODUCER + " - [CPI-KAFKA-PLUS-DIAG] producerRetryMaxAttempts=3 has no effect for "
-                        + "producerBatchMode=XML_LIST without enableTransactions=true, because a partially sent "
-                        + "batch cannot be retried without duplicating records. Enable transactions to use "
-                        + "producer retry for batches.");
+                "ERROR " + PRODUCER + " - [CPI-KAFKA-PLUS-DIAG] producer.config.ineffective "
+                        + "parameter=producerRetryMaxAttempts value=3 producerBatchMode=XML_LIST reason='a partially "
+                        + "sent batch cannot be retried without duplicating records; switch on enableTransactions "
+                        + "to retry batches'");
 
         CpiKafkaPlusEndpoint singleSlot = endpoint();
         singleSlot.setProducerBatchMode("JSON_ARRAY");
@@ -133,10 +153,10 @@ public class ReceiverConfigValidatorTest {
         singleSlot.setProducerRetryTotalBudgetSeconds(900);
 
         assertLoggedOnce(capture(() -> ReceiverConfigValidator.validateRetry(singleSlot)),
-                "WARN " + PRODUCER + " - [CPI-KAFKA-PLUS-DIAG] producerRetryMaxAttempts=2 with "
-                        + "maxConcurrentTransactions=1: a retry holds the single transaction slot for its whole "
-                        + "duration (up to producerRetryTotalBudgetSeconds=900s), blocking every other send on "
-                        + "this node meanwhile. Consider raising maxConcurrentTransactions.");
+                "ERROR " + PRODUCER + " - [CPI-KAFKA-PLUS-DIAG] producer.config.ineffective "
+                        + "parameter=producerRetryMaxAttempts value=2 maxConcurrentTransactions=1 reason='a retry "
+                        + "holds the single transaction slot for up to producerRetryTotalBudgetSeconds=900s and "
+                        + "blocks every other send on this node meanwhile; raise maxConcurrentTransactions'");
     }
 
     private static CpiKafkaPlusEndpoint endpoint() {

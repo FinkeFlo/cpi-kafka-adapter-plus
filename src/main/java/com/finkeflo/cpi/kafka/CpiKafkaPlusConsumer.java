@@ -1338,7 +1338,8 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
             }
         }
         if (topics.isEmpty()) {
-            throw new IllegalArgumentException("At least one topic must be specified");
+            throw new IllegalArgumentException(UiLabels.field("topic") + " must name at least one topic, got: "
+                    + UiLabels.quote(topicString));
         }
         return topics;
     }

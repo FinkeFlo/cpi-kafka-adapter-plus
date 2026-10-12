@@ -315,6 +315,41 @@ Note when counting dead-letter records that the adapter partitions them by the o
 so a multi-partition dead-letter topic spreads them across all partitions. Reading only partition 0
 will make records look lost that are not.
 
+### A channel does not start after updating to 1.4.2
+
+1.4.2 rejects a few more settings at deployment. Every deployment error of a start check now has one
+form, `'<UI label>' (<parameter>) must …, got: <value>`, for example
+`'Max Poll Records' (maxPollRecords) must be at least 1, got: 0`. A text value is quoted, so an empty
+value or spaces around it show.
+
+* **Receiver:** a *Transactional ID Prefix* that makes the `transactional.id` of the last transaction slot
+  longer than 249 characters. 1.4.1 checked the first slot only, whose id is one character shorter from
+  11 *Max Concurrent Transactions* on, so this check can stop a channel that deployed before. Shorten the
+  prefix by the number of characters the message gives.
+* **Receiver:** *Max Request Size (KB)* or *Buffer Memory (KB)* below 1, a negative
+  *Producer Batch Size (KB)*, or, with *Enable Schema Registry* and *Serialize Values as Avro* on, a
+  *Schema Registry URL* that does not start with `http://` or `https://`.
+* **Sender:** a *Dead Letter Topic* that Kafka refuses as a topic name: Kafka takes 1 to 249 characters
+  from `a-z`, `A-Z`, `0-9`, `.`, `_` and `-`, but not `.` or `..` alone. With *Enable Schema Registry*
+  and *Deserialize Values as Avro* on, a *Schema Registry URL* that does not start with `http://` or
+  `https://`.
+* **Both:** a *Bootstrap Servers* entry that Kafka cannot read as `host:port`, such as `broker1` or
+  `b1:9092;b2:9092`, or whose port is above 65535, and, with a SASL *Security Protocol*, a
+  *SASL Mechanism* other than `PLAIN`, `SCRAM-SHA-256` or `SCRAM-SHA-512`.
+
+Apart from the *Transactional ID Prefix*, these values never worked: each failed at the first poll, send,
+dead letter or Schema Registry call instead. A sender with such a *Dead Letter Topic* may still have run
+without a problem, because only its first dead letter fails, and that record then blocks its partition
+(see [When the DLQ Write Fails](features/dead-letter-queue.md#when-the-dlq-write-fails)). Fix the value and
+redeploy.
+
+1.4.2 also deploys a few values that failed before. Spaces around a number, a switch, a credential alias,
+the *Bootstrap Servers* or the *Schema Registry URL* are removed, an empty entry in *Bootstrap Servers*,
+such as after a trailing comma, is dropped, and *Auto Offset Reset*, *Compression Type* and
+*Acknowledgments* take Kafka's keywords in any letter case, such as `LATEST`, `GZIP` or `ALL`. The
+*Consumer Group ID* and the *Transactional ID Prefix* keep their spaces: they identify the channel to
+Kafka.
+
 ### A channel does not start after updating to 1.4.1
 
 1.4.1 rejects settings that could never work at deployment instead of failing at every poll or send. The
@@ -327,7 +362,8 @@ deployment error names the field.
 * **Receiver:** an unknown *Batch Send Mode*, *Delivery Timeout (Seconds)* below 1, or a
   *Subject Name Strategy* other than `TopicNameStrategy` with Avro serialization.
 * **Both:** empty *Bootstrap Servers*, or a *JSON Schema* that is not valid JSON while
-  *Enable JSON Schema Validation* is on.
+  *Enable JSON Schema Validation* is on (on the receiver from 1.4.2 on with *Batch Send Mode* `NONE`
+  only, the one mode that validates).
 
 The message gives the UI label and the parameter name, e.g. `'Batch Send Mode' (producerBatchMode)`.
 
@@ -424,6 +460,51 @@ work; only the MPL enrichment is lost.
 Initialisation failed. `bootstrapServers` and `securityProtocol` are in the line, and the serialised
 cause chain usually names the problem directly — a rejected credential, a TLS handshake failure, or
 an unreachable broker.
+
+A SASL credential with a line break is refused before the client is built: the cause names the alias,
+e.g. `The password stored under 'Credential Alias' (credentialAlias) 'my-kafka-user' contains a line
+break`, never the value. The sender
+reports the same in `consumer.init.failed`, the DLQ producer in `dlq.producer.init.failed`. See
+[Authentication](security/authentication.md#cpi-secure-store).
+
+### `producer.config.ineffective`
+
+A receiver setting that has no effect, or not the one intended, with the rest of the configuration. It
+is logged once at deployment, as ERROR so that it reaches the tenant trace, and the channel starts all
+the same. `parameter` names the setting and `reason` says why:
+
+* `enableTransactions` with *Batch Send Mode* `NONE`: transactions apply to batches only.
+* `jsonSchemaValidation` with *Batch Send Mode* `JSON_ARRAY` or `XML_LIST`: the JSON Schema applies to
+  single messages only. A batch is sent without validation, and the schema is neither checked at
+  deployment nor compiled.
+* `producerRetryMaxAttempts` above 1 with *Batch Send Mode* `JSON_ARRAY` or `XML_LIST` and
+  *Enable Transactions* off: a partially sent batch cannot be retried without duplicating records, so
+  batches are not retried.
+* `producerRetryMaxAttempts` above 1 with transactional batching and 1 *Max Concurrent Transactions*:
+  a retry holds the only transaction slot for up to *Total Retry Budget (Seconds)* and blocks every
+  other send on the node meanwhile.
+* `securityProtocol` empty, as an externalized value can be: the Kafka client connects with `PLAINTEXT`,
+  without TLS and without authentication, which works against a `PLAINTEXT` listener only. Up to 1.4.1
+  this was not logged.
+
+Up to 1.4.1 the two retry lines were WARN, which does not reach the tenant trace. Change the setting
+if the line should go away.
+
+### `consumer.config.ineffective` and `consumer.config.clamped`
+
+A sender setting the adapter replaces with a working value. It is logged once at deployment, as ERROR,
+and the channel starts all the same:
+
+* `consumer.config.ineffective parameter=batchOutputFormat`: an unknown *Batch Output Format*; batches
+  are formatted as `JSON_ARRAY`.
+* `consumer.config.ineffective parameter=avroOutputFormat`: an unknown *Avro Output Format*; Avro
+  records are converted to JSON.
+* `consumer.config.ineffective parameter=securityProtocol value=''`: an empty *Security Protocol*, as an
+  externalized value can be; the Kafka client connects with `PLAINTEXT`, without TLS and without
+  authentication, which works against a `PLAINTEXT` listener only. Up to 1.4.1 this was not logged.
+* `consumer.config.clamped`: with **Auto-Pause on Errors**, a *Consecutive Error Threshold* or an
+  *Initial Pause Duration (sec)* below 1 is used as 1, and an *Initial Pause Duration (sec)* above 900
+  as 900, the longest pause there is. Up to 1.4.1 a value above 900 was cut without a line.
 
 ### `producer.metadata.prewarm outcome=FAILED`
 

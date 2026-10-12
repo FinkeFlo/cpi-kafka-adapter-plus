@@ -23,8 +23,11 @@ package com.finkeflo.cpi.kafka;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 
 import org.apache.camel.impl.DefaultCamelContext;
+import org.apache.kafka.common.errors.InvalidTopicException;
+import org.apache.kafka.common.internals.Topic;
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
@@ -55,9 +58,22 @@ public class ConsumerStartChecksTest {
         CpiKafkaPlusEndpoint endpoint = endpoint();
         endpoint.setErrorHandling("DROP");
 
-        String message = startFailure(endpoint);
+        assertRejected(endpoint, "errorHandling", "Error Handling");
+    }
 
-        Assert.assertTrue(message, message.contains("errorHandling"));
+    @Test
+    public void errorHandlingIsIgnoredWhileTheDlqIsOn() throws Exception {
+        // Hidden with a DLQ and never used then; an externalized stale value must not block (#264).
+        CpiKafkaPlusEndpoint unknown = endpoint();
+        unknown.setDlqEnabled(true);
+        unknown.setDlqTopic("orders-dlq");
+        unknown.setErrorHandling("DROP");
+        assertStarts(unknown);
+        CpiKafkaPlusEndpoint missing = endpoint();
+        missing.setDlqEnabled(true);
+        missing.setDlqTopic("orders-dlq");
+        missing.setErrorHandling(null);
+        assertStarts(missing);
     }
 
     @Test
@@ -116,11 +132,12 @@ public class ConsumerStartChecksTest {
         assertRejected(group, "groupId", "Consumer Group ID");
         CpiKafkaPlusEndpoint mode = endpoint();
         mode.setConsumptionMode(null);
-        Assert.assertEquals("consumptionMode must be SCHEDULED or STREAMING, got: null", startFailure(mode));
+        Assert.assertEquals("'Consumption Mode' (consumptionMode) must be SCHEDULED or STREAMING, got: ''",
+                startFailure(mode));
         CpiKafkaPlusEndpoint handling = endpoint();
         handling.setErrorHandling(null);
-        Assert.assertEquals("errorHandling must be RETRY (Retry Failed Message) or SKIP (Skip Failed Message), "
-                + "got: null", startFailure(handling));
+        Assert.assertEquals("'Error Handling' (errorHandling) must be RETRY (Retry Failed Message) or SKIP "
+                + "(Skip Failed Message), got: ''", startFailure(handling));
     }
 
     @Test
@@ -190,7 +207,7 @@ public class ConsumerStartChecksTest {
         withDlq.setDlqEnabled(true);
         withDlq.setDlqTopic("orders-dlq");
         withDlq.setDlqMaxRetries(-1);
-        assertRejected(withDlq, "dlqMaxRetries", "Max Retries before DLQ");
+        assertRejected(withDlq, "dlqMaxRetries", "Retries before DLQ (additional attempts)");
         CpiKafkaPlusEndpoint withoutDlq = endpoint();
         withoutDlq.setDlqMaxRetries(-1);
         assertStarts(withoutDlq);
@@ -211,8 +228,78 @@ public class ConsumerStartChecksTest {
         e.setDlqEnabled(true);
         e.setDlqTopic(" orders-dlq ");
         String message = startFailure(e);
-        Assert.assertTrue(message, message.contains("whitespace"));
+        Assert.assertTrue(message, message.contains("must not start or end with a space, got: ' orders-dlq '"));
         Assert.assertTrue(message, message.contains("'Dead Letter Topic'"));
+    }
+
+    @Test
+    public void aDlqTopicKafkaRefusesIsRejected() throws Exception {
+        // Each deployed and failed at the first dead letter, when the record had nowhere else to go (#261).
+        for (String value : new String[] {"orders dlq", "orders/dlq", "orders:dlq", "orders-dlq-ä", ".", "..",
+                repeat('x', 250)}) {
+            CpiKafkaPlusEndpoint e = endpoint();
+            e.setDlqEnabled(true);
+            e.setDlqTopic(value);
+            String message = startFailure(e);
+            Assert.assertTrue(message, message.startsWith("'Dead Letter Topic' (dlqTopic) must be a valid Kafka "
+                    + "topic name, got: '" + value + "'"));
+        }
+    }
+
+    @Test
+    public void theDlqTopicCheckAgreesWithKafka() throws Exception {
+        for (String value : new String[] {"orders-dlq", "orders.dlq", "orders_dlq", "ORDERS-DLQ", "a", "...",
+                repeat('x', 249), repeat('x', 250), "orders dlq", ".", "..", "orders/dlq", "orders:dlq", "orders-ä"}) {
+            boolean kafkaTakesIt;
+            try {
+                Topic.validate(value);
+                kafkaTakesIt = true;
+            } catch (InvalidTopicException e) {
+                kafkaTakesIt = false;
+            }
+            CpiKafkaPlusEndpoint e = endpoint();
+            e.setDlqEnabled(true);
+            e.setDlqTopic(value);
+            CpiKafkaPlusConsumer consumer = new CpiKafkaPlusConsumer(e, exchange -> { });
+            boolean starts;
+            try {
+                consumer.doStart();
+                starts = true;
+            } catch (IllegalArgumentException rejected) {
+                starts = false;
+            } finally {
+                consumer.doStop();
+            }
+            Assert.assertEquals(value, kafkaTakesIt, starts);
+        }
+    }
+
+    @Test
+    public void aSchemaRegistryUrlWithoutHttpIsRejectedWithAvroDeserialization() throws Exception {
+        CpiKafkaPlusEndpoint e = endpoint();
+        e.setSchemaRegistryEnabled(true);
+        e.setSchemaRegistryUrl("sr.example.com:8081");
+        assertRejected(e, "schemaRegistryUrl", "Schema Registry URL");
+
+        CpiKafkaPlusEndpoint off = endpoint();
+        off.setSchemaRegistryEnabled(true);
+        off.setSchemaRegistryUrl("sr.example.com:8081");
+        off.setAvroValueDeserialization(false);
+        assertStarts(off);
+
+        CpiKafkaPlusEndpoint upperCase = endpoint();
+        upperCase.setSchemaRegistryEnabled(true);
+        upperCase.setSchemaRegistryUrl("HTTPS://sr:8081");
+        assertStarts(upperCase);
+    }
+
+    @Test
+    public void bootstrapServersKafkaCannotReadAreRejected() throws Exception {
+        CpiKafkaPlusEndpoint e = endpoint();
+        e.setBootstrapServers("broker1");
+        String message = startFailure(e);
+        Assert.assertEquals("'Bootstrap Servers' (bootstrapServers) must be a comma-separated list of host:port "
+                + "addresses, got: 'broker1'. Kafka cannot read 'broker1' as host:port.", message);
     }
 
     @Test
@@ -328,6 +415,12 @@ public class ConsumerStartChecksTest {
 
     private interface ThrowingRunnable {
         void run() throws Exception;
+    }
+
+    private static String repeat(char c, int count) {
+        char[] chars = new char[count];
+        Arrays.fill(chars, c);
+        return new String(chars);
     }
 
     private static String capture(ThrowingRunnable action) throws Exception {

@@ -9,7 +9,7 @@ When **JSON Schema Validation** (`jsonSchemaValidation`) is enabled, every messa
 | Direction | Invalid message | `jsonSchemaReportError=true` adds |
 |-----------|-----------------|-----------------------------------|
 | Sender (consumer) | Never reaches the IFlow. With a DLQ it is written there; without one it is discarded and its offset committed. **Error Handling** (Retry / Skip) does not apply, because an invalid message stays invalid. Without the flag, only a WARN log line is written, which does not reach the tenant trace in production — the message disappears without a visible trace. | A failed MPL entry with the validation error, visible in CPI monitoring; the payload is added to its trace if trace is active. |
-| Receiver (producer) | Always fails the exchange; the message is not sent. Validation applies to **Batch Send Mode** `NONE` only — with `JSON_ARRAY` or `XML_LIST` it is skipped and a warning is logged. | The rejected payload in the MPL trace, if trace is active for the integration flow. The exchange fails either way. |
+| Receiver (producer) | Always fails the exchange; the message is not sent. Validation applies to **Batch Send Mode** `NONE` only — with `JSON_ARRAY` or `XML_LIST` a batch is sent without validation, the schema is neither checked at deployment nor compiled, and the deployment logs `producer.config.ineffective` once. | The rejected payload in the MPL trace, if trace is active for the integration flow. The exchange fails either way. |
 
 ## Configuration
 

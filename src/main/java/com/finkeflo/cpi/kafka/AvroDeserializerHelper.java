@@ -55,7 +55,7 @@ public class AvroDeserializerHelper implements Closeable {
     public AvroDeserializerHelper(CpiKafkaPlusEndpoint endpoint) {
         CredentialHelper.UserCredentials creds = CredentialHelper.requireUserCredential(
                 endpoint.getSchemaRegistryCredentialAlias(),
-                "'Schema Registry Credential Alias' (schemaRegistryCredentialAlias)");
+                UiLabels.field("schemaRegistryCredentialAlias"));
 
         String username = creds != null ? creds.username() : null;
         String password = creds != null ? creds.password() : null;

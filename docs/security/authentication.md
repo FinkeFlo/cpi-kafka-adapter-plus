@@ -49,6 +49,11 @@ For Kafka clusters using SCRAM authentication:
 
 Supported SCRAM mechanisms: `SCRAM-SHA-256` and `SCRAM-SHA-512`.
 
+The mechanism may be written in any letter case. With a SASL `securityProtocol`, any other mechanism,
+such as an externalized `OAUTHBEARER`, fails the deployment with
+`'SASL Mechanism' (saslMechanism) must be PLAIN, SCRAM-SHA-256 or SCRAM-SHA-512 …, got: 'OAUTHBEARER'`.
+Up to 1.4.1 such a channel deployed with the PLAIN login and failed at the first connect.
+
 !!! note "Kerberos / GSSAPI is not supported"
     Only `PLAIN`, `SCRAM-SHA-256` and `SCRAM-SHA-512` are supported. SASL/GSSAPI
     (Kerberos) is intentionally **not** available: CPI's OSGi runtime does not export
@@ -102,6 +107,19 @@ All credentials are managed through the SAP CPI Secure Store:
 - **Keystore entries**: Private keys/certificates and trusted CA certificates for SSL/TLS
 
 Credential artifacts are referenced by their **alias** in the adapter configuration. The adapter resolves them at runtime via the `ITApiFactory`.
+
+The user name and the password of a SASL credential (*Credential Alias*, *DLQ SASL Credential Alias*) must not
+contain a line break (CR or LF): it would end the value in the Kafka client's JAAS configuration. The adapter
+refuses such a credential before the Kafka client sees it, and the error names the alias, never the value:
+
+```
+The password stored under 'Credential Alias' (credentialAlias) 'my-kafka-user' contains a line break, which the
+Kafka client's JAAS configuration cannot take. Please store the credential without it.
+```
+
+The sender reports it in `consumer.init.failed`, the DLQ producer in `dlq.producer.init.failed`, and the receiver
+fails every message with it. Store the credential again without the line break, which is often copied along with
+the secret. Any other character, a tab included, reaches the Kafka client unchanged.
 
 ## Troubleshooting: "Topic not present in metadata"
 

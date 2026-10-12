@@ -25,6 +25,7 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
+import java.net.MalformedURLException;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
@@ -320,6 +321,68 @@ final class SchemaRegistryHttpClient {
     // -----------------------------------------------------------------------
     // Utilities
     // -----------------------------------------------------------------------
+
+    /**
+     * Rejects a registry URL that no request can be sent to (#261). Every request URL is built from it
+     * as {@link #openConnection} builds it, and only http and https connect. The value in the message
+     * is masked by {@link #maskedForRejection}: the URL may carry credentials. An empty URL is left to
+     * {@link CpiKafkaPlusEndpoint#validateConfiguration()}, which rejects it while the registry is on.
+     */
+    static void requireUsableUrl(String url) {
+        if (url == null || url.trim().isEmpty()) {
+            return;
+        }
+        String protocol;
+        try {
+            protocol = new URL(normalizeUrl(url) + "/subjects").getProtocol();
+        } catch (MalformedURLException e) {
+            protocol = null;
+        }
+        if (!"http".equals(protocol) && !"https".equals(protocol)) {
+            // The parser's own message is not added: it can quote a part of a password.
+            boolean httpScheme = normalizeUrl(url).toLowerCase(java.util.Locale.ROOT).matches("https?://.*");
+            throw new IllegalArgumentException(UiLabels.field("schemaRegistryUrl")
+                    + " must be an http or https URL, got: " + UiLabels.quote(maskedForRejection(url))
+                    + (httpScheme ? ". Its host or port cannot be read."
+                            : ". Please start it with https:// or http://."));
+        }
+    }
+
+    /**
+     * A refused URL for the message of the rejection. It does not parse, so its parts cannot be told
+     * apart reliably: everything up to the last {@code @} may be user info, a password with {@code /}
+     * or {@code @} included, and a query or fragment may carry a key. All of that becomes {@code ***}.
+     * Where a {@code ?} or {@code #} comes before the last {@code @}, either may hold the secret, and
+     * nothing after the scheme is shown.
+     */
+    static String maskedForRejection(String url) {
+        java.util.regex.Matcher scheme = SCHEME.matcher(url);
+        int start = scheme.lookingAt() ? scheme.end() : 0;
+        String rest = url.substring(start);
+        int at = rest.lastIndexOf('@');
+        int query = firstQueryOrFragment(rest);
+        if (query >= 0 && query < at) {
+            rest = "***";
+        } else {
+            if (at >= 0) {
+                rest = "***" + rest.substring(at);
+            }
+            query = firstQueryOrFragment(rest);
+            if (query >= 0) {
+                rest = rest.substring(0, query + 1) + "***";
+            }
+        }
+        return url.substring(0, start) + rest;
+    }
+
+    private static int firstQueryOrFragment(String s) {
+        int query = s.indexOf('?');
+        int fragment = s.indexOf('#');
+        return query < 0 ? fragment : fragment < 0 ? query : Math.min(query, fragment);
+    }
+
+    private static final java.util.regex.Pattern SCHEME =
+            java.util.regex.Pattern.compile("[A-Za-z][A-Za-z0-9+.-]*://");
 
     /**
      * The URL with any {@code user:password@} replaced by {@code ***@}, for log lines. A Schema

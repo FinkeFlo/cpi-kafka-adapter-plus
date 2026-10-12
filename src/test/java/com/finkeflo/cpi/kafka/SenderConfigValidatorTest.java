@@ -63,7 +63,7 @@ public class SenderConfigValidatorTest {
         e.setRetryDelaySeconds(500);
 
         String logged = capture(() -> assertRejected(() -> SenderConfigValidator.validate(e),
-                "retryDelaySeconds must be between 0 and 300, got: 500"));
+                "'Retry Delay (Seconds)' (retryDelaySeconds) must be between 0 and 300, got: 500"));
 
         assertLoggedOnce(logged, AVRO_FALLBACK);
     }
@@ -72,11 +72,31 @@ public class SenderConfigValidatorTest {
     public void aDlqWithoutATopicIsRejected() {
         CpiKafkaPlusEndpoint e = endpoint();
         e.setDlqEnabled(true);
-        for (String missing : new String[] {null, " "}) {
-            e.setDlqTopic(missing);
-            assertRejected(() -> SenderConfigValidator.validate(e),
-                    "DLQ is enabled but no DLQ topic is configured. Please set the 'dlqTopic' property.");
-        }
+        e.setDlqTopic(null);
+        assertRejected(() -> SenderConfigValidator.validate(e), "'Dead Letter Topic' (dlqTopic) must not be empty "
+                + "while 'Enable Dead Letter Queue' (dlqEnabled) is on, got: ''");
+        e.setDlqTopic(" ");
+        assertRejected(() -> SenderConfigValidator.validate(e), "'Dead Letter Topic' (dlqTopic) must not be empty "
+                + "while 'Enable Dead Letter Queue' (dlqEnabled) is on, got: ' '");
+    }
+
+    /** Every pause is capped at 900 s; a longer configured one used to be cut without a word (#255). */
+    @Test
+    public void aCooldownAboveTheCapIsLoggedAsClamped() throws Exception {
+        CpiKafkaPlusEndpoint e = endpoint();
+        e.setAutoPauseEnabled(true);
+        e.setAutoPauseCooldownSeconds(3600);
+
+        assertLoggedOnce(capture(() -> SenderConfigValidator.validate(e)), "ERROR " + CONSUMER
+                + " - [CPI-KAFKA-PLUS-DIAG] consumer.config.clamped autoPauseCooldownSeconds=3600 "
+                + "reason='values above 900 are used as 900'");
+
+        e.setAutoPauseCooldownSeconds(900);
+        Assert.assertEquals("", capture(() -> SenderConfigValidator.validate(e)));
+
+        e.setAutoPauseCooldownSeconds(3600);
+        e.setAutoPauseEnabled(false);
+        Assert.assertEquals("", capture(() -> SenderConfigValidator.validate(e)));
     }
 
     /** STREAMING ignores the drain fields and the polling interval, so stale values must not block it. */
@@ -91,8 +111,9 @@ public class SenderConfigValidatorTest {
         SenderConfigValidator.validate(e);
 
         e.setConsumptionMode("SCHEDULED");
-        assertRejected(() -> SenderConfigValidator.validate(e), "Drain mode requires commitStrategy=BATCH_COMPLETE. "
-                + "AUTO commit cannot guarantee at-least-once delivery during drain loops.");
+        assertRejected(() -> SenderConfigValidator.validate(e), "'Offset Commit Strategy' (commitStrategy) must be "
+                + "BATCH_COMPLETE while 'Drain Backlog' (drainEnabled) is on, got: 'AUTO'. AUTO commit cannot "
+                + "guarantee at-least-once delivery during drain loops.");
     }
 
     @Test(expected = IllegalArgumentException.class)

@@ -11,7 +11,7 @@ When working with Avro-encoded Kafka topics, the adapter can automatically deser
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `schemaRegistryEnabled` | `false` | Enable Schema Registry integration |
-| `schemaRegistryUrl` | — | Confluent Schema Registry URL |
+| `schemaRegistryUrl` | — | Confluent Schema Registry URL, starting with `http://` or `https://`. Any other URL, such as `sr.example.com:8081`, fails the deployment while the channel uses Avro. |
 | `schemaRegistryCredentialAlias` | — | Credential alias for Schema Registry authentication (from CPI Secure Store) |
 | `autoRegisterSchemas` | `false` | Automatically register schemas when producing |
 | `subjectNameStrategy` | `TopicNameStrategy` | Subject naming strategy for Producer (Receiver) serialization |
@@ -67,7 +67,7 @@ To produce Avro-encoded messages:
 | `RecordNameStrategy` | Not supported for serialization | — | Requires the record schema name, which is only known after fetching the schema |
 | `TopicRecordNameStrategy` | Not supported for serialization | — | Requires the record schema name, which is only known after fetching the schema |
 
-A receiver channel with Avro serialization and a strategy other than `TopicNameStrategy` does not start.
+A receiver channel with Avro serialization and a strategy other than `TopicNameStrategy` does not start. The name is compared in any letter case, at deployment and for every message, so `topicnamestrategy` works as well.
 
 ## Authentication
 
