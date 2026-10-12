@@ -137,11 +137,11 @@
                 </GuiLabels>
                 <AttributeReference>
                     <ReferenceName>autoOffsetReset</ReferenceName>
-                    <description>What to do when no committed offset exists for the consumer group. 'Latest' skips existing messages and only reads new ones. 'Earliest' reads all available messages from the beginning.</description>
+                    <description>What to do when the consumer group has no valid committed offset. 'Latest' skips existing messages and only reads new ones. 'Earliest' reads all available messages from the beginning. This applies for example on the first deployment with a new Consumer Group ID, after the broker deleted the group's offsets (by default once the group has had no active consumer for 7 days), and when the committed offset no longer exists because the topic's retention deleted those messages. With 'Latest', messages written before that point are never read.</description>
                 </AttributeReference>
                 <AttributeReference>
                     <ReferenceName>commitStrategy</ReferenceName>
-                    <description>When to commit offsets back to Kafka. 'After Successful Processing' ensures at-least-once delivery (recommended). 'Auto Commit' commits periodically regardless of processing success.</description>
+                    <description>When to commit offsets back to Kafka. 'After Successful Processing' ensures at-least-once delivery (recommended). 'Auto Commit' lets the Kafka client commit the consumer position periodically instead: records that were polled but not processed yet can be committed and lost, for example when the integration flow is stopped while a long-running IFlow call is still in progress. Not allowed together with 'Drain Backlog': the deployment fails.</description>
                 </AttributeReference>
             </AttributeGroup>
             <AttributeGroup id="pollingConfig">
@@ -206,7 +206,7 @@
                 </GuiLabels>
                 <AttributeReference>
                     <ReferenceName>drainEnabled</ReferenceName>
-                    <description>Enable drain mode: after each poll cycle, continue polling until the topic is empty or the drain limit is reached. Recommended for topics with peak loads (e.g. month-end processing). Ignored when 'Consumption Mode' is Streaming (greedy scheduling already consumes continuously).</description>
+                    <description>Enable drain mode: after each poll cycle, continue polling until the topic is empty or the drain limit is reached. Recommended for topics with peak loads (e.g. month-end processing). Ignored when 'Consumption Mode' is Streaming (greedy scheduling already consumes continuously). Requires Offset Commit Strategy 'After Successful Processing (At-Least-Once)'.</description>
                     <EditCondition>
                         <AttributeName>consumptionMode</AttributeName>
                         <AttributeValue>SCHEDULED</AttributeValue>
@@ -262,11 +262,11 @@
                 </GuiLabels>
                 <AttributeReference>
                     <ReferenceName>batchMode</ReferenceName>
-                    <description>Enable batch mode to process multiple Kafka records in a single IFlow execution. Improves throughput for high-volume topics. Disable for single-message processing.</description>
+                    <description>When enabled (default), the IFlow receives an envelope with up to 'Max Records per IFlow Run (MPL)' records of one partition – {"kafkaRecords":{"record":[{"key":…,"value":…,"topic":…,"partition":…,"offset":…,"timestamp":…}]}} or the XML equivalent – not the original message body. Disable to receive each Kafka message in its own IFlow run, with the message value as the body.</description>
                 </AttributeReference>
                 <AttributeReference>
                     <ReferenceName>batchSize</ReferenceName>
-                    <description>Maximum number of Kafka records grouped into a single IFlow execution (one MPL per batch). The adapter collects up to this many records before triggering the IFlow. Default: 100.</description>
+                    <description>Maximum number of records of one partition from one poll passed to a single IFlow run (one MPL per batch). Batches never span partitions or polls, so the effective size is also limited by 'Max Poll Records': a value above it has no effect. Default: 100.</description>
                     <ErrorMessage>Please enter a positive number for batch size (e.g. 100)</ErrorMessage>
                     <EditCondition>
                         <AttributeName>batchMode</AttributeName>
@@ -275,7 +275,7 @@
                 </AttributeReference>
                 <AttributeReference>
                     <ReferenceName>batchOutputFormat</ReferenceName>
-                    <description>Output format for batched records. JSON Array: [{"key":"...","value":"..."},...]. XML List: wraps records in XML elements.</description>
+                    <description>Output format for batched records. JSON Array: {"kafkaRecords":{"record":[{"key":…,"value":…,"topic":"…","partition":0,"offset":0,"timestamp":0}]}} – key and value are embedded as JSON when they are one JSON document, otherwise as a string. XML List: &lt;kafkaRecords count="n"&gt;&lt;record&gt;…&lt;/record&gt;&lt;/kafkaRecords&gt;, each record with the elements key, value, topic, partition, offset and timestamp; a value that is XML is embedded (format="xml"), any other value is text (format="text").</description>
                     <EditCondition>
                         <AttributeName>batchMode</AttributeName>
                         <AttributeValue>true</AttributeValue>
@@ -607,7 +607,7 @@
         <GuiLabels guid="b1000003-0000-0000-0000-000000000003"><Label language="EN">Offset Commit Strategy</Label></GuiLabels>
         <FixedValues>
             <FixedValue><Value>BATCH_COMPLETE</Value><GuiLabels guid="b1000003-0000-0000-0000-000000000031"><Label language="EN">After Successful Processing (At-Least-Once)</Label></GuiLabels></FixedValue>
-            <FixedValue><Value>AUTO</Value><GuiLabels guid="b1000003-0000-0000-0000-000000000032"><Label language="EN">Auto Commit (Periodic)</Label></GuiLabels></FixedValue>
+            <FixedValue><Value>AUTO</Value><GuiLabels guid="b1000003-0000-0000-0000-000000000032"><Label language="EN">Auto Commit (Periodic, may lose messages)</Label></GuiLabels></FixedValue>
         </FixedValues>
     </AttributeMetadata>
     <AttributeMetadata>

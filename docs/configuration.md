@@ -37,8 +37,8 @@ For detailed security setup, see [Authentication](security/authentication.md).
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `autoOffsetReset` | `latest` | Auto offset reset: `earliest` or `latest`. |
-| `commitStrategy` | `BATCH_COMPLETE` | Offset commit strategy: `AUTO`, `BATCH_COMPLETE`. |
+| `autoOffsetReset` | `latest` | Where to start when the consumer group has no valid committed offset: `earliest` reads all available messages, `latest` only new ones. This applies for example on the first deployment with a new `groupId`, after the broker deleted the group's offsets (by default once the group has had no active consumer for 7 days, broker setting `offsets.retention.minutes`) and when the committed offset no longer exists because the topic's retention deleted those messages. With `latest`, messages written before that point are never read. |
+| `commitStrategy` | `BATCH_COMPLETE` | Offset commit strategy. `BATCH_COMPLETE` (UI: "After Successful Processing (At-Least-Once)") commits only records that were processed, dead-lettered or deliberately skipped. `AUTO` (UI: "Auto Commit (Periodic, may lose messages)") lets the Kafka client commit the consumer position periodically instead: records that were polled but not processed yet can be committed and lost, for example when the integration flow is stopped while a long-running IFlow call is still in progress. `AUTO` cannot be combined with `drainEnabled`: the channel does not start. |
 
 **Polling**
 
@@ -62,7 +62,7 @@ For detailed security setup, see [Authentication](security/authentication.md).
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `drainEnabled` | `false` | Poll repeatedly until the topic is empty. Ignored when `consumptionMode=STREAMING`. |
+| `drainEnabled` | `false` | Poll repeatedly until the topic is empty. Ignored when `consumptionMode=STREAMING`. Requires `commitStrategy=BATCH_COMPLETE`; with `AUTO` the channel does not start. |
 | `minBacklogToDrain` | `0` | Minimum records in an extra drain poll required to continue draining; `0` drains until empty. |
 
 ### Message Handling
@@ -81,9 +81,9 @@ For more details, see [JSON Schema Validation](features/json-schema-validation.m
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `batchMode` | `true` | Enable batch mode: multiple records per iFlow execution (one MPL entry per batch). |
-| `batchSize` | `100` | Maximum records per batch (UI label: "Max Records per IFlow Run (MPL)"). |
-| `batchOutputFormat` | `JSON_ARRAY` | Batch output format: `JSON_ARRAY`, `XML_LIST`. (`SPLIT_EXCHANGES` accepted at runtime for backward compatibility but removed from the UI as of 1.2.0.) |
+| `batchMode` | `true` | When `true`, the iFlow receives an envelope with up to `batchSize` records of one partition, `{"kafkaRecords":{"record":[…]}}` or the XML equivalent (see `batchOutputFormat`), not the original message body; one MPL entry per batch. When `false`, every Kafka message is its own iFlow execution with the message value as the body. |
+| `batchSize` | `100` | Maximum number of records of one partition from one poll per iFlow execution (UI label: "Max Records per IFlow Run (MPL)"). Batches never span partitions or polls, so a value above `maxPollRecords` has no effect. |
+| `batchOutputFormat` | `JSON_ARRAY` | Batch output format: `JSON_ARRAY` (`{"kafkaRecords":{"record":[{"key":…,"value":…,"topic":…,"partition":…,"offset":…,"timestamp":…}]}}`), `XML_LIST` (`<kafkaRecords count="n"><record>…</record></kafkaRecords>`). (`SPLIT_EXCHANGES` accepted at runtime for backward compatibility but removed from the UI as of 1.2.0.) |
 
 In `XML_LIST` mode, each `<value>` element carries a `format` attribute (`"xml"` for directly embedded XML, `"text"` for text/CDATA content). Values that look like XML are always auto-detected and embedded; there is no configuration option for this. See [Batch Processing](features/batch-processing.md) for details.
 

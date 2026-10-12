@@ -75,9 +75,11 @@ a record that has not been processed, dead-lettered or deliberately skipped — 
 write fails is retried, and so is a record during which the adapter itself failed. See
 [Error Handling Without DLQ](features/dead-letter-queue.md#error-handling-without-dlq).
 
-With **Auto Commit (Periodic)** (`AUTO`), Kafka commits offsets in the background on a
-timer regardless of whether processing succeeded. This is not recommended for
-production-critical scenarios.
+With **Auto Commit (Periodic, may lose messages)** (`AUTO`), the Kafka client commits the
+consumer position periodically instead of the adapter committing after each record or batch.
+Records that were polled but not processed yet can be committed and lost, for example when the
+integration flow is stopped while a long-running IFlow call is still in progress. This is not
+recommended for production-critical scenarios, and it cannot be combined with **Drain Backlog**.
 
 ### What happens when a rebalance occurs during processing?
 

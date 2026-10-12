@@ -525,7 +525,7 @@
         <GuiLabels guid="b1000003-0000-0000-0000-000000000003"><Label language="EN">Offset Commit Strategy</Label></GuiLabels>
         <FixedValues>
             <FixedValue><Value>BATCH_COMPLETE</Value><GuiLabels guid="b1000003-0000-0000-0000-000000000031"><Label language="EN">After Successful Processing (At-Least-Once)</Label></GuiLabels></FixedValue>
-            <FixedValue><Value>AUTO</Value><GuiLabels guid="b1000003-0000-0000-0000-000000000032"><Label language="EN">Auto Commit (Periodic)</Label></GuiLabels></FixedValue>
+            <FixedValue><Value>AUTO</Value><GuiLabels guid="b1000003-0000-0000-0000-000000000032"><Label language="EN">Auto Commit (Periodic, may lose messages)</Label></GuiLabels></FixedValue>
         </FixedValues>
     </AttributeMetadata>
     <!-- Batch (Sender) -->
