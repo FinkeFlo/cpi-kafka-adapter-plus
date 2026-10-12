@@ -91,6 +91,16 @@ Rationale:
   - `snappy-java`, `lz4-java`, `zstd-jni` — contain native libraries
   - `avro`, `jackson-*`, `json-schema-validator` — have ServiceLoader entries
 
+- **Correction (2026-10-12, #249):** bnd only takes the packages named in
+  `Private-Package` from `target/classes`. The other unpacked files of
+  `kafka-clients` never reached the bundle: its `META-INF/services` entry
+  (`ConfigProvider`, which the adapter does not use), its `LICENSE` and `NOTICE`,
+  and `kafka/kafka-version.properties`. Without the version file Kafka logged a
+  WARN once per class space and reported its client version as `unknown`, in its
+  own log lines and to the broker (KIP-511). Since #249 the bundle names the
+  version file and Kafka's `LICENSE` and `NOTICE` (under `META-INF/kafka-clients/`)
+  in `Include-Resource`; `META-INF/services` is still not shipped.
+
 - ESA size reduces by approximately 2–3 MB (~17 MB → ~14–15 MB).
   Prerequisite: ADR 0002 (remove Confluent client) is implemented first,
   as its ~4 MB saving establishes the ~17 MB baseline.

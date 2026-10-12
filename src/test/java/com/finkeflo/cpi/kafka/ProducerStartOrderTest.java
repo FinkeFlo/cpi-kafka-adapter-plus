@@ -140,8 +140,9 @@ public class ProducerStartOrderTest {
                 + "characters, and the adapter allows at most 249\\. Please shorten the prefix by at least \\d+ "
                 + "characters?\\."));
         e.setTransactionalIdPrefix("orders-tx");
-        assertRejected(e, "'Max Send Attempts' (producerRetryMaxAttempts) must be between 1 and 5, got: 6. This "
-                + "is the total number of attempts, not the number of additional ones; 1 switches the retry off.");
+        assertRejected(e, "'Send Attempts (total, 1 = off)' (producerRetryMaxAttempts) must be between 1 and 5, "
+                + "got: 6. This is the total number of attempts, not the number of additional ones; 1 switches the "
+                + "retry off.");
         e.setProducerRetryMaxAttempts(2);
         assertRejected(e, "'Delay Between Attempts (Seconds)' (producerRetryDelaySeconds) must be between 1 and "
                 + "30, got: 0. A delay below one second cannot help against a disconnected broker node — the "
@@ -152,8 +153,8 @@ public class ProducerStartOrderTest {
         e.setProducerRetryTotalBudgetSeconds(5);
         assertRejected(e, "'Total Retry Budget (Seconds)' (producerRetryTotalBudgetSeconds) must cover the worst "
                 + "case of the configured retry, 28 s, got: 5. Lower 'Delivery Timeout (Seconds)' "
-                + "(deliveryTimeoutSeconds) (currently 2) or 'Max Send Attempts' (producerRetryMaxAttempts), or "
-                + "raise the budget. The budget must stay below the timeout of "
+                + "(deliveryTimeoutSeconds) (currently 2) or 'Send Attempts (total, 1 = off)' "
+                + "(producerRetryMaxAttempts), or raise the budget. The budget must stay below the timeout of "
                 + "the calling HTTP client. Note that one attempt costs roughly four times "
                 + "deliveryTimeoutSeconds on the transactional path, because initTransactions(), the metadata "
                 + "block inside send() and commitTransaction() are each bounded by max.block.ms = min(30s, "
@@ -195,9 +196,9 @@ public class ProducerStartOrderTest {
         e.setEnableTransactions(true);
         e.setProducerRetryMaxAttempts(6);
 
-        String logged = capture(() -> assertRejected(e, "'Max Send Attempts' (producerRetryMaxAttempts) must be "
-                + "between 1 and 5, got: 6. This is the total number of attempts, not the number of additional "
-                + "ones; 1 switches the retry off."));
+        String logged = capture(() -> assertRejected(e, "'Send Attempts (total, 1 = off)' "
+                + "(producerRetryMaxAttempts) must be between 1 and 5, got: 6. This is the total number of attempts, "
+                + "not the number of additional ones; 1 switches the retry off."));
 
         assertInOrder(logged, START_UP_LINE,
                 "ERROR " + PRODUCER + " - [CPI-KAFKA-PLUS-DIAG] producer.config.ineffective "
@@ -217,9 +218,9 @@ public class ProducerStartOrderTest {
 
         String logged = capture(() -> assertRejected(e, "'Total Retry Budget (Seconds)' "
                 + "(producerRetryTotalBudgetSeconds) must cover the worst case of the configured retry, 432 s, "
-                + "got: 30. Lower 'Delivery Timeout (Seconds)' (deliveryTimeoutSeconds) (currently 120) or 'Max "
-                + "Send Attempts' (producerRetryMaxAttempts), or raise the budget. The budget must stay below the "
-                + "timeout of the calling HTTP client. Note that one attempt costs roughly four times "
+                + "got: 30. Lower 'Delivery Timeout (Seconds)' (deliveryTimeoutSeconds) (currently 120) or 'Send "
+                + "Attempts (total, 1 = off)' (producerRetryMaxAttempts), or raise the budget. The budget must stay "
+                + "below the timeout of the calling HTTP client. Note that one attempt costs roughly four times "
                 + "deliveryTimeoutSeconds on the transactional path, because initTransactions(), the metadata "
                 + "block inside send() and commitTransaction() are each bounded by max.block.ms = min(30s, "
                 + "deliveryTimeoutSeconds) on top of the wait for acknowledgements."));

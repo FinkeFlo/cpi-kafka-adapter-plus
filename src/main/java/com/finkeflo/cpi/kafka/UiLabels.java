@@ -75,9 +75,9 @@ final class UiLabels {
         put("retryDelaySeconds", "Retry Delay (Seconds)");
         put("dlqEnabled", "Enable Dead Letter Queue");
         put("dlqTopic", "Dead Letter Topic");
-        put("dlqMaxRetries", "Max Retries before DLQ");
+        put("dlqMaxRetries", "Retries before DLQ (additional attempts)");
         put("dlqCredentialAlias", "DLQ SASL Credential Alias");
-        put("retryOnlyTransientErrors", "Skip Retries for Permanent Errors");
+        put("retryOnlyTransientErrors", "Retry Transient Errors Only");
         put("autoPauseEnabled", "Enable Auto-Pause");
         put("autoPauseErrorThreshold", "Consecutive Error Threshold");
         put("autoPauseCooldownSeconds", "Initial Pause Duration (sec)");
@@ -97,7 +97,7 @@ final class UiLabels {
         put("autoRegisterSchemas", "Auto Register Schemas");
         put("subjectNameStrategy", "Subject Name Strategy");
         put("avroValueSerialization", "Serialize Values as Avro");
-        put("producerRetryMaxAttempts", "Max Send Attempts");
+        put("producerRetryMaxAttempts", "Send Attempts (total, 1 = off)");
         put("producerRetryDelaySeconds", "Delay Between Attempts (Seconds)");
         put("producerRetryOnlyTransientErrors", "Retry Transient Errors Only");
         put("producerRetryTotalBudgetSeconds", "Total Retry Budget (Seconds)");

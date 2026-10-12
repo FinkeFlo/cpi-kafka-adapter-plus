@@ -82,8 +82,9 @@ public class ReceiverConfigValidatorTest {
         ReceiverConfigValidator.validateBeforeStart(e);
         ReceiverConfigValidator.validateTransactional(e);
         assertRejected(() -> ReceiverConfigValidator.validateRetry(e),
-                "'Max Send Attempts' (producerRetryMaxAttempts) must be between 1 and 5, got: 6. This is the total "
-                        + "number of attempts, not the number of additional ones; 1 switches the retry off.");
+                "'Send Attempts (total, 1 = off)' (producerRetryMaxAttempts) must be between 1 and 5, got: 6. "
+                        + "This is the total number of attempts, not the number of additional ones; 1 switches the "
+                        + "retry off.");
     }
 
     /**

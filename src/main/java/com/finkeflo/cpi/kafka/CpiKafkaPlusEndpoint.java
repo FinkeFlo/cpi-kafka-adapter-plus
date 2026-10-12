@@ -81,9 +81,11 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
 
     @UriParam(label = "security",
             description = "Leave empty for brokers with a publicly trusted certificate (e.g. Confluent Cloud) — "
-                    + "the JVM default truststore is used and TLS is still active. Set a CPI Keystore alias "
-                    + "only for a private/company CA, a self-signed broker certificate, or client-certificate "
-                    + "authentication (mTLS).")
+                    + "the JVM default truststore is used and TLS is still active. Setting any alias makes the "
+                    + "adapter trust the certificates of the whole CPI tenant keystore instead of the JVM default "
+                    + "truststore, so the broker's CA certificate (or its self-signed certificate) must then be "
+                    + "in the tenant keystore. For client-certificate authentication (mTLS) the alias must name "
+                    + "a key pair.")
     private String sslKeystoreAlias;
 
     // --- Processing ---
@@ -194,7 +196,9 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
     private long bufferMemoryKb = 32768;
 
     @UriParam(label = "producer", defaultValue = "true",
-            description = "Enable idempotent producer (exactly-once semantics)")
+            description = "Enable the idempotent producer: the broker discards the duplicates of the producer's "
+                    + "own internal retries. Not end-to-end exactly-once: a message the caller sends twice "
+                    + "is written twice.")
     private boolean enableIdempotence = true;
 
     @UriParam(label = "producer", defaultValue = "false",
@@ -202,7 +206,8 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
     private boolean enableTransactions = false;
 
     @UriParam(label = "producer",
-            description = "Prefix for transactional.id (e.g. my-app-txn). Required if enableTransactions is true.")
+            description = "Prefix for transactional.id (e.g. my-app-txn). Required with transactional batching "
+                    + "(enableTransactions with producerBatchMode JSON_ARRAY or XML_LIST).")
     private String transactionalIdPrefix;
 
     @UriParam(label = "producer", defaultValue = "5",
@@ -344,7 +349,9 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
     private boolean autoPauseEnabled = false;
 
     @UriParam(label = "errorHandling", defaultValue = "5",
-            description = "Number of consecutive processing errors before auto-pause activates")
+            description = "Number of consecutive failed records (or failed batches without a DLQ) before "
+                    + "auto-pause activates. A record counts once after its last attempt, also when it is then "
+                    + "dead-lettered; JSON Schema violations do not count.")
     private int autoPauseErrorThreshold = 5;
 
     @UriParam(label = "errorHandling", defaultValue = "60",
@@ -361,7 +368,8 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
     private boolean autoRegisterSchemas = false;
 
     @UriParam(label = "avro", defaultValue = "TopicNameStrategy",
-            description = "Subject naming strategy: TopicNameStrategy, RecordNameStrategy, TopicRecordNameStrategy")
+            description = "Subject naming strategy. Only TopicNameStrategy is supported: with RecordNameStrategy or "
+                    + "TopicRecordNameStrategy and Avro serialization the endpoint does not start.")
     private String subjectNameStrategy = "TopicNameStrategy";
 
     @UriParam(label = "avro",
@@ -388,13 +396,16 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
     @UriParam(label = "processing", defaultValue = "STANDARD",
             description = "Diagnostic output level. STANDARD (default): every failure gets one structured ERROR line "
                     + "with the full serialised cause chain — sufficient to root-cause most production incidents. "
-                    + "FULL: adds expensive/verbose extras (success baselines, JVM/thread state, per-record detail) "
-                    + "for deep investigation. Use FULL only when actively debugging; STANDARD is the normal operational mode.")
+                    + "FULL adds one thing on the receiver: a bounded thread dump attached to the node-fault "
+                    + "escalation, which always carries the JVM state. It costs nothing on a normal send. "
+                    + "Use FULL only while investigating such a fault.")
     private String diagnosticsLevel = "STANDARD";
 
     @UriParam(label = "errorHandling", defaultValue = "true",
             description = "Write the full Kafka adapter error diagnostic as an MPL attachment "
-                    + "('KafkaAdapterError'). Disable to keep only searchable MPL headers/attributes.")
+                    + "('KafkaAdapterError'). Disable to keep only searchable MPL headers/attributes. "
+                    + "Sender only: on the receiver it currently has no effect, because a failing receiver "
+                    + "channel fails the exchange and CPI writes the MPL entry without the attachment.")
     private boolean writeMplErrorAttachment = true;
 
     public CpiKafkaPlusEndpoint() {
@@ -841,9 +852,6 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
     public String getAllowedHeaders() { return allowedHeaders; }
     public void setAllowedHeaders(String allowedHeaders) { this.allowedHeaders = allowedHeaders; }
 
-    // public int getRetries() { return retries; }
-    // public void setRetries(int retries) { this.retries = retries; }
-
     public int getDeliveryTimeoutSeconds() { return deliveryTimeoutSeconds; }
     public void setDeliveryTimeoutSeconds(int deliveryTimeoutSeconds) { this.deliveryTimeoutSeconds = deliveryTimeoutSeconds; }
 
@@ -862,7 +870,7 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
     public String getDiagnosticsLevel() { return diagnosticsLevel; }
     public void setDiagnosticsLevel(String diagnosticsLevel) { this.diagnosticsLevel = diagnosticsLevel; }
 
-    /** True when diagnostics level is set to FULL for verbose/expensive output. */
+    /** True at diagnostics level FULL: the receiver's node-fault escalation then adds a thread dump. */
     public boolean isDiagnosticsLevelFull() { return "FULL".equalsIgnoreCase(diagnosticsLevel); }
 
     public boolean isWriteMplErrorAttachment() { return writeMplErrorAttachment; }

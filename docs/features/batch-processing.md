@@ -230,9 +230,9 @@ Without a threshold (default 0), drain would continue in iteration 4 and also fe
 
 Kafka removes a consumer from the group if it does not call `poll()` within `max.poll.interval.ms`. The adapter significantly reduces this risk by polling regularly (including keep-alive polls between emit cycles) and by deriving `max.poll.interval.ms` from **Polling Interval (Seconds)** (`pollingIntervalSeconds`) with an additional processing buffer (capped at 6 h 10 min).
 
-### Limitation: Drain + Auto Commit (Periodic)
+### Limitation: Drain + Auto Commit
 
-Drain Backlog is not compatible with `Offset Commit Strategy = Auto Commit`. The adapter rejects this combination during startup because auto commit could commit offsets before records are processed, which can cause data loss.
+Drain Backlog is not compatible with **Offset Commit Strategy** = **Auto Commit (Periodic, may lose messages)** (`AUTO`). The adapter rejects this combination during startup because auto commit could commit offsets before records are processed, which can cause data loss.
 
 ---
 
@@ -459,4 +459,4 @@ The parameter only affects idle detection for an empty topic.
 
 With **Offset Commit Strategy** (`commitStrategy`) set to **After Successful Processing (At-Least-Once)** (`BATCH_COMPLETE`) (recommended), offsets are committed only after each batch has been processed successfully, and never past a record that is still open. If the IFlow fails, the batch's records are retried individually and dead-lettered when a DLQ is configured; without a DLQ the whole failed batch, good records included, is retried (default) or skipped, as **Error Handling** says (see [Error Handling Without DLQ](dead-letter-queue.md#error-handling-without-dlq)). A batch that fails while the IFlow is being stopped or undeployed is neither split up, dead-lettered nor skipped: it stays uncommitted and is delivered again after the restart.
 
-With **Offset Commit Strategy** (`commitStrategy`) set to **Auto Commit (Periodic)** (`AUTO`), Kafka commits periodically in the background, independently of whether processing succeeded. This is not recommended for production-critical scenarios.
+With **Offset Commit Strategy** (`commitStrategy`) set to **Auto Commit (Periodic, may lose messages)** (`AUTO`), the Kafka client commits the consumer position periodically instead of the adapter committing after each batch. Records that were polled but not processed yet can be committed and lost, for example when the integration flow is stopped while a long-running IFlow call is still in progress. This is not recommended for production-critical scenarios.

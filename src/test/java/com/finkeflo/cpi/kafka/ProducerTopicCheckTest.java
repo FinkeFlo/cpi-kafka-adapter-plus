@@ -278,6 +278,48 @@ public class ProducerTopicCheckTest {
     }
 
     /**
+     * A probe failure belongs to the topic whose probe failed (#246): it does not join the send error
+     * of another topic, confirmed before or after it.
+     */
+    @Test
+    public void aTopicsProbeFailureDoesNotJoinAnotherTopicsSendError() throws Exception {
+        String confirmed = "orders-confirmed-before";
+        String unreachable = "orders-unreachable-after";
+        CpiKafkaPlusProducer producer = newProducer(confirmed, "SSL");
+        install(producer);
+        script(producer).answer(confirmed, exists())
+                .answer(unreachable, inconclusive(new TimeoutException("Timed out waiting for a node assignment.")));
+
+        send(producer, confirmed);
+        send(producer, unreachable);
+
+        Assert.assertEquals("Failed to send message to Kafka topic 'orders-confirmed-before': send failed",
+                sendFailure(producer, confirmed, new RuntimeException("send failed")).getMessage());
+    }
+
+    /**
+     * Confirming one topic does not clear the probe failure of another (#246): its next send error
+     * still names the cause.
+     */
+    @Test
+    public void aConfirmedTopicClearsOnlyItsOwnProbeFailure() throws Exception {
+        String unreachable = "orders-unreachable-before";
+        String confirmed = "orders-confirmed-after";
+        CpiKafkaPlusProducer producer = newProducer(unreachable, "SSL");
+        install(producer);
+        script(producer).answer(unreachable, inconclusive(new TimeoutException("Timed out waiting for a node assignment.")))
+                .answer(confirmed, exists());
+
+        send(producer, unreachable);
+        send(producer, confirmed);
+
+        Assert.assertEquals("Failed to send message to Kafka topic 'orders-unreachable-before': send failed The "
+                + "broker could not be reached during the pre-send check either (TimeoutException: Timed out "
+                + "waiting for a node assignment.).",
+                sendFailure(producer, unreachable, new RuntimeException("send failed")).getMessage());
+    }
+
+    /**
      * A rejected authentication found by the probe fails the exchange at once, before the pre-warm
      * and the send, naming the broker, the topic and the cause. The probe is not repeated, the topic
      * is not remembered, and the cause is not kept for a later send error: the exception carries it.

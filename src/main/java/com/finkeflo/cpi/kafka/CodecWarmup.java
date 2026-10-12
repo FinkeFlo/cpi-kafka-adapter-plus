@@ -22,6 +22,7 @@ package com.finkeflo.cpi.kafka;
 
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.lang.reflect.InvocationTargetException;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
@@ -39,24 +40,34 @@ import org.apache.kafka.common.utils.ByteBufferOutputStream;
  * libraries are extracted and linked <em>before</em> an adapter update can purge the bundle
  * revision (issue #148).
  *
- * <p>snappy-java, zstd-jni and lz4-java all locate their {@code .so} with
- * {@code getResourceAsStream} on their own class loader when first used. On a route that is
- * still running on a purged revision that lookup returns {@code null} and the codec dies for good
- * ({@code SnappyError FAILED_TO_LOAD_NATIVE_LIBRARY}, then {@code NoClassDefFoundError: Could not
- * initialize class …}). Pre-loading the classes does not help — the resource, not the class, is
- * missing — so the only defence is to trigger the native load while the revision is still live.
- * A real compress/decompress round trip through Kafka's own {@link Compression} API does exactly
- * that and additionally initialises Kafka's codec-side statics.
+ * <p>snappy-java and zstd-jni locate their {@code .so} with {@code getResourceAsStream} on their
+ * own class loader when first used. On a route that is still running on a purged revision that
+ * lookup returns {@code null} and the codec dies for good ({@code SnappyError
+ * FAILED_TO_LOAD_NATIVE_LIBRARY}, then {@code NoClassDefFoundError: Could not initialize class …}).
+ * Pre-loading the classes does not help — the resource, not the class, is missing — so the only
+ * defence is to trigger the native load while the revision is still live. A real
+ * compress/decompress round trip through Kafka's own {@link Compression} API does exactly that and
+ * additionally initialises Kafka's codec-side statics.
+ *
+ * <p>lz4-java never loads its native library inside the bundle: {@code LZ4Factory.fastestInstance()},
+ * which Kafka's LZ4 streams use, only tries it when lz4-java was loaded by the system class loader
+ * or the library is already loaded. In the bundle lz4 therefore runs in pure Java
+ * ({@link #lz4Implementation}), and its round trip only loads and initialises its classes.
  */
 final class CodecWarmup {
 
     private static final byte[] SAMPLE =
             "cpi-kafka-plus codec warm-up sample — repeat repeat repeat repeat repeat".getBytes(StandardCharsets.UTF_8);
 
+    /** {@code LZ4Factory.toString()} is this prefix followed by the implementation's name. */
+    private static final String LZ4_FACTORY_PREFIX = "LZ4Factory:";
+
     private CodecWarmup() {}
 
     static final class Result {
         final Map<String, String> outcomes = new LinkedHashMap<>();
+        /** See {@link CodecWarmup#lz4Implementation()}. */
+        String lz4Implementation;
         long durationMs;
 
         int failed() {
@@ -91,8 +102,26 @@ final class CodecWarmup {
             }
             result.outcomes.put(type.name, roundTrip(type));
         }
+        result.lz4Implementation = lz4Implementation();
         result.durationMs = (System.nanoTime() - t0) / 1_000_000L;
         return result;
+    }
+
+    /**
+     * The LZ4 implementation that Kafka's LZ4 streams use, from {@code LZ4Factory.fastestInstance()}:
+     * {@code JNI}, {@code JavaUnsafe} or {@code JavaSafe}. If it cannot be determined, the failure's
+     * class name. Read by reflection because lz4-java is a runtime-only dependency.
+     */
+    static String lz4Implementation() {
+        try {
+            Class<?> factory = Class.forName("net.jpountz.lz4.LZ4Factory", true, CodecWarmup.class.getClassLoader());
+            String name = String.valueOf(factory.getMethod("fastestInstance").invoke(null));
+            return name.startsWith(LZ4_FACTORY_PREFIX) ? name.substring(LZ4_FACTORY_PREFIX.length()) : name;
+        } catch (InvocationTargetException e) {
+            return (e.getCause() != null ? e.getCause() : e).getClass().getName();
+        } catch (Throwable t) {
+            return t.getClass().getName();
+        }
     }
 
     /** @return {@code "ok"} or {@code "<ExceptionClass>: <message>"} */

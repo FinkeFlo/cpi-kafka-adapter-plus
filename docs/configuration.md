@@ -16,16 +16,16 @@ An externalized parameter bypasses the dropdowns, and its value reaches the adap
 |-----------|---------|-------------|
 | `bootstrapServers` | _(required)_ | Kafka bootstrap servers, comma-separated `host:port` addresses, each optionally with a listener prefix such as `SASL_SSL://`. Spaces around the addresses and empty entries, such as after a trailing comma, are removed. An address Kafka cannot read as `host:port`, or a port above 65535, fails the deployment. |
 | `topic` | _(required)_ | Kafka topic or comma-separated topics to consume from. |
-| `groupId` | — | Consumer group ID. |
+| `groupId` | _(required)_ | Consumer group ID. |
 
 **Security**
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `securityProtocol` | `SASL_SSL` | Security protocol, covering transport and authentication in one value: `SASL_SSL` (UI: "SASL_SSL (SASL over TLS)"), `SSL` (UI: "SSL (TLS, client certificate optional via Keystore Alias)") — TLS with a client certificate (mTLS) only when `sslKeystoreAlias` holds one, `SASL_PLAINTEXT` (UI: "SASL_PLAINTEXT (no TLS)"), `PLAINTEXT` (UI: "PLAINTEXT (no TLS, no authentication)"). Managed brokers such as Confluent Cloud accept TLS only. An empty externalized value connects with `PLAINTEXT`, without TLS and without authentication; the deployment logs this once as ERROR (`consumer.config.ineffective`). |
+| `securityProtocol` | `SASL_SSL` | Security protocol, covering transport and authentication in one value: `SASL_SSL` (UI: "SASL_SSL (SASL over TLS)"), `SSL` (UI: "SSL (TLS, client certificate optional via Keystore Alias)") — TLS with a client certificate (mTLS) only when `sslKeystoreAlias` names a key pair, `SASL_PLAINTEXT` (UI: "SASL_PLAINTEXT (no TLS)"), `PLAINTEXT` (UI: "PLAINTEXT (no TLS, no authentication)"). Managed brokers such as Confluent Cloud accept TLS only. An empty externalized value connects with `PLAINTEXT`, without TLS and without authentication; the deployment logs this once as ERROR (`consumer.config.ineffective`). |
 | `saslMechanism` | `PLAIN` | SASL mechanism: `PLAIN`, `SCRAM-SHA-256`, `SCRAM-SHA-512`, in any letter case. With a SASL protocol any other value fails the deployment. |
-| `credentialAlias` | — | Credential alias for SASL username/password from CPI Secure Store. Neither may contain a line break or another control character; the adapter refuses such a credential at the first connect, naming the alias (see [Authentication](security/authentication.md#cpi-secure-store)). |
-| `sslKeystoreAlias` | — | Leave empty for brokers with a publicly trusted certificate (e.g. Confluent Cloud) — the JVM default truststore is used and TLS is still active. Set a CPI Keystore alias only for a private/company CA, a self-signed broker certificate, or client-certificate authentication (mTLS). |
+| `credentialAlias` | _(required)_ | Credential alias for SASL username/password from CPI Secure Store. Required when `securityProtocol` is `SASL_SSL` or `SASL_PLAINTEXT`. Neither the user name nor the password may contain a line break or another control character; the adapter refuses such a credential at the first connect, naming the alias (see [Authentication](security/authentication.md#cpi-secure-store)). |
+| `sslKeystoreAlias` | — | Leave empty for brokers with a publicly trusted certificate (e.g. Confluent Cloud) — the JVM default truststore is used and TLS is still active. Setting any alias makes the adapter trust the certificates of the whole CPI tenant keystore instead of the JVM default truststore, so the broker's CA certificate (or its self-signed certificate) must then be in the tenant keystore. For client-certificate authentication (mTLS) the alias must name a key pair. |
 
 For detailed security setup, see [Authentication](security/authentication.md).
 
@@ -41,8 +41,8 @@ For detailed security setup, see [Authentication](security/authentication.md).
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `autoOffsetReset` | `latest` | Auto offset reset: `earliest` or `latest`, in any letter case. An externalized value may also be Kafka's `none` or `by_duration:<duration>`; anything else is passed to Kafka as it is. |
-| `commitStrategy` | `BATCH_COMPLETE` | Offset commit strategy: `AUTO`, `BATCH_COMPLETE`. |
+| `autoOffsetReset` | `latest` | Where to start when the consumer group has no valid committed offset: `earliest` reads all available messages, `latest` only new ones. Both are accepted in any letter case; an externalized value may also be Kafka's `none` or `by_duration:<duration>`, and anything else is passed to Kafka as it is. This applies for example on the first deployment with a new `groupId`, after the broker deleted the group's offsets (by default once the group has had no active consumer for 7 days, broker setting `offsets.retention.minutes`) and when the committed offset no longer exists because the topic's retention deleted those messages. With `latest`, messages written before that point are never read. |
+| `commitStrategy` | `BATCH_COMPLETE` | Offset commit strategy. `BATCH_COMPLETE` (UI: "After Successful Processing (At-Least-Once)") commits only records that were processed, dead-lettered or deliberately skipped. `AUTO` (UI: "Auto Commit (Periodic, may lose messages)") lets the Kafka client commit the consumer position periodically instead: records that were polled but not processed yet can be committed and lost, for example when the integration flow is stopped while a long-running IFlow call is still in progress. With `consumptionMode=SCHEDULED`, `AUTO` cannot be combined with `drainEnabled`: the channel does not start. |
 
 **Polling**
 
@@ -66,7 +66,7 @@ For detailed security setup, see [Authentication](security/authentication.md).
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `drainEnabled` | `false` | Poll repeatedly until the topic is empty. Ignored when `consumptionMode=STREAMING`. |
+| `drainEnabled` | `false` | Poll repeatedly until the topic is empty. Ignored when `consumptionMode=STREAMING`. Requires `commitStrategy=BATCH_COMPLETE`; with `AUTO` the channel does not start. |
 | `minBacklogToDrain` | `0` | Minimum records in an extra drain poll required to continue draining; `0` drains until empty. |
 
 ### Message Handling
@@ -76,7 +76,7 @@ For detailed security setup, see [Authentication](security/authentication.md).
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `jsonSchemaValidation` | `false` | Enable JSON Schema validation of incoming messages. A message that fails validation never reaches the IFlow: it goes to the DLQ if one is enabled, otherwise it is discarded and its offset committed. `errorHandling` does not apply to it. |
-| `jsonSchema` | — | Inline JSON Schema for message validation. |
+| `jsonSchema` | _(required)_ | Inline JSON Schema for message validation. Required when `jsonSchemaValidation` is `true`. |
 | `jsonSchemaReportError` | `false` | Also write a failed MPL entry with the validation error for every message that fails validation (the payload only in its trace, if trace is active). When `false`, a discarded message leaves only a WARN log line, which does not reach the tenant trace in production. |
 
 For more details, see [JSON Schema Validation](features/json-schema-validation.md).
@@ -85,9 +85,9 @@ For more details, see [JSON Schema Validation](features/json-schema-validation.m
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `batchMode` | `true` | Enable batch mode: multiple records per iFlow execution (one MPL entry per batch). |
-| `batchSize` | `100` | Maximum records per batch (UI label: "Max Records per IFlow Run (MPL)"). |
-| `batchOutputFormat` | `JSON_ARRAY` | Batch output format: `JSON_ARRAY`, `XML_LIST`. (`SPLIT_EXCHANGES` accepted at runtime for backward compatibility but removed from the UI as of 1.2.0.) |
+| `batchMode` | `true` | When `true`, the iFlow receives an envelope with up to `batchSize` records of one partition, `{"kafkaRecords":{"record":[…]}}` or the XML equivalent (see `batchOutputFormat`), not the original message body; one MPL entry per batch. When `false`, every Kafka message is its own iFlow execution with the message value as the body. |
+| `batchSize` | `100` | Maximum number of records of one partition from one poll per iFlow execution (UI label: "Max Records per IFlow Run (MPL)"). Batches never span partitions or polls, so a value above `maxPollRecords` has no effect. |
+| `batchOutputFormat` | `JSON_ARRAY` | Batch output format: `JSON_ARRAY` (`{"kafkaRecords":{"record":[{"key":…,"value":…,"topic":…,"partition":…,"offset":…,"timestamp":…}]}}`), `XML_LIST` (`<kafkaRecords count="n"><record>…</record></kafkaRecords>`). (`SPLIT_EXCHANGES` accepted at runtime for backward compatibility but removed from the UI as of 1.2.0.) |
 
 In `XML_LIST` mode, each `<value>` element carries a `format` attribute (`"xml"` for directly embedded XML, `"text"` for text/CDATA content). Values that look like XML are always auto-detected and embedded; there is no configuration option for this. See [Batch Processing](features/batch-processing.md) for details.
 
@@ -96,7 +96,7 @@ In `XML_LIST` mode, each `<value>` element carries a `format` attribute (`"xml"`
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `schemaRegistryEnabled` | `false` | Enable Confluent Schema Registry integration. |
-| `schemaRegistryUrl` | — | Confluent Schema Registry URL, starting with `http://` or `https://` in any letter case. While `schemaRegistryEnabled` and `avroValueDeserialization` are on, any other URL fails the deployment. |
+| `schemaRegistryUrl` | _(required)_ | Confluent Schema Registry URL. Required when `schemaRegistryEnabled` is `true`. It must start with `http://` or `https://`, in any letter case: while `schemaRegistryEnabled` and `avroValueDeserialization` are on, any other URL fails the deployment. |
 | `schemaRegistryCredentialAlias` | — | Credential alias for Schema Registry authentication. |
 | `avroOutputFormat` | `JSON` | Avro output format: `JSON`, `XML`. |
 | `avroValueDeserialization` | `true` | Deserialize message values using Avro. Requires Schema Registry. |
@@ -117,10 +117,10 @@ For details on Avro integration, see [Avro / Schema Registry](features/avro-sche
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `dlqEnabled` | `false` | Enable Dead Letter Queue routing for failed messages. |
-| `dlqTopic` | — | Topic name for the Dead Letter Queue: 1 to 249 characters from `a-z`, `A-Z`, `0-9`, `.`, `_` and `-`, but not `.` or `..` alone, and not a topic this channel consumes. Anything else fails the deployment. |
-| `dlqMaxRetries` | `3` | Maximum processing retries before routing to the DLQ. |
+| `dlqTopic` | _(required)_ | Topic name for the Dead Letter Queue. Required when `dlqEnabled` is `true`. It takes 1 to 249 characters from `a-z`, `A-Z`, `0-9`, `.`, `_` and `-`, but not `.` or `..` alone, and must not be a topic this channel consumes; anything else fails the deployment. |
+| `dlqMaxRetries` | `3` | Retries after the first failed attempt before a record is routed to the DLQ (UI: "Retries before DLQ (additional attempts)"): `3` means up to 4 attempts in total, `0` routes it after the first failure. |
 | `dlqCredentialAlias` | — | SASL credential alias for writing to the DLQ topic, if that needs other credentials than the main connection. The DLQ topic is always on the same cluster (`bootstrapServers`); leave empty to reuse `credentialAlias`. As there, a user name or password with a line break or another control character is refused. |
-| `retryOnlyTransientErrors` | `true` | **Sender (consumer) direction only.** Retry only transient errors; send permanent errors directly to the DLQ. The receiver direction uses `producerRetryOnlyTransientErrors`. |
+| `retryOnlyTransientErrors` | `true` | **Sender (consumer) direction only.** Retry only transient errors; send permanent errors directly to the DLQ (UI: "Retry Transient Errors Only"). The receiver direction uses `producerRetryOnlyTransientErrors`. |
 | `writeMplErrorAttachment` | `true` | Write the full error diagnostic (including full stack trace) as MPL attachment `KafkaAdapterError`. Disable to keep only searchable MPL headers/attributes. |
 
 **Auto-Pause on Errors**
@@ -128,7 +128,7 @@ For details on Avro integration, see [Avro / Schema Registry](features/avro-sche
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `autoPauseEnabled` | `false` | Automatically pause the consumer after consecutive processing errors. |
-| `autoPauseErrorThreshold` | `5` | Consecutive processing errors required to activate auto-pause. Every failed IFlow call counts, including records that end up in the DLQ. |
+| `autoPauseErrorThreshold` | `5` | Consecutive failed records required to activate auto-pause. A record, including one that cannot be deserialized, counts once after its last attempt, also when it is then written to the DLQ; the retries before it do not count separately. Without a DLQ a failed batch counts once; with a DLQ it is retried record by record and its failing records count. With `errorHandling` `RETRY` every new attempt on a later poll counts again. Records rejected by JSON Schema validation do not count, nor does a failure caused by stopping the integration flow. A successful record or batch resets the count. |
 | `autoPauseCooldownSeconds` | `60` | Initial auto-pause duration in seconds; doubles after subsequent failures, capped at 900 seconds. A larger value is used as 900 and logged as `consumer.config.clamped` at deployment. |
 
 For details on DLQ and retry behavior, see [Dead Letter Queue](features/dead-letter-queue.md).
@@ -148,10 +148,10 @@ For details on DLQ and retry behavior, see [Dead Letter Queue](features/dead-let
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `securityProtocol` | `SASL_SSL` | Security protocol, covering transport and authentication in one value: `SASL_SSL` (UI: "SASL_SSL (SASL over TLS)"), `SSL` (UI: "SSL (TLS, client certificate optional via Keystore Alias)") — TLS with a client certificate (mTLS) only when `sslKeystoreAlias` holds one, `SASL_PLAINTEXT` (UI: "SASL_PLAINTEXT (no TLS)"), `PLAINTEXT` (UI: "PLAINTEXT (no TLS, no authentication)"). Managed brokers such as Confluent Cloud accept TLS only. An empty externalized value connects with `PLAINTEXT`, without TLS and without authentication; the deployment logs this once as ERROR (`producer.config.ineffective`). |
+| `securityProtocol` | `SASL_SSL` | Security protocol, covering transport and authentication in one value: `SASL_SSL` (UI: "SASL_SSL (SASL over TLS)"), `SSL` (UI: "SSL (TLS, client certificate optional via Keystore Alias)") — TLS with a client certificate (mTLS) only when `sslKeystoreAlias` names a key pair, `SASL_PLAINTEXT` (UI: "SASL_PLAINTEXT (no TLS)"), `PLAINTEXT` (UI: "PLAINTEXT (no TLS, no authentication)"). Managed brokers such as Confluent Cloud accept TLS only. An empty externalized value connects with `PLAINTEXT`, without TLS and without authentication; the deployment logs this once as ERROR (`producer.config.ineffective`). |
 | `saslMechanism` | `PLAIN` | SASL mechanism: `PLAIN`, `SCRAM-SHA-256`, `SCRAM-SHA-512`, in any letter case. With a SASL protocol any other value fails the deployment. |
-| `credentialAlias` | — | Credential alias for SASL username/password from CPI Secure Store. Neither may contain a line break or another control character; the adapter refuses such a credential at the first connect, naming the alias (see [Authentication](security/authentication.md#cpi-secure-store)). |
-| `sslKeystoreAlias` | — | Leave empty for brokers with a publicly trusted certificate (e.g. Confluent Cloud) — the JVM default truststore is used and TLS is still active. Set a CPI Keystore alias only for a private/company CA, a self-signed broker certificate, or client-certificate authentication (mTLS). |
+| `credentialAlias` | _(required)_ | Credential alias for SASL username/password from CPI Secure Store. Required when `securityProtocol` is `SASL_SSL` or `SASL_PLAINTEXT`. Neither the user name nor the password may contain a line break or another control character; the adapter refuses such a credential at the first connect, naming the alias (see [Authentication](security/authentication.md#cpi-secure-store)). |
+| `sslKeystoreAlias` | — | Leave empty for brokers with a publicly trusted certificate (e.g. Confluent Cloud) — the JVM default truststore is used and TLS is still active. Setting any alias makes the adapter trust the certificates of the whole CPI tenant keystore instead of the JVM default truststore, so the broker's CA certificate (or its self-signed certificate) must then be in the tenant keystore. For client-certificate authentication (mTLS) the alias must name a key pair. |
 
 For detailed security setup, see [Authentication](security/authentication.md).
 
@@ -169,7 +169,7 @@ For detailed security setup, see [Authentication](security/authentication.md).
 |-----------|---------|-------------|
 | `acks` | `all` | Producer acknowledgments: `all` (in any letter case), `1`, `0`. Only used with `enableIdempotence=false`; otherwise the adapter always sends with `all`. |
 | `enableIdempotence` | `true` | Enable idempotent producer: the broker discards duplicates from the producer's own internal retries. Forces `acks=all`. Not end-to-end exactly-once: a message the caller sends twice is written twice. |
-| `deliveryTimeoutSeconds` | `120` | Maximum delivery time in seconds, including retries. With `enableTransactions` the adapter derives `transaction.timeout.ms` from this value (plus up to 30 s commit headroom, never below 60 s), so the maximum is 870 s — above that a broker rejects the producer. |
+| `deliveryTimeoutSeconds` | `120` | Maximum delivery time in seconds, including retries. With transactional batching (`enableTransactions` with `producerBatchMode` `JSON_ARRAY` or `XML_LIST`) the adapter derives `transaction.timeout.ms` from this value (plus up to 30 s commit headroom, never below 60 s), so the maximum is then 870 s — above that a broker rejects the producer. |
 
 **Header Mapping**
 
@@ -184,7 +184,7 @@ For detailed security setup, see [Authentication](security/authentication.md).
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `enableTransactions` | `false` | Enable transactional batching (creates a new transactional producer per batch). Applies only to `producerBatchMode` `JSON_ARRAY` or `XML_LIST`; with `NONE` messages are sent without a transaction. |
-| `transactionalIdPrefix` | — | Prefix for `transactional.id` (e.g. `my-app-txn`). Required if `enableTransactions` is `true`. Each transaction slot has its own id, `<prefix>-<topic hash>-<node>-<slot>`, and the adapter keeps every one of them within 249 characters: a prefix that makes the id of the last slot (`maxConcurrentTransactions` − 1) longer fails the deployment, and the message says by how many characters to shorten it. |
+| `transactionalIdPrefix` | _(required)_ | Prefix for `transactional.id` (e.g. `my-app-txn`). Required with transactional batching: `enableTransactions` with `producerBatchMode` `JSON_ARRAY` or `XML_LIST`. Each transaction slot has its own id, `<prefix>-<topic hash>-<node>-<slot>`, and the adapter keeps every one of them within 249 characters: a prefix that makes the id of the last slot (`maxConcurrentTransactions` − 1) longer fails the deployment, and the message says by how many characters to shorten it. |
 | `maxConcurrentTransactions` | `5` | Maximum number of concurrent transactional producers per worker node. |
 
 **Performance Tuning**
@@ -201,7 +201,7 @@ For detailed security setup, see [Authentication](security/authentication.md).
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `jsonSchemaValidation` | `false` | Enable JSON Schema validation of outgoing messages. An invalid message fails the exchange and is not sent. Applies to `producerBatchMode` `NONE` only: with `JSON_ARRAY` or `XML_LIST` a batch is sent without validation, the schema is neither checked at deployment nor compiled, and the deployment logs `producer.config.ineffective` once. |
-| `jsonSchema` | — | Inline JSON Schema for message validation. |
+| `jsonSchema` | _(required)_ | Inline JSON Schema for message validation. Required when `jsonSchemaValidation` is `true` and `producerBatchMode` is `NONE`. |
 | `jsonSchemaReportError` | `false` | An invalid message always fails the exchange, whatever this setting says. `true` also writes the rejected payload to the MPL trace, if trace is active for the integration flow. |
 
 For more details, see [JSON Schema Validation](features/json-schema-validation.md).
@@ -211,10 +211,10 @@ For more details, see [JSON Schema Validation](features/json-schema-validation.m
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `schemaRegistryEnabled` | `false` | Enable Confluent Schema Registry integration. |
-| `schemaRegistryUrl` | — | Confluent Schema Registry URL, starting with `http://` or `https://` in any letter case. While `schemaRegistryEnabled` and `avroValueSerialization` are on, any other URL fails the deployment. |
+| `schemaRegistryUrl` | _(required)_ | Confluent Schema Registry URL. Required when `schemaRegistryEnabled` is `true`. It must start with `http://` or `https://`, in any letter case: while `schemaRegistryEnabled` and `avroValueSerialization` are on, any other URL fails the deployment. |
 | `schemaRegistryCredentialAlias` | — | Credential alias for Schema Registry authentication. |
 | `autoRegisterSchemas` | `false` | Automatically register schemas with Schema Registry. |
-| `subjectNameStrategy` | `TopicNameStrategy` | Subject naming strategy. Only `TopicNameStrategy` (subject `<topic>-value`) is supported, its name in any letter case: while `schemaRegistryEnabled` and `avroValueSerialization` are on, `RecordNameStrategy` or `TopicRecordNameStrategy` fails the deployment, because the record name cannot be derived from the JSON input. |
+| `subjectNameStrategy` | `TopicNameStrategy` | Subject naming strategy. Only `TopicNameStrategy` (subject `<topic>-value`) is supported, its name in any letter case: with `RecordNameStrategy` or `TopicRecordNameStrategy` (UI: "RecordNameStrategy (not supported – deployment fails)", "TopicRecordNameStrategy (not supported – deployment fails)") while `schemaRegistryEnabled` and `avroValueSerialization` are on, the channel does not start, because the record name cannot be derived from the JSON input. Both values stay selectable only so that saved configurations remain valid. |
 | `avroValueSerialization` | `true` | Serialize message values using Avro. Requires Schema Registry. |
 
 For details on Avro integration, see [Avro / Schema Registry](features/avro-schema-registry.md).
@@ -225,7 +225,7 @@ For details on Avro integration, see [Avro / Schema Registry](features/avro-sche
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `producerRetryMaxAttempts` | `1` | Total number of send attempts, not additional attempts. `1` keeps the previous behaviour and switches the retry off. Range 1–5. |
+| `producerRetryMaxAttempts` | `1` | Total number of send attempts, not additional attempts (UI: "Send Attempts (total, 1 = off)"). `1` keeps the previous behaviour and switches the retry off. Range 1–5. |
 | `producerRetryDelaySeconds` | `2` | Constant wait between attempts in seconds. Range 1–30. Shown only when `producerRetryMaxAttempts` is not `1`. |
 | `producerRetryOnlyTransientErrors` | `true` | Retry only transient (`RETRIABLE`) failures. `false` additionally retries an unusable transactional producer. |
 | `producerRetryTotalBudgetSeconds` | `30` | Hard upper bound for all attempts of one message together. Must stay below the calling system's timeout; a Kafka-to-Kafka or scheduled channel has no such caller and can use a larger budget. Range 5–900. Shown only when `producerRetryMaxAttempts` is not `1`. |

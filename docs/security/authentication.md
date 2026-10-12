@@ -11,7 +11,7 @@ TLS.
 | Protocol (UI label) | TLS | Authentication | When to use |
 |---|---|---|---|
 | `SASL_SSL (SASL over TLS)` | yes | Username/password via SASL | Default and the right choice for almost every broker, including all managed services |
-| `SSL (TLS, client certificate optional via Keystore Alias)` | yes | Client certificate (mTLS) if **SSL Keystore Alias** holds one, otherwise none | Brokers that authenticate clients by certificate instead of credentials, or TLS-only brokers without client authentication |
+| `SSL (TLS, client certificate optional via Keystore Alias)` | yes | Client certificate (mTLS) if **SSL Keystore Alias** names a key pair, otherwise none | Brokers that authenticate clients by certificate instead of credentials, or TLS-only brokers without client authentication |
 | `SASL_PLAINTEXT (no TLS)` | **no** | Username/password via SASL | Local or test brokers on a trusted network only |
 | `PLAINTEXT (no TLS, no authentication)` | **no** | none | Local development only |
 
@@ -63,22 +63,9 @@ Up to 1.4.1 such a channel deployed with the PLAIN login and failed at the first
 
 ## SSL/TLS and mTLS
 
-For broker connections that need a private/custom CA and/or client certificate
-authentication, configure a CPI keystore alias:
-
-| Parameter | Value |
-|---|---|
-| `securityProtocol` | `SSL` |
-| `sslKeystoreAlias` | `MyKafkaKeystore` |
-
-Or, when SASL and custom TLS material are both required:
-
-| Parameter | Value |
-|---|---|
-| `securityProtocol` | `SASL_SSL` |
-| `saslMechanism` | `PLAIN` |
-| `credentialAlias` | `MyKafkaCredentials` |
-| `sslKeystoreAlias` | `MyKafkaKeystore` |
+With `SSL` and `SASL_SSL`, **SSL Keystore Alias** (`sslKeystoreAlias`) decides which
+certificates the adapter trusts and which client certificate it presents. The field takes the
+alias of an **entry** in the CPI tenant keystore, not the name of a keystore.
 
 How it works at runtime:
 
@@ -88,10 +75,29 @@ How it works at runtime:
   **TLS is still fully active**: leaving the alias empty does not weaken the
   connection, it only means no custom trust material is needed.
 - If `sslKeystoreAlias` is **set**, the adapter creates a Kafka `SslEngineFactory`
-  backed by CPI's `KeystoreService`.
-- CPI trust managers are used for custom/private CA validation.
-- If the configured alias also contains a client keypair, the same setup enables
-  mutual TLS (mTLS).
+  backed by CPI's `KeystoreService` and trusts the certificates of the **whole CPI tenant
+  keystore** — not only the entry the alias names — **instead of** the JVM default truststore.
+  The broker's CA certificate (or its self-signed certificate) must then be in the tenant
+  keystore; this holds for a broker with a publicly trusted certificate as well.
+- The alias also selects the client key. For client-certificate authentication (mTLS) it must
+  name a **key pair** in the tenant keystore; the adapter presents that key pair's certificate to
+  the broker.
+
+mTLS, where the broker authenticates the adapter by its certificate:
+
+| Parameter | Value |
+|---|---|
+| `securityProtocol` | `SSL` |
+| `sslKeystoreAlias` | `MyKafkaClientKey` (alias of a key pair in the tenant keystore) |
+
+Or, with SASL authentication on top:
+
+| Parameter | Value |
+|---|---|
+| `securityProtocol` | `SASL_SSL` |
+| `saslMechanism` | `PLAIN` |
+| `credentialAlias` | `MyKafkaCredentials` |
+| `sslKeystoreAlias` | `MyKafkaClientKey` |
 
 ## CPI Secure Store
 
@@ -158,7 +164,9 @@ Please check Security Protocol, Credential Alias and SSL Keystore Alias.
 
 Reported immediately rather than after a timeout, because the same credentials or certificates
 would be rejected again. Check the User Credentials artifact behind `credentialAlias`, and — if
-`sslKeystoreAlias` is set — whether that keystore really contains the broker's CA.
+`sslKeystoreAlias` is set — whether the CPI tenant keystore contains the broker's CA certificate
+(with an alias set, the JVM default truststore is not used) and, for mTLS, whether the alias names
+a key pair.
 
 **The security protocol does not match the broker's listener**
 

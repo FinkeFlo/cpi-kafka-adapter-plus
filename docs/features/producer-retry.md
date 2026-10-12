@@ -20,7 +20,7 @@ A retry is only permitted where the previous attempt provably wrote **nothing**.
 |---|---|---|
 | Transactional, failure **before** the commit | :material-check: yes | The aborted transaction is never visible to `read_committed` consumers. The successor producer uses the same `transactional.id`, fences the old epoch and has the broker clean up. |
 | Transactional, failure **during** the commit | :material-close: no | The outcome is unknowable. The commit may have succeeded broker-side with only the response lost, so a retry would commit the batch a second time. |
-| Non-transactional **single** message | :material-check: only before buffering | Repeated only when the record never reached the producer's buffer: `send()` failed on metadata, a full buffer or the KAFKA-10902 fault. A failure after buffering (delivery timeout, disconnect) may already be on the broker, and a new `send()` is not deduplicated — stopped with `stopReason=OUTCOME_UNKNOWN`. Requires `enableIdempotence=true`. |
+| Non-transactional **single** message | :material-check: only before buffering | Repeated only when the record never reached the producer's buffer: `send()` failed on metadata, a full buffer, the KAFKA-10902 fault, or because the rebuild after another message's failure had just closed the shared producer (the next attempt uses the new one). A failure after buffering (delivery timeout, disconnect) may already be on the broker, and a new `send()` is not deduplicated — stopped with `stopReason=OUTCOME_UNKNOWN`. Requires `enableIdempotence=true`. |
 | Non-transactional **batch** | :material-close: no | Records `0..k-1` may already be committed when `k` fails. Resending the batch would duplicate them, and a new producer would get a new PID, disabling broker-side deduplication. |
 
 This is not a judgement call. The Kafka client documents both clean-up mechanisms the transactional
@@ -51,7 +51,7 @@ setting has no effect there. Enable transactions to use the retry for batches.
 
 From metadata version 1.4 the UI flags a value outside these ranges; an externalized `{{parameter}}`
 is not flagged and is checked when the channel starts. *Delay Between Attempts* and *Total Retry
-Budget* are hidden while *Max Send Attempts* is `1`, because they have no effect then and the start
+Budget* are hidden while *Send Attempts (total, 1 = off)* is `1`, because they have no effect then and the start
 check ignores them.
 
 These are **separate** from the sender-side `retryDelaySeconds` / `retryOnlyTransientErrors`, which
@@ -65,7 +65,9 @@ and hit the same broker node that just disappeared.
 
 Data errors (`RecordTooLargeException`, serialization failures, an invalid topic) and unclassified
 errors are **never** retried, whatever the configuration says. A record that is too large will be
-exactly as too large on the next attempt.
+exactly as too large on the next attempt. A send that Kafka refused because the shared producer had
+just been closed under it is not unclassified: it is reported as `RETRIABLE` (see
+[Troubleshooting](../troubleshooting.md#exception-classification)).
 
 ### One exception: the KAFKA-10902 monitor fault
 

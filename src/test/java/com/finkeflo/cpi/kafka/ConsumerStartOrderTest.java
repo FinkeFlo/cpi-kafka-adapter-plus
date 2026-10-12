@@ -117,7 +117,7 @@ public class ConsumerStartOrderTest {
         assertRejected(e, "'Max Records per IFlow Run (MPL)' (batchSize) must be at least 1 in batch mode, "
                 + "got: 0");
         e.setBatchSize(100);
-        assertRejected(e, "'Max Retries before DLQ' (dlqMaxRetries) must not be negative, got: -1");
+        assertRejected(e, "'Retries before DLQ (additional attempts)' (dlqMaxRetries) must not be negative, got: -1");
         e.setDlqMaxRetries(3);
         assertRejected(e, "'Dead Letter Topic' (dlqTopic) must not start or end with a space, got: "
                 + "' orders-dlq '. Please remove the spaces around the topic name.");

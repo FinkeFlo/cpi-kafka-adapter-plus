@@ -4,7 +4,7 @@ The adapter supports routing failed messages to a Dead Letter Queue topic, preve
 
 ## Overview
 
-When **Enable Dead Letter Queue** (`dlqEnabled`) is turned on, records that fail processing in the CPI IFlow are retried a configurable number of times. If all retries configured via **Max Retries before DLQ** (`dlqMaxRetries`) are exhausted, the record is forwarded to the configured **DLQ Topic** (`dlqTopic`) instead of blocking the consumer — unless the write to the DLQ itself fails, see [When the DLQ Write Fails](#when-the-dlq-write-fails). The original record key, value, and headers are preserved, and error metadata is added as Kafka headers.
+When **Enable Dead Letter Queue** (`dlqEnabled`) is turned on, records that fail processing in the CPI IFlow are retried a configurable number of times. If all retries configured via **Retries before DLQ (additional attempts)** (`dlqMaxRetries`) are exhausted, the record is forwarded to the configured **DLQ Topic** (`dlqTopic`) instead of blocking the consumer — unless the write to the DLQ itself fails, see [When the DLQ Write Fails](#when-the-dlq-write-fails). The original record key, value, and headers are preserved, and error metadata is added as Kafka headers.
 
 ## Configuration
 
@@ -12,9 +12,9 @@ When **Enable Dead Letter Queue** (`dlqEnabled`) is turned on, records that fail
 |-----------|---------|-------------|
 | `dlqEnabled` | `false` | Enable Dead Letter Queue routing for failed records |
 | `dlqTopic` | _(required)_ | Kafka topic to send failed records to. Kafka takes 1 to 249 characters from `a-z`, `A-Z`, `0-9`, `.`, `_` and `-`, but not `.` or `..` alone; any other name fails the deployment. |
-| `dlqMaxRetries` | `3` | Number of retry attempts before a record is sent to the DLQ |
-| `dlqCredentialAlias` | _(empty)_ | SASL credential alias for the DLQ Kafka cluster. Only visible when DLQ is enabled. Leave empty to reuse the main consumer credentials. |
-| `retryOnlyTransientErrors` | `true` | Only retry transient errors (timeouts, connection failures). Permanent errors are sent directly to DLQ. |
+| `dlqMaxRetries` | `3` | Number of retries after the first failed attempt before a record is sent to the DLQ (UI: "Retries before DLQ (additional attempts)") |
+| `dlqCredentialAlias` | _(empty)_ | SASL credential alias for writing to the DLQ topic, if that needs other credentials than the main connection. The DLQ topic is always on the same cluster (`bootstrapServers`). Only visible when DLQ is enabled. Leave empty to reuse the main consumer credentials. |
+| `retryOnlyTransientErrors` | `true` | Only retry transient errors (timeouts, connection failures). Permanent errors are sent directly to DLQ. (UI: "Retry Transient Errors Only") |
 | `retryDelaySeconds` | `0` | Initial delay between retries in seconds. Doubles after each retry (exponential backoff), capped at 300s. |
 
 !!! note "Not to be confused with the producer retry"
@@ -33,7 +33,7 @@ of that size (`message.max.bytes` / `max.message.bytes`).
 
 ## How Retries Work
 
-Retries happen **synchronously in memory** during the same poll cycle — the record is not re-read from Kafka. The consumer holds the record and passes it to the IFlow pipeline up to **Max Retries before DLQ** (`dlqMaxRetries`) + 1 times (1 initial attempt + N retries).
+Retries happen **synchronously in memory** during the same poll cycle — the record is not re-read from Kafka. The consumer holds the record and passes it to the IFlow pipeline up to **Retries before DLQ (additional attempts)** (`dlqMaxRetries`) + 1 times (1 initial attempt + N retries).
 
 ```
 Record consumed from Kafka
@@ -53,13 +53,19 @@ Record consumed from Kafka
 
 If any attempt succeeds, the offset is committed immediately and processing continues with the next record.
 
+A record that ends up in the DLQ still counts as one failure for **Auto-Pause on Errors**
+(`autoPauseEnabled`): once, after its last attempt, while the retries before it do not count
+separately. With the default **Consecutive Error Threshold** of 5, five dead-lettered records in a row
+pause the consumer, although the DLQ took each of them. A successful record resets the count, and
+records rejected by JSON Schema validation do not count.
+
 If the integration flow is stopped or undeployed while an attempt runs or while the consumer waits for the next
 one, the record is neither sent to the DLQ nor skipped: it stays uncommitted and is delivered again after the
 restart. An attempt that fails during the stop usually fails because of the stop, not because of the record.
 
 ## Smart Retry: Error Classification
 
-When **Only Retry Transient Errors** (`retryOnlyTransientErrors`) is enabled (default), the adapter classifies exceptions before retrying. Permanent errors are sent directly to the DLQ without further retry attempts.
+When **Retry Transient Errors Only** (`retryOnlyTransientErrors`) is enabled (default), the adapter classifies exceptions before retrying. Permanent errors are sent directly to the DLQ without further retry attempts.
 
 ### Transient Errors (retried)
 
@@ -86,7 +92,7 @@ The adapter walks the full exception cause chain. If a `RuntimeException` wraps 
 
 ### DLQ Error Type Header
 
-DLQ records include a `CpiKafkaPlusDlqErrorType` header. Normal processing failures use `PERMANENT` or `TRANSIENT`; deserialization poison pills use `DESERIALIZATION`.
+With **Retry Transient Errors Only** (`retryOnlyTransientErrors`) switched on, a record that failed in the IFlow reaches the DLQ with the header `CpiKafkaPlusDlqErrorType`: `PERMANENT` if the error was permanent and the remaining retries were skipped, `TRANSIENT` if all retries failed. With the switch off, the header is absent, because the adapter does not classify the error then. Records that cannot be deserialized (poison pills) always carry `DESERIALIZATION`; records that failed JSON Schema validation carry no error type.
 
 ## Retry Delay with Exponential Backoff
 
@@ -94,7 +100,7 @@ When `retryDelaySeconds` is set to a value greater than 0, the adapter waits bet
 
 **Formula:** `delay = min(retryDelaySeconds * 2^attempt, 300)`
 
-**Example** with `retryDelaySeconds=2` and **Max Retries before DLQ** (`dlqMaxRetries`) = 3:
+**Example** with `retryDelaySeconds=2` and **Retries before DLQ (additional attempts)** (`dlqMaxRetries`) = 3:
 
 | Attempt | Result | Wait |
 |---------|--------|------|
@@ -105,7 +111,7 @@ When `retryDelaySeconds` is set to a value greater than 0, the adapter waits bet
 | **Total** | | **14s** |
 
 !!! warning "max.poll.interval.ms"
-    The consumer's `max.poll.interval.ms` scales with **Polling Interval (Seconds)** (`pollingIntervalSeconds`) — it is that interval plus a 10-minute processing buffer (about 10 minutes at the default 5-second interval), capped at 6 h 10 min. If the total backoff time across all records in a single poll exceeds this limit, Kafka triggers a rebalance. Keep **Max Retries before DLQ** (`dlqMaxRetries`) low (1-3) and **Max Poll Records** (`maxPollRecords`) moderate when using retry delays. Combining with **Only Retry Transient Errors** (`retryOnlyTransientErrors`) minimizes the number of records entering the retry loop.
+    The consumer's `max.poll.interval.ms` scales with **Polling Interval (Seconds)** (`pollingIntervalSeconds`) — it is that interval plus a 10-minute processing buffer (about 10 minutes at the default 5-second interval), capped at 6 h 10 min. If the total backoff time across all records in a single poll exceeds this limit, Kafka triggers a rebalance. Keep **Retries before DLQ (additional attempts)** (`dlqMaxRetries`) low (1-3) and **Max Poll Records** (`maxPollRecords`) moderate when using retry delays. Combining with **Retry Transient Errors Only** (`retryOnlyTransientErrors`) minimizes the number of records entering the retry loop.
 
 ## Batch Mode Behavior
 
@@ -116,11 +122,14 @@ When using batch processing (`batchMode=true` with **JSON Array** (`JSON_ARRAY`)
 3. Each record is then retried individually with the full retry logic
 4. Only records that fail all individual retries are sent to the DLQ
 
+Each record of this fallback reaches the IFlow as a batch of one record in the same envelope, with
+the header `CpiKafkaPlusFallbackMode=true` (see [Kafka Headers](kafka-headers.md#batch-mode)).
+
 This means a single bad record does not drag the entire batch into the DLQ.
 
 ### Example: 5-Record Batch with One Bad Record
 
-**Setup:** **Max Records per IFlow Run (MPL)** (`batchSize`) = 5, **Max Retries before DLQ** (`dlqMaxRetries`) = 2, Record #3 contains invalid data.
+**Setup:** **Max Records per IFlow Run (MPL)** (`batchSize`) = 5, **Retries before DLQ (additional attempts)** (`dlqMaxRetries`) = 2, Record #3 contains invalid data.
 
 | Step | Action | Result |
 |------|--------|--------|
@@ -138,7 +147,7 @@ This means a single bad record does not drag the entire batch into the DLQ.
 
 ## JSON Schema Validation and DLQ
 
-Records that fail **JSON Schema Validation** (`jsonSchemaValidation`) are sent to the DLQ **immediately without retries** (`retryCount=0`), since schema validation errors are deterministic and retrying would produce the same result.
+Records that fail **JSON Schema Validation** (`jsonSchemaValidation`) are sent to the DLQ **immediately without retries** (`CpiKafkaPlusDlqRetryCount` = `0`, no `CpiKafkaPlusDlqErrorType`), since schema validation errors are deterministic and retrying would produce the same result.
 
 **Without DLQ:** Records that fail **JSON Schema Validation** (`jsonSchemaValidation`) are **silently discarded** — the offset is committed so the record is not reprocessed, but the record is not forwarded to the IFlow. A WARN-level log entry is written for each discarded record; WARN does not reach the tenant trace in production, so enable **Report Validation Failures in CPI Monitoring** (`jsonSchemaReportError`) to see these records as failed messages.
 
@@ -201,7 +210,7 @@ Each record sent to the DLQ includes the original headers plus DLQ metadata. The
 
 ### Normal Processing Failures
 
-Records that fail during IFlow processing include these headers:
+Records that fail during IFlow processing, and records that fail JSON Schema validation, include these headers:
 
 | Header | Description |
 |--------|-------------|
@@ -210,8 +219,8 @@ Records that fail during IFlow processing include these headers:
 | `CpiKafkaPlusDlqOriginalPartition` | Original partition number |
 | `CpiKafkaPlusDlqOriginalOffset` | Original offset within the partition |
 | `CpiKafkaPlusDlqTimestamp` | ISO 8601 timestamp of when the record was sent to DLQ |
-| `CpiKafkaPlusDlqRetryCount` | Number of retries attempted before DLQ routing |
-| `CpiKafkaPlusDlqErrorType` | `PERMANENT` or `TRANSIENT` — error classification |
+| `CpiKafkaPlusDlqRetryCount` | Number of retries before DLQ routing (attempts − 1), including a retry that failed with a permanent error; `0` for JSON Schema violations |
+| `CpiKafkaPlusDlqErrorType` | `PERMANENT` or `TRANSIENT`, only with **Retry Transient Errors Only** (`retryOnlyTransientErrors`) switched on; absent otherwise and for JSON Schema violations (see [DLQ Error Type Header](#dlq-error-type-header)) |
 
 ### Deserialization / Poison-Pill Failures
 
@@ -219,7 +228,7 @@ Records that cannot be deserialized include these headers:
 
 | Header | Description |
 |--------|-------------|
-| `CpiKafkaPlusDlqError` | Error message |
+| `CpiKafkaPlusDlqError` | Error message or exception class name |
 | `CpiKafkaPlusDlqErrorClass` | Exception class name |
 | `CpiKafkaPlusDlqCauseClass` | Cause exception class name |
 | `CpiKafkaPlusDlqCauseMessage` | Cause exception message |
@@ -229,13 +238,15 @@ Records that cannot be deserialized include these headers:
 | `CpiKafkaPlusDlqTimestamp` | ISO 8601 timestamp of when the record was sent to DLQ |
 | `CpiKafkaPlusDlqErrorType` | `DESERIALIZATION` |
 
+Such a record is not retried, so it carries no `CpiKafkaPlusDlqRetryCount`.
+
 These headers allow consumers of the DLQ topic to trace the origin of each failed record and understand the failure context.
 
 ## Recommendations
 
-- **Start with the default** of **Max Retries before DLQ** (`dlqMaxRetries`) = 3 — this handles transient errors well without adding too much latency
+- **Start with the default** of **Retries before DLQ (additional attempts)** (`dlqMaxRetries`) = 3 — this handles transient errors well without adding too much latency
 - **Monitor the DLQ topic** to detect recurring failures and fix root causes
 - **Use the DLQ headers** (`CpiKafkaPlusDlqError`, `CpiKafkaPlusDlqOriginalTopic`) to build automated alerting or reprocessing pipelines
 - **Combine with Offset Commit Strategy = After Successful Processing (At-Least-Once)** (`BATCH_COMPLETE`) to ensure at-least-once delivery — records are only committed after successful processing or DLQ routing
-- **Enable Only Retry Transient Errors** (`retryOnlyTransientErrors`) (default) to avoid wasting retries on mapping errors, NPEs, or other permanent failures
+- **Enable Retry Transient Errors Only** (`retryOnlyTransientErrors`) (default) to avoid wasting retries on mapping errors, NPEs, or other permanent failures
 - **Set `retryDelaySeconds=2`** when using DLQ with transient-error-prone backends to give downstream systems time to recover

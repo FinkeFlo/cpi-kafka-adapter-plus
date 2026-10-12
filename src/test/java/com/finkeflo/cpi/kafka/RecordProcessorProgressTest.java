@@ -184,7 +184,7 @@ public class RecordProcessorProgressTest {
 
     @Test
     public void withoutDlqAFailedRecordIsNotRetriedWithinThePoll() throws Exception {
-        // Max Retries before DLQ only applies with a DLQ. Without one, the blocked partition retries
+        // Retries before DLQ only applies with a DLQ. Without one, the blocked partition retries
         // the record on a later poll, after a backoff.
         failingTransiently.add("0:0");
         MockConsumer<byte[], byte[]> consumer = consumerWith(P0, "a", "b");

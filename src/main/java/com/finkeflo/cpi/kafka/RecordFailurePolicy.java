@@ -123,7 +123,7 @@ final class RecordFailurePolicy {
      * The settings are read when a decision is made, not here.
      *
      * @param deadLetterQueue          whether failed records can be written to a dead letter queue
-     * @param dlqMaxRetries            Max Retries before DLQ
+     * @param dlqMaxRetries            Retries before DLQ (additional attempts)
      * @param retryOnlyTransientErrors whether only a transient route failure is retried
      * @param skipFailedMessages       whether {@code errorHandling} is Skip Failed Message
      */
@@ -136,8 +136,8 @@ final class RecordFailurePolicy {
     }
 
     /**
-     * How often the route is called again for a failed record within the poll. Max Retries before
-     * DLQ applies only with a DLQ: without one, the blocked partition retries the record on a later
+     * How often the route is called again for a failed record within the poll. Retries before DLQ
+     * applies only with a DLQ: without one, the blocked partition retries the record on a later
      * poll, after a backoff.
      */
     int maxRetries() {

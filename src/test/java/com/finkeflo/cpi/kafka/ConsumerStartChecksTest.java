@@ -207,7 +207,7 @@ public class ConsumerStartChecksTest {
         withDlq.setDlqEnabled(true);
         withDlq.setDlqTopic("orders-dlq");
         withDlq.setDlqMaxRetries(-1);
-        assertRejected(withDlq, "dlqMaxRetries", "Max Retries before DLQ");
+        assertRejected(withDlq, "dlqMaxRetries", "Retries before DLQ (additional attempts)");
         CpiKafkaPlusEndpoint withoutDlq = endpoint();
         withoutDlq.setDlqMaxRetries(-1);
         assertStarts(withoutDlq);

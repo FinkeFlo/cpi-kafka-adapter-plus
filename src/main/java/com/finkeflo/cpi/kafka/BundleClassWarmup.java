@@ -60,11 +60,12 @@ import org.slf4j.LoggerFactory;
  * <ol>
  *   <li><b>Synchronous</b>: all {@code com.finkeflo.cpi.kafka.*} classes, initialised. Cheap
  *       (~70 classes) and covers the adapter's own stop/error paths. Followed by one
- *       compress/decompress round trip per Kafka codec ({@link CodecWarmup}): snappy, zstd and
- *       lz4 extract their native library from the bundle jar via {@code getResourceAsStream} on
+ *       compress/decompress round trip per Kafka codec ({@link CodecWarmup}): snappy and zstd
+ *       extract their native library from the bundle jar via {@code getResourceAsStream} on
  *       first use — a <em>resource</em> lookup that class loading alone does not cover and that
  *       fails just the same on a purged revision (verified on DEV: {@code SnappyError
- *       FAILED_TO_LOAD_NATIVE_LIBRARY} on the first snappy batch after an update).</li>
+ *       FAILED_TO_LOAD_NATIVE_LIBRARY} on the first snappy batch after an update). lz4 runs in
+ *       pure Java inside the bundle and loads no native library.</li>
  *   <li><b>Background daemon thread</b>: every {@code .class} in the bundle root and in every
  *       {@code Bundle-ClassPath} jar, loaded without initialisation. Kafka codec, consumer and
  *       record packages go first. Failures are expected for classes whose optional dependencies
@@ -127,6 +128,23 @@ final class BundleClassWarmup {
     private BundleClassWarmup() {}
 
     /**
+     * The Camel version of the runtime, for the start line: the Implementation-Version of camel-api,
+     * else the version of the bundle that provides it; {@code null} when neither can be read.
+     *
+     * @param anchor a class of this bundle, whose class loader sees the OSGi framework API
+     */
+    static String camelVersion(Class<?> anchor) {
+        try {
+            Class<?> api = org.apache.camel.CamelContext.class;
+            Package pkg = api.getPackage();
+            String version = pkg != null ? pkg.getImplementationVersion() : null;
+            return version != null ? version : OsgiBundleInfo.of(api, anchor).getVersion();
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /**
      * Starts the warm-up once per class space. Safe to call from every component/consumer/producer
      * start; all but the first call return immediately.
      *
@@ -141,9 +159,10 @@ final class BundleClassWarmup {
         }
         OsgiBundleInfo bundle = OsgiBundleInfo.of(anchor);
         LOG.error("[CPI-KAFKA-PLUS-DIAG] class-warmup.start trigger={} loader={} bundleId={} bundleVersion={} "
-                        + "bundleLastModified={} revisions={}",
+                        + "bundleLastModified={} revisions={} java={} javaVendor='{}' camel={}",
                 trigger, System.identityHashCode(anchor.getClassLoader()), bundle.getBundleId(),
-                bundle.getVersion(), bundle.getLastModified(), bundle.getRevisionCount());
+                bundle.getVersion(), bundle.getLastModified(), bundle.getRevisionCount(),
+                System.getProperty("java.version"), System.getProperty("java.vendor"), camelVersion(anchor));
 
         Report adapterReport;
         try {
@@ -158,8 +177,9 @@ final class BundleClassWarmup {
 
         try {
             CodecWarmup.Result codecs = CodecWarmup.warmAll();
-            LOG.error("[CPI-KAFKA-PLUS-DIAG] class-warmup.codecs.completed codecs={} failed={} durationMs={}",
-                    codecs.summary(), codecs.failed(), codecs.durationMs);
+            LOG.error("[CPI-KAFKA-PLUS-DIAG] class-warmup.codecs.completed codecs={} lz4Implementation={} failed={} "
+                            + "durationMs={}",
+                    codecs.summary(), codecs.lz4Implementation, codecs.failed(), codecs.durationMs);
         } catch (Throwable t) {
             LOG.error("[CPI-KAFKA-PLUS-DIAG] class-warmup.codecs.failed exClass={} exMsg='{}'",
                     t.getClass().getName(), t.getMessage());
