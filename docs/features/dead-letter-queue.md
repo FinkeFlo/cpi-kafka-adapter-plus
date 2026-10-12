@@ -53,6 +53,10 @@ Record consumed from Kafka
 
 If any attempt succeeds, the offset is committed immediately and processing continues with the next record.
 
+If the integration flow is stopped or undeployed while an attempt runs or while the consumer waits for the next
+one, the record is neither sent to the DLQ nor skipped: it stays uncommitted and is delivered again after the
+restart. An attempt that fails during the stop usually fails because of the stop, not because of the record.
+
 ## Smart Retry: Error Classification
 
 When **Only Retry Transient Errors** (`retryOnlyTransientErrors`) is enabled (default), the adapter classifies exceptions before retrying. Permanent errors are sent directly to the DLQ without further retry attempts.
