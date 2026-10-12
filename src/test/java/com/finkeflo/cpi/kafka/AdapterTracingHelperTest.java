@@ -499,6 +499,35 @@ public class AdapterTracingHelperTest {
         Assert.assertEquals("KP-CFG-002", errorCode);
     }
 
+    /**
+     * The MPL status text names the retries of a sender record. {@code retryAttempts} counts the
+     * retries after the first attempt, so a record that was tried once has none to name. Up to now
+     * a single retry was not named at all, and a record without one read "after 0 retry attempts".
+     */
+    @Test
+    public void theMplStatusTextNamesTheRetriesOfARecord() {
+        Exception error = new IllegalStateException("route failed");
+
+        Assert.assertEquals("KP-GEN-001: route failed",
+                helper.buildStatusMessage("KP-GEN-001", error, retries("0")));
+        Assert.assertEquals("KP-GEN-001: route failed (after 1 retry attempt)",
+                helper.buildStatusMessage("KP-GEN-001", error, retries("1")));
+        Assert.assertEquals("KP-GEN-001: route failed (after 3 retry attempts)",
+                helper.buildStatusMessage("KP-GEN-001", error, retries("3")));
+
+        java.util.Map<String, String> stopped = retries("3");
+        stopped.put("stopReason", "ATTEMPTS_EXHAUSTED");
+        Assert.assertEquals(
+                "KP-GEN-001: route failed (after 3 retry attempts, stopReason=ATTEMPTS_EXHAUSTED)",
+                helper.buildStatusMessage("KP-GEN-001", error, stopped));
+    }
+
+    private static java.util.Map<String, String> retries(String retryAttempts) {
+        java.util.Map<String, String> context = new java.util.LinkedHashMap<>();
+        context.put("retryAttempts", retryAttempts);
+        return context;
+    }
+
     /** Runs {@code action} and returns the {@code adapter.failure.reported} line it logged. */
     private static String failureReportedLine(Runnable action) throws Exception {
         java.io.PrintStream original = System.err;

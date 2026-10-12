@@ -439,8 +439,11 @@ public class AdapterTracingHelper {
         }
     }
 
-    /** Builds a status message from errorCode and exception, null-safe, with length limit. */
-    private String buildStatusMessage(String errorCode, Exception e, Map<String, String> context) {
+    /**
+     * Builds a status message from errorCode and exception, null-safe, with length limit.
+     * Package-private for tests.
+     */
+    String buildStatusMessage(String errorCode, Exception e, Map<String, String> context) {
         StringBuilder sb = new StringBuilder();
         if (errorCode != null) {
             sb.append(errorCode).append(": ");
@@ -477,18 +480,25 @@ public class AdapterTracingHelper {
     }
 
     /**
-     * Appends the producer retry history to the MPL status text, if there was one.
+     * Appends the retry history to the MPL status text, if there was one.
+     *
+     * <p>{@code retryAttempts} counts the retries after the first attempt, as the sender's
+     * {@code RecordProcessor} passes it and {@code CpiKafkaPlusDlqRetryCount} reports it: a record
+     * that was tried once has 0. The sender is the only caller of {@link #reportFailure} that
+     * passes it. The receiver's traces count attempts under the same key, but the receiver reports
+     * a failure through its exception, not through this status text.
      *
      * <p>{@code stopReason} is included because "was not retried" is not actionable on its own: a
      * permanent error, an exhausted budget and a switched-off feature are three different
      * conclusions for the operator reading this line.
      */
     private static void appendRetryOutcome(StringBuilder sb, Map<String, String> context) {
-        String attempts = context.get("retryAttempts");
-        if (attempts == null || "1".equals(attempts.trim()) || attempts.trim().isEmpty()) {
+        String retries = context.get("retryAttempts");
+        if (retries == null || retries.trim().isEmpty() || "0".equals(retries.trim())) {
             return;
         }
-        sb.append(" (after ").append(attempts.trim()).append(" retry attempts");
+        String count = retries.trim();
+        sb.append(" (after ").append(count).append("1".equals(count) ? " retry attempt" : " retry attempts");
         String stopReason = context.get("stopReason");
         if (stopReason != null && !stopReason.trim().isEmpty()) {
             sb.append(", stopReason=").append(stopReason.trim());

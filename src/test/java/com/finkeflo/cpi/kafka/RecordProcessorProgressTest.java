@@ -154,6 +154,9 @@ public class RecordProcessorProgressTest {
         Assert.assertEquals("orders-dlq", tracing.traced.get(0).get("dlqTopic"));
         Assert.assertEquals("PERMANENT", tracing.traced.get(0).get("errorType"));
         Assert.assertEquals("0", tracing.traced.get(0).get("retryAttempts"));
+        Assert.assertEquals(1, tracing.statuses.size());
+        Assert.assertFalse("a record that was tried once names no retries: " + tracing.statuses.get(0),
+                tracing.statuses.get(0).contains("retry attempt"));
     }
 
     @Test
@@ -353,6 +356,9 @@ public class RecordProcessorProgressTest {
         Assert.assertEquals("1", header(dlq.history().get(0), "CpiKafkaPlusDlqRetryCount"));
         Assert.assertEquals("PERMANENT", tracing.traced.get(0).get("errorType"));
         Assert.assertEquals("1", tracing.traced.get(0).get("retryAttempts"));
+        Assert.assertEquals(1, tracing.statuses.size());
+        Assert.assertTrue(tracing.statuses.get(0),
+                tracing.statuses.get(0).endsWith(" (moved to dead-letter topic orders-dlq) (after 1 retry attempt)"));
         Assert.assertEquals(2L, committed(consumer, P0));
     }
 
@@ -379,6 +385,9 @@ public class RecordProcessorProgressTest {
         Assert.assertEquals("UNKNOWN", tracing.traced.get(0).get("errorType"));
         Assert.assertEquals("2", tracing.traced.get(0).get("retryAttempts"));
         Assert.assertEquals("MOVED", tracing.traced.get(0).get("dlqOutcome"));
+        Assert.assertEquals(1, tracing.statuses.size());
+        Assert.assertTrue(tracing.statuses.get(0),
+                tracing.statuses.get(0).endsWith(" (moved to dead-letter topic orders-dlq) (after 2 retry attempts)"));
         Assert.assertEquals(2L, committed(consumer, P0));
     }
 
@@ -1327,9 +1336,13 @@ public class RecordProcessorProgressTest {
         };
     }
 
-    /** Records the context of every failure trace, which carries the failure's error type. */
+    /**
+     * Records the context of every failure trace, which carries the failure's error type, and the
+     * MPL status text of every reported failure.
+     */
     private static final class RecordingTracingHelper extends AdapterTracingHelper {
         final List<Map<String, String>> traced = new ArrayList<>();
+        final List<String> statuses = new ArrayList<>();
 
         RecordingTracingHelper(CpiKafkaPlusEndpoint endpoint) {
             super(endpoint);
@@ -1340,6 +1353,13 @@ public class RecordProcessorProgressTest {
                                boolean senderDirection) {
             traced.add(new HashMap<>(context));
             super.traceError(exchange, e, context, senderDirection);
+        }
+
+        @Override
+        public void reportFailure(Exchange exchange, Exception e, String errorCode,
+                                  Map<String, String> context, boolean fireStatusEvent) {
+            statuses.add(buildStatusMessage(errorCode, e, context));
+            super.reportFailure(exchange, e, errorCode, context, fireStatusEvent);
         }
     }
 }
