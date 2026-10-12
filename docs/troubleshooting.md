@@ -289,8 +289,10 @@ will make records look lost that are not.
 
 ### A channel does not start after updating to 1.4.2
 
-1.4.2 rejects a few more settings at deployment. The deployment error names the field with its UI label
-and parameter name, as in 1.4.1.
+1.4.2 rejects a few more settings at deployment. Every deployment error of a start check now has one
+form, `'<UI label>' (<parameter>) must …, got: <value>`, for example
+`'Max Poll Records' (maxPollRecords) must be at least 1, got: 0`. A text value is quoted, so an empty
+value or spaces around it show.
 
 * **Receiver:** a *Transactional ID Prefix* that makes the `transactional.id` of the last transaction slot
   longer than 249 characters. 1.4.1 checked the first slot only, whose id is one character shorter from
@@ -413,16 +415,36 @@ reports the same in `consumer.init.failed`, the DLQ producer in `dlq.producer.in
 
 ### `producer.config.ineffective`
 
-A receiver setting that has no effect with the rest of the configuration. It is logged once at
-deployment, as ERROR so that it reaches the tenant trace, and the channel starts all the same.
-`parameter` names the setting and `reason` says why:
+A receiver setting that has no effect, or not the one intended, with the rest of the configuration. It
+is logged once at deployment, as ERROR so that it reaches the tenant trace, and the channel starts all
+the same. `parameter` names the setting and `reason` says why:
 
 * `enableTransactions` with *Batch Send Mode* `NONE`: transactions apply to batches only.
 * `jsonSchemaValidation` with *Batch Send Mode* `JSON_ARRAY` or `XML_LIST`: the JSON Schema applies to
   single messages only. A batch is sent without validation, and the schema is neither checked at
   deployment nor compiled.
+* `producerRetryMaxAttempts` above 1 with *Batch Send Mode* `JSON_ARRAY` or `XML_LIST` and
+  *Enable Transactions* off: a partially sent batch cannot be retried without duplicating records, so
+  batches are not retried.
+* `producerRetryMaxAttempts` above 1 with transactional batching and 1 *Max Concurrent Transactions*:
+  a retry holds the only transaction slot for up to *Total Retry Budget (Seconds)* and blocks every
+  other send on the node meanwhile.
 
-Switch the setting off, or change the *Batch Send Mode*, if the line should go away.
+Up to 1.4.1 the two retry lines were WARN, which does not reach the tenant trace. Change the setting
+if the line should go away.
+
+### `consumer.config.ineffective` and `consumer.config.clamped`
+
+A sender setting the adapter replaces with a working value. It is logged once at deployment, as ERROR,
+and the channel starts all the same:
+
+* `consumer.config.ineffective parameter=batchOutputFormat`: an unknown *Batch Output Format*; batches
+  are formatted as `JSON_ARRAY`.
+* `consumer.config.ineffective parameter=avroOutputFormat`: an unknown *Avro Output Format*; Avro
+  records are converted to JSON.
+* `consumer.config.clamped`: with **Auto-Pause on Errors**, a *Consecutive Error Threshold* or an
+  *Initial Pause Duration (sec)* below 1 is used as 1, and an *Initial Pause Duration (sec)* above 900
+  as 900, the longest pause there is. Up to 1.4.1 a value above 900 was cut without a line.
 
 ### `producer.metadata.prewarm outcome=FAILED`
 

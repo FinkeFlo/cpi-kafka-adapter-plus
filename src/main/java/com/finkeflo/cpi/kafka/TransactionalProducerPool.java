@@ -114,9 +114,10 @@ final class TransactionalProducerPool {
         String longestId = formatTransactionalId(prefix, topicHash, resolvedMemberSuffix, Math.max(1, slots) - 1);
         if (longestId.length() > MAX_TRANSACTIONAL_ID_LENGTH) {
             int excess = longestId.length() - MAX_TRANSACTIONAL_ID_LENGTH;
-            throw new IllegalArgumentException("'Transactional ID Prefix' (transactionalIdPrefix) must be at most "
-                    + (prefix.length() - excess) + " characters long, got: " + prefix.length() + " characters. "
-                    + "With " + slots + " for 'Max Concurrent Transactions', the transactional.id of the last "
+            throw new IllegalArgumentException(UiLabels.field("transactionalIdPrefix") + " must be at most "
+                    + (prefix.length() - excess) + " characters long, got: " + UiLabels.quote(prefix) + " ("
+                    + prefix.length() + " characters). With " + slots + " for "
+                    + UiLabels.field("maxConcurrentTransactions") + ", the transactional.id of the last "
                     + "slot, '" + longestId + "', would have " + longestId.length() + " characters, and the "
                     + "adapter allows at most " + MAX_TRANSACTIONAL_ID_LENGTH + ". Please shorten the prefix by "
                     + "at least " + excess + (excess == 1 ? " character." : " characters."));

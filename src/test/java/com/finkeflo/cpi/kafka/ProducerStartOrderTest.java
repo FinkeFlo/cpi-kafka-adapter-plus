@@ -82,54 +82,59 @@ public class ProducerStartOrderTest {
         e.setProducerRetryTotalBudgetSeconds(901);
 
         // CpiKafkaPlusEndpoint.validateConfiguration(), shared with the sender, comes first
-        assertRejected(e, "[CPI-KAFKA-PLUS-DIAG] Invalid diagnosticsLevel 'VERBOSE'. Accepted values are "
-                + "STANDARD (default) or FULL.");
+        assertRejected(e, "'Diagnostics Level' (diagnosticsLevel) must be STANDARD (default) or FULL, got: "
+                + "'VERBOSE'");
         e.setDiagnosticsLevel("STANDARD");
-        assertRejected(e, "Unknown 'Batch Send Mode' (producerBatchMode): CSV. Supported: NONE, JSON_ARRAY, "
-                + "XML_LIST");
+        assertRejected(e, "'Batch Send Mode' (producerBatchMode) must be NONE, JSON_ARRAY or XML_LIST, got: "
+                + "'CSV'");
         e.setProducerBatchMode("JSON_ARRAY");
         assertRejected(e, "'Delivery Timeout (Seconds)' (deliveryTimeoutSeconds) must be at least 1, got: 0. "
                 + "With 0 every send times out before it is sent.");
         e.setDeliveryTimeoutSeconds(871);
-        assertRejected(e, "'Subject Name Strategy' (subjectNameStrategy) 'RecordNameStrategy' is not supported "
-                + "for Avro serialization: the subject cannot be resolved from JSON input without the record "
-                + "name. Please use TopicNameStrategy.");
+        assertRejected(e, "'Subject Name Strategy' (subjectNameStrategy) must be TopicNameStrategy while "
+                + "'Serialize Values as Avro' (avroValueSerialization) is on, got: 'RecordNameStrategy'. The "
+                + "subject cannot be resolved from JSON input without the record name.");
         e.setSubjectNameStrategy("TopicNameStrategy");
         // after super.doStart() and the start-up line
-        assertRejected(e, "Please configure transactionalIdPrefix — it is required whenever transactional "
-                + "batching is switched on");
+        assertRejected(e, "'Transactional ID Prefix' (transactionalIdPrefix) must not be empty while 'Enable "
+                + "Transactions' (enableTransactions) is on, got: ' '");
         e.setTransactionalIdPrefix(repeat('x', 240));
-        assertRejected(e, "Please leave idempotence switched on — it cannot be turned off while transactional "
-                + "batching is enabled");
+        assertRejected(e, "'Enable Idempotent Producer' (enableIdempotence) must be on while 'Enable "
+                + "Transactions' (enableTransactions) is on, got: false. Kafka allows transactions only with "
+                + "idempotence.");
         e.setEnableIdempotence(true);
-        assertRejected(e, "Please set deliveryTimeoutSeconds to at most 870 on a transactional channel "
-                + "(configured value: 871s). The adapter derives transaction.timeout.ms from it, and a broker "
-                + "rejects a producer asking for more than transaction.max.timeout.ms (15 minutes by default).");
+        assertRejected(e, "'Delivery Timeout (Seconds)' (deliveryTimeoutSeconds) must be at most 870 while "
+                + "'Enable Transactions' (enableTransactions) is on, got: 871. The adapter derives "
+                + "transaction.timeout.ms from it, and a broker rejects a producer asking for more than "
+                + "transaction.max.timeout.ms (15 minutes by default).");
         e.setDeliveryTimeoutSeconds(2);
-        assertRejected(e, "Please set maxConcurrentTransactions to 1 or higher (configured value: 0) — with "
-                + "transactional batching enabled, a value below 1 would leave the adapter unable to send "
-                + "anything");
+        assertRejected(e, "'Max Concurrent Transactions' (maxConcurrentTransactions) must be at least 1 while "
+                + "'Enable Transactions' (enableTransactions) is on, got: 0. With no transaction slot the adapter "
+                + "could not send anything.");
         e.setMaxConcurrentTransactions(1);
         // TransactionalProducerPool.start(); the member suffix depends on the node
         String tooLong = rejection(e);
         Assert.assertTrue(tooLong, tooLong.matches("'Transactional ID Prefix' \\(transactionalIdPrefix\\) must be "
-                + "at most \\d+ characters long, got: 240 characters\\. With 1 for 'Max Concurrent Transactions', "
-                + "the transactional\\.id of the last slot, 'x{240}-[0-9a-f]{8}-[^']+-0', would have \\d+ "
+                + "at most \\d+ characters long, got: 'x{240}' \\(240 characters\\)\\. With 1 for 'Max Concurrent "
+                + "Transactions' \\(maxConcurrentTransactions\\), the transactional\\.id of the last slot, "
+                + "'x{240}-[0-9a-f]{8}-[^']+-0', would have \\d+ "
                 + "characters, and the adapter allows at most 249\\. Please shorten the prefix by at least \\d+ "
                 + "characters?\\."));
         e.setTransactionalIdPrefix("orders-tx");
-        assertRejected(e, "Please set producerRetryMaxAttempts between 1 and 5 (configured value: 6). This is "
-                + "the total number of attempts, not the number of additional ones; 1 switches the retry off.");
+        assertRejected(e, "'Max Send Attempts' (producerRetryMaxAttempts) must be between 1 and 5, got: 6. This "
+                + "is the total number of attempts, not the number of additional ones; 1 switches the retry off.");
         e.setProducerRetryMaxAttempts(2);
-        assertRejected(e, "Please set producerRetryDelaySeconds between 1 and 30 (configured value: 0). A delay "
-                + "below one second cannot help against a disconnected broker node — the Kafka client has "
-                + "already backed off exponentially before giving up — and only adds load.");
+        assertRejected(e, "'Delay Between Attempts (Seconds)' (producerRetryDelaySeconds) must be between 1 and "
+                + "30, got: 0. A delay below one second cannot help against a disconnected broker node — the "
+                + "Kafka client has already backed off exponentially before giving up — and only adds load.");
         e.setProducerRetryDelaySeconds(2);
-        assertRejected(e, "Please set producerRetryTotalBudgetSeconds between 5 and 900 (configured value: 901).");
+        assertRejected(e, "'Total Retry Budget (Seconds)' (producerRetryTotalBudgetSeconds) must be between 5 "
+                + "and 900, got: 901");
         e.setProducerRetryTotalBudgetSeconds(5);
-        assertRejected(e, "Producer retry is configured with a worst case of 28s, which exceeds "
-                + "producerRetryTotalBudgetSeconds=5. Lower deliveryTimeoutSeconds (currently 2s) or "
-                + "producerRetryMaxAttempts, or raise the budget. The budget must stay below the timeout of "
+        assertRejected(e, "'Total Retry Budget (Seconds)' (producerRetryTotalBudgetSeconds) must cover the worst "
+                + "case of the configured retry, 28 s, got: 5. Lower 'Delivery Timeout (Seconds)' "
+                + "(deliveryTimeoutSeconds) (currently 2) or 'Max Send Attempts' (producerRetryMaxAttempts), or "
+                + "raise the budget. The budget must stay below the timeout of "
                 + "the calling HTTP client. Note that one attempt costs roughly four times "
                 + "deliveryTimeoutSeconds on the transactional path, because initTransactions(), the metadata "
                 + "block inside send() and commitTransaction() are each bounded by max.block.ms = min(30s, "
@@ -159,8 +164,8 @@ public class ProducerStartOrderTest {
         e.setEnableTransactions(true);
         e.setTransactionalIdPrefix(null);
 
-        String logged = capture(() -> assertRejected(e, "Please configure transactionalIdPrefix — it is required "
-                + "whenever transactional batching is switched on"));
+        String logged = capture(() -> assertRejected(e, "'Transactional ID Prefix' (transactionalIdPrefix) must "
+                + "not be empty while 'Enable Transactions' (enableTransactions) is on, got: ''"));
 
         assertInOrder(logged, START_UP_LINE, "producer.start.failed");
     }
@@ -171,8 +176,8 @@ public class ProducerStartOrderTest {
         e.setEnableTransactions(true);
         e.setProducerRetryMaxAttempts(6);
 
-        String logged = capture(() -> assertRejected(e, "Please set producerRetryMaxAttempts between 1 and 5 "
-                + "(configured value: 6). This is the total number of attempts, not the number of additional "
+        String logged = capture(() -> assertRejected(e, "'Max Send Attempts' (producerRetryMaxAttempts) must be "
+                + "between 1 and 5, got: 6. This is the total number of attempts, not the number of additional "
                 + "ones; 1 switches the retry off."));
 
         assertInOrder(logged, START_UP_LINE,
@@ -183,7 +188,7 @@ public class ProducerStartOrderTest {
     }
 
     @Test
-    public void theSingleSlotWarningIsLoggedEvenWhenTheWorstCaseCheckRejects() throws Exception {
+    public void theSingleSlotLineIsLoggedEvenWhenTheWorstCaseCheckRejects() throws Exception {
         CpiKafkaPlusEndpoint e = endpoint();
         e.setProducerBatchMode("JSON_ARRAY");
         e.setEnableTransactions(true);
@@ -191,9 +196,10 @@ public class ProducerStartOrderTest {
         e.setMaxConcurrentTransactions(1);
         e.setProducerRetryMaxAttempts(2);
 
-        String logged = capture(() -> assertRejected(e, "Producer retry is configured with a worst case of 432s, "
-                + "which exceeds producerRetryTotalBudgetSeconds=30. Lower deliveryTimeoutSeconds (currently "
-                + "120s) or producerRetryMaxAttempts, or raise the budget. The budget must stay below the "
+        String logged = capture(() -> assertRejected(e, "'Total Retry Budget (Seconds)' "
+                + "(producerRetryTotalBudgetSeconds) must cover the worst case of the configured retry, 432 s, "
+                + "got: 30. Lower 'Delivery Timeout (Seconds)' (deliveryTimeoutSeconds) (currently 120) or 'Max "
+                + "Send Attempts' (producerRetryMaxAttempts), or raise the budget. The budget must stay below the "
                 + "timeout of the calling HTTP client. Note that one attempt costs roughly four times "
                 + "deliveryTimeoutSeconds on the transactional path, because initTransactions(), the metadata "
                 + "block inside send() and commitTransaction() are each bounded by max.block.ms = min(30s, "
@@ -202,37 +208,37 @@ public class ProducerStartOrderTest {
         assertInOrder(logged, START_UP_LINE,
                 "INFO " + PRODUCER + " - [CPI-KAFKA-PLUS-DIAG] Transactional batching enabled with max 1 "
                         + "concurrent transactions.",
-                "WARN " + PRODUCER + " - [CPI-KAFKA-PLUS-DIAG] producerRetryMaxAttempts=2 with "
-                        + "maxConcurrentTransactions=1: a retry holds the single transaction slot for its whole "
-                        + "duration (up to producerRetryTotalBudgetSeconds=30s), blocking every other send on "
-                        + "this node meanwhile. Consider raising maxConcurrentTransactions.",
+                "ERROR " + PRODUCER + " - [CPI-KAFKA-PLUS-DIAG] producer.config.ineffective "
+                        + "parameter=producerRetryMaxAttempts value=2 maxConcurrentTransactions=1 reason='a retry "
+                        + "holds the single transaction slot for up to producerRetryTotalBudgetSeconds=30s and "
+                        + "blocks every other send on this node meanwhile; raise maxConcurrentTransactions'",
                 "producer.start.failed");
     }
 
     /**
-     * Without transactions a batch is never retried: the start warns and skips the worst case, here
+     * Without transactions a batch is never retried: the start says so and skips the worst case, here
      * with a budget it could never meet. The ranges are still checked first.
      */
     @Test
-    public void aBatchWithoutTransactionsWarnsAfterTheRangesAndSkipsTheWorstCase() throws Exception {
+    public void aBatchWithoutTransactionsLogsAfterTheRangesAndSkipsTheWorstCase() throws Exception {
         CpiKafkaPlusEndpoint e = endpoint();
         e.setProducerBatchMode("JSON_ARRAY");
         e.setProducerRetryMaxAttempts(2);
         e.setProducerRetryTotalBudgetSeconds(5);
-        String warning = "WARN " + PRODUCER + " - [CPI-KAFKA-PLUS-DIAG] producerRetryMaxAttempts=2 has no effect "
-                + "for producerBatchMode=JSON_ARRAY without enableTransactions=true, because a partially sent "
-                + "batch cannot be retried without duplicating records. Enable transactions to use producer "
-                + "retry for batches.";
+        String ineffective = "ERROR " + PRODUCER + " - [CPI-KAFKA-PLUS-DIAG] producer.config.ineffective "
+                + "parameter=producerRetryMaxAttempts value=2 producerBatchMode=JSON_ARRAY reason='a partially "
+                + "sent batch cannot be retried without duplicating records; switch on enableTransactions to retry "
+                + "batches'";
 
         String started = capture(() -> assertStarts(e));
-        assertInOrder(started, START_UP_LINE, warning);
+        assertInOrder(started, START_UP_LINE, ineffective);
 
         e.setProducerRetryDelaySeconds(0);
-        String rejected = capture(() -> assertRejected(e, "Please set producerRetryDelaySeconds between 1 and 30 "
-                + "(configured value: 0). A delay below one second cannot help against a disconnected broker "
-                + "node — the Kafka client has already backed off exponentially before giving up — and only "
-                + "adds load."));
-        Assert.assertFalse(rejected, rejected.contains("has no effect for producerBatchMode"));
+        String rejected = capture(() -> assertRejected(e, "'Delay Between Attempts (Seconds)' "
+                + "(producerRetryDelaySeconds) must be between 1 and 30, got: 0. A delay below one second cannot "
+                + "help against a disconnected broker node — the Kafka client has already backed off "
+                + "exponentially before giving up — and only adds load."));
+        Assert.assertFalse(rejected, rejected.contains("parameter=producerRetryMaxAttempts"));
     }
 
     private CpiKafkaPlusEndpoint endpoint() throws Exception {

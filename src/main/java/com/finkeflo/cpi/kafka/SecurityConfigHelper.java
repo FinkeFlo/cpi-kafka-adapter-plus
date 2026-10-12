@@ -68,7 +68,7 @@ public final class SecurityConfigHelper {
             CredentialHelper.UserCredentials credentials = CredentialHelper.getUserCredential(alias);
             if (credentials != null) {
                 String jaasConfig = buildJaasConfig(endpoint.getSaslMechanism(), credentials.username(),
-                        credentials.password(), "'Credential Alias' (credentialAlias) '" + alias + "'");
+                        credentials.password(), UiLabels.field("credentialAlias") + " '" + alias + "'");
                 props.put("sasl.jaas.config", jaasConfig);
                 LOG.info("SASL credentials resolved for alias '{}'", alias);
             } else {
@@ -144,7 +144,7 @@ public final class SecurityConfigHelper {
             CredentialHelper.UserCredentials credentials = CredentialHelper.getUserCredential(alias);
             if (credentials != null) {
                 String jaasConfig = buildJaasConfig(mechanism, credentials.username(), credentials.password(),
-                        "'DLQ SASL Credential Alias' (dlqCredentialAlias) '" + alias + "'");
+                        UiLabels.field("dlqCredentialAlias") + " '" + alias + "'");
                 props.put("sasl.jaas.config", jaasConfig);
                 LOG.info("DLQ SASL credentials resolved for alias '{}'", alias);
             } else {

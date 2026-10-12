@@ -421,51 +421,60 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
     void validateConfiguration(boolean jsonSchemaApplied) {
         String effectiveTopic = getEffectiveTopic();
         if (effectiveTopic == null || effectiveTopic.trim().isEmpty()) {
-            throw new IllegalArgumentException(
-                    "[CPI-KAFKA-PLUS-DIAG] Topic is not configured. Please set the target topic in the adapter Connection tab.");
+            throw new IllegalArgumentException(UiLabels.field("topic") + " must not be empty, got: "
+                    + UiLabels.quote(effectiveTopic) + ". Please set it in the adapter Connection tab.");
         }
         if (!effectiveTopic.equals(effectiveTopic.trim())) {
-            throw new IllegalArgumentException(
-                    "[CPI-KAFKA-PLUS-DIAG] Topic name '" + effectiveTopic + "' contains leading or trailing whitespace. "
-                    + "Please remove any spaces around the topic name in the adapter Connection tab.");
+            throw new IllegalArgumentException(UiLabels.field("topic") + " must not start or end with a space, got: "
+                    + UiLabels.quote(effectiveTopic) + ". Please remove the spaces around the topic name in the "
+                    + "adapter Connection tab.");
         }
         if (bootstrapServers == null || bootstrapServers.trim().isEmpty()) {
-            throw new IllegalArgumentException(
-                    "'Bootstrap Servers' (bootstrapServers) must not be empty. Please set the Kafka broker address in the adapter Connection tab.");
+            throw new IllegalArgumentException(UiLabels.field("bootstrapServers") + " must not be empty, got: "
+                    + UiLabels.quote(bootstrapServers) + ". Please set the Kafka broker address in the adapter "
+                    + "Connection tab.");
         }
         if (schemaRegistryEnabled
                 && (schemaRegistryUrl == null || schemaRegistryUrl.isEmpty())) {
-            throw new IllegalArgumentException(
-                    "Schema Registry is enabled but schemaRegistryUrl is not configured.");
+            throw new IllegalArgumentException(UiLabels.field("schemaRegistryUrl") + " must not be empty while "
+                    + UiLabels.field("schemaRegistryEnabled") + " is on, got: " + UiLabels.quote(schemaRegistryUrl));
         }
         if (jsonSchemaValidation && jsonSchemaApplied) {
             if (jsonSchema == null || jsonSchema.trim().isEmpty()) {
-                throw new IllegalArgumentException(
-                        "JSON Schema validation is enabled but no JSON Schema is configured. "
-                        + "Please provide a valid JSON Schema (draft-07) or disable JSON Schema validation.");
+                throw new IllegalArgumentException(UiLabels.field("jsonSchema") + " must not be empty while "
+                        + UiLabels.field("jsonSchemaValidation") + " is on, got: " + UiLabels.quote(jsonSchema)
+                        + ". Please provide a JSON Schema (draft-07) or switch the validation off.");
             }
             try {
                 JsonSchemaValidator.parseSchemaDocument(new ObjectMapper(), jsonSchema);
             } catch (IllegalArgumentException e) {
-                throw new IllegalArgumentException("JSON Schema validation is enabled but 'JSON Schema' "
-                        + "(jsonSchema) is not valid JSON. " + e.getMessage(), e);
+                // The schema can be 50,000 characters long: its beginning, its length and the parser's
+                // account of where it fails say more than the whole text would.
+                throw new IllegalArgumentException(UiLabels.field("jsonSchema") + " must be one valid JSON document "
+                        + "while " + UiLabels.field("jsonSchemaValidation") + " is on, got: "
+                        + UiLabels.quote(abbreviate(jsonSchema)) + " (" + jsonSchema.length() + " characters). "
+                        + e.getMessage(), e);
             }
         }
         if (securityProtocol != null
                 && securityProtocol.toUpperCase().contains("SASL")
                 && (credentialAlias == null || credentialAlias.trim().isEmpty())) {
-            throw new IllegalArgumentException(
-                    "Security protocol " + securityProtocol
-                    + " requires SASL authentication but no credentialAlias is configured.");
+            throw new IllegalArgumentException(UiLabels.field("credentialAlias") + " must not be empty while "
+                    + UiLabels.field("securityProtocol") + " is " + securityProtocol + ", got: "
+                    + UiLabels.quote(credentialAlias));
         }
         if (diagnosticsLevel != null
                 && !diagnosticsLevel.isEmpty()
                 && !"STANDARD".equalsIgnoreCase(diagnosticsLevel)
                 && !"FULL".equalsIgnoreCase(diagnosticsLevel)) {
-            throw new IllegalArgumentException(
-                    "[CPI-KAFKA-PLUS-DIAG] Invalid diagnosticsLevel '" + diagnosticsLevel
-                    + "'. Accepted values are STANDARD (default) or FULL.");
+            throw new IllegalArgumentException(UiLabels.field("diagnosticsLevel")
+                    + " must be STANDARD (default) or FULL, got: " + UiLabels.quote(diagnosticsLevel));
         }
+    }
+
+    /** The first 40 characters of {@code text}, and "..." if there are more. */
+    private static String abbreviate(String text) {
+        return text.length() <= 40 ? text : text.substring(0, 40) + "...";
     }
 
     @Override

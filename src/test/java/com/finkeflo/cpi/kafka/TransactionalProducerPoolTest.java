@@ -137,10 +137,11 @@ public class TransactionalProducerPoolTest {
                 Assert.fail("expected the start to fail");
             } catch (IllegalArgumentException expected) {
                 Assert.assertEquals("'Transactional ID Prefix' (transactionalIdPrefix) must be at most 223 "
-                        + "characters long, got: 224 characters. With 11 for 'Max Concurrent Transactions', the "
-                        + "transactional.id of the last slot, '" + prefix + "-c6fb053c-" + suffix + "-10', would "
-                        + "have 250 characters, and the adapter allows at most 249. Please shorten the prefix by "
-                        + "at least 1 character.", expected.getMessage());
+                        + "characters long, got: '" + prefix + "' (224 characters). With 11 for 'Max Concurrent "
+                        + "Transactions' (maxConcurrentTransactions), the transactional.id of the last slot, '"
+                        + prefix + "-c6fb053c-" + suffix + "-10', would have 250 characters, and the adapter "
+                        + "allows at most 249. Please shorten the prefix by at least 1 character.",
+                        expected.getMessage());
             }
         });
         Assert.assertFalse("a rejected start logs no start-up line:\n" + logged,
@@ -155,8 +156,9 @@ public class TransactionalProducerPoolTest {
         } catch (IllegalArgumentException expected) {
             // "<prefix>-c6fb053c-3-0" is the prefix plus 13 characters.
             Assert.assertTrue(expected.getMessage(), expected.getMessage().startsWith("'Transactional ID Prefix' "
-                    + "(transactionalIdPrefix) must be at most 236 characters long, got: 300 characters. With 1 "
-                    + "for 'Max Concurrent Transactions', the transactional.id of the last slot, '"));
+                    + "(transactionalIdPrefix) must be at most 236 characters long, got: '" + repeat('p', 300)
+                    + "' (300 characters). With 1 for 'Max Concurrent Transactions' (maxConcurrentTransactions), "
+                    + "the transactional.id of the last slot, '"));
             Assert.assertTrue(expected.getMessage(), expected.getMessage().endsWith("would have 313 characters, "
                     + "and the adapter allows at most 249. Please shorten the prefix by at least 64 characters."));
         }

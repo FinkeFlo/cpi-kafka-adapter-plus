@@ -729,10 +729,10 @@ public class CpiKafkaPlusComponentTest {
             ep.validateConfiguration();
             Assert.fail("Expected IllegalArgumentException for invalid diagnosticsLevel");
         } catch (IllegalArgumentException e) {
-            Assert.assertTrue("Error message should contain diagnostic marker",
-                    e.getMessage().contains("[CPI-KAFKA-PLUS-DIAG]"));
+            Assert.assertTrue("Error message should name the field as the UI shows it",
+                    e.getMessage().startsWith("'Diagnostics Level' (diagnosticsLevel) must be "));
             Assert.assertTrue("Error message should mention the invalid value",
-                    e.getMessage().contains("VERBOSE"));
+                    e.getMessage().contains("got: 'VERBOSE'"));
             Assert.assertTrue("Error message should list valid values",
                     e.getMessage().contains("STANDARD") && e.getMessage().contains("FULL"));
         }

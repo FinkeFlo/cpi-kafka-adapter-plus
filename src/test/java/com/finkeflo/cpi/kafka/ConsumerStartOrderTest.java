@@ -85,22 +85,23 @@ public class ConsumerStartOrderTest {
         e.setPollingIntervalSeconds(0);
 
         // CpiKafkaPlusEndpoint.validateConfiguration(), shared with the receiver, comes first
-        assertRejected(e, "[CPI-KAFKA-PLUS-DIAG] Invalid diagnosticsLevel 'VERBOSE'. Accepted values are "
-                + "STANDARD (default) or FULL.");
+        assertRejected(e, "'Diagnostics Level' (diagnosticsLevel) must be STANDARD (default) or FULL, got: "
+                + "'VERBOSE'");
         e.setDiagnosticsLevel("STANDARD");
-        assertRejected(e, "consumptionMode must be SCHEDULED or STREAMING, got: BATCH");
+        assertRejected(e, "'Consumption Mode' (consumptionMode) must be SCHEDULED or STREAMING, got: 'BATCH'");
         e.setConsumptionMode("SCHEDULED");
         assertRejected(e, "'Error Handling' (errorHandling) must be RETRY (Retry Failed Message) or SKIP "
-                + "(Skip Failed Message), got: DROP");
+                + "(Skip Failed Message), got: 'DROP'");
         e.setErrorHandling("RETRY");
         e.setDlqEnabled(true);
-        assertRejected(e, "DLQ is enabled but no DLQ topic is configured. Please set the 'dlqTopic' property.");
+        assertRejected(e, "'Dead Letter Topic' (dlqTopic) must not be empty while 'Enable Dead Letter Queue' "
+                + "(dlqEnabled) is on, got: ' '");
         e.setDlqTopic(" orders-dlq ");
-        assertRejected(e, "'Consumer Group ID' (groupId) must not be empty — the consumer cannot join a "
+        assertRejected(e, "'Consumer Group ID' (groupId) must not be empty, got: ' '. The consumer cannot join a "
                 + "consumer group without it.");
         e.setGroupId("g");
         assertRejected(e, "'Offset Commit Strategy' (commitStrategy) must be BATCH_COMPLETE or AUTO, got: "
-                + "MANUAL. Any other value never commits an offset, so every message would be delivered "
+                + "'MANUAL'. Any other value never commits an offset, so every message would be delivered "
                 + "again on every restart and rebalance.");
         e.setCommitStrategy("AUTO");
         assertRejected(e, "'Max Poll Records' (maxPollRecords) must be at least 1, got: 0");
@@ -116,30 +117,33 @@ public class ConsumerStartOrderTest {
         e.setBatchSize(100);
         assertRejected(e, "'Max Retries before DLQ' (dlqMaxRetries) must not be negative, got: -1");
         e.setDlqMaxRetries(3);
-        assertRejected(e, "'Dead Letter Topic' (dlqTopic) ' orders-dlq ' contains leading or trailing "
-                + "whitespace. Please remove the spaces around the topic name.");
+        assertRejected(e, "'Dead Letter Topic' (dlqTopic) must not start or end with a space, got: "
+                + "' orders-dlq '. Please remove the spaces around the topic name.");
         e.setDlqTopic("orders");
-        assertRejected(e, "'Dead Letter Topic' (dlqTopic) 'orders' is also a topic this channel consumes. A "
-                + "failed record would be dead-lettered into its own source and consumed again, endlessly. "
-                + "Please use a separate DLQ topic.");
+        assertRejected(e, "'Dead Letter Topic' (dlqTopic) must not be a topic this channel consumes, got: "
+                + "'orders'. A failed record would be dead-lettered into its own source and consumed again, "
+                + "endlessly. Please use a separate DLQ topic.");
         e.setDlqTopic("orders-dlq");
-        assertRejected(e, "Drain mode requires commitStrategy=BATCH_COMPLETE. AUTO commit cannot guarantee "
-                + "at-least-once delivery during drain loops.");
+        assertRejected(e, "'Offset Commit Strategy' (commitStrategy) must be BATCH_COMPLETE while 'Drain "
+                + "Backlog' (drainEnabled) is on, got: 'AUTO'. AUTO commit cannot guarantee at-least-once "
+                + "delivery during drain loops.");
         e.setCommitStrategy("BATCH_COMPLETE");
-        assertRejected(e, "minBacklogToDrain must be >= 0, got: -1");
+        assertRejected(e, "'Min Backlog to Drain' (minBacklogToDrain) must not be negative, got: -1");
         e.setMinBacklogToDrain(1000);
-        assertRejected(e, "minBacklogToDrain (1000) must be <= maxPollRecords (500). A higher value would "
-                + "disable drain after every poll.");
+        assertRejected(e, "'Min Backlog to Drain' (minBacklogToDrain) must be at most 500, the value of 'Max "
+                + "Poll Records' (maxPollRecords), got: 1000. A higher value would disable drain after every "
+                + "poll.");
         e.setMinBacklogToDrain(10);
-        assertRejected(e, "maxPartitionFetchSizeKb must be between 1 and 51200 (50 MB).");
+        assertRejected(e, "'Max Fetch Size per Partition (KB)' (maxPartitionFetchSizeKb) must be between 1 and "
+                + "51200 (50 MB), got: 0");
         e.setMaxPartitionFetchSizeKb(1024);
-        assertRejected(e, "retryDelaySeconds must be between 0 and 300, got: 999");
+        assertRejected(e, "'Retry Delay (Seconds)' (retryDelaySeconds) must be between 0 and 300, got: 999");
         e.setRetryDelaySeconds(5);
-        assertRejected(e, "pollingIntervalSeconds must be > 0, got: 0");
+        assertRejected(e, "'Polling Interval (Seconds)' (pollingIntervalSeconds) must be at least 1, got: 0");
         e.setPollingIntervalSeconds(21601);
-        assertRejected(e, "pollingIntervalSeconds must be <= 21600 (6 h), got: 21601. Higher values exceed "
-                + "the max.poll.interval.ms hard cap (6 h 10 min) and would cause the consumer to leave the "
-                + "group between polls.");
+        assertRejected(e, "'Polling Interval (Seconds)' (pollingIntervalSeconds) must be at most 21600 (6 h), "
+                + "got: 21601. Higher values exceed the max.poll.interval.ms hard cap (6 h 10 min) and would "
+                + "cause the consumer to leave the group between polls.");
         e.setPollingIntervalSeconds(60);
         assertStarts(e);
     }
@@ -152,8 +156,9 @@ public class ConsumerStartOrderTest {
         e.setDrainEnabled(true);
         e.setCommitStrategy("AUTO");
 
-        String logged = capture(() -> assertRejected(e, "Drain mode requires commitStrategy=BATCH_COMPLETE. AUTO "
-                + "commit cannot guarantee at-least-once delivery during drain loops."));
+        String logged = capture(() -> assertRejected(e, "'Offset Commit Strategy' (commitStrategy) must be "
+                + "BATCH_COMPLETE while 'Drain Backlog' (drainEnabled) is on, got: 'AUTO'. AUTO commit cannot "
+                + "guarantee at-least-once delivery during drain loops."));
 
         assertLoggedBeforeTheRejection(logged, "ERROR " + CONSUMER + " - [CPI-KAFKA-PLUS-DIAG] "
                 + "consumer.config.ineffective parameter=batchOutputFormat value=CSV reason='unknown value; "
@@ -169,7 +174,8 @@ public class ConsumerStartOrderTest {
         e.setAvroOutputFormat("CSV");
         e.setRetryDelaySeconds(500);
 
-        String logged = capture(() -> assertRejected(e, "retryDelaySeconds must be between 0 and 300, got: 500"));
+        String logged = capture(() -> assertRejected(e, "'Retry Delay (Seconds)' (retryDelaySeconds) must be "
+                + "between 0 and 300, got: 500"));
 
         assertLoggedBeforeTheRejection(logged, "ERROR " + CONSUMER + " - [CPI-KAFKA-PLUS-DIAG] "
                 + "consumer.config.ineffective parameter=avroOutputFormat value=CSV reason='unknown value; "
@@ -183,7 +189,8 @@ public class ConsumerStartOrderTest {
         e.setAutoPauseErrorThreshold(0);
         e.setPollingIntervalSeconds(0);
 
-        String logged = capture(() -> assertRejected(e, "pollingIntervalSeconds must be > 0, got: 0"));
+        String logged = capture(() -> assertRejected(e, "'Polling Interval (Seconds)' (pollingIntervalSeconds) "
+                + "must be at least 1, got: 0"));
 
         assertLoggedBeforeTheRejection(logged, "ERROR " + CONSUMER + " - [CPI-KAFKA-PLUS-DIAG] "
                 + "consumer.config.clamped autoPauseErrorThreshold=0 autoPauseCooldownSeconds=60 "
@@ -201,9 +208,9 @@ public class ConsumerStartOrderTest {
         e.setDlqEnabled(true);
         e.setDlqTopic("orders");
 
-        String logged = capture(() -> assertRejected(e, "'Dead Letter Topic' (dlqTopic) 'orders' is also a "
-                + "topic this channel consumes. A failed record would be dead-lettered into its own source and "
-                + "consumed again, endlessly. Please use a separate DLQ topic."));
+        String logged = capture(() -> assertRejected(e, "'Dead Letter Topic' (dlqTopic) must not be a topic "
+                + "this channel consumes, got: 'orders'. A failed record would be dead-lettered into its own "
+                + "source and consumed again, endlessly. Please use a separate DLQ topic."));
 
         Assert.assertFalse(logged, logged.contains("consumer.config."));
     }
@@ -213,9 +220,10 @@ public class ConsumerStartOrderTest {
     public void theChecksRunBeforeTheStartUpLines() throws Exception {
         CpiKafkaPlusEndpoint rejected = endpoint();
         rejected.setPollingIntervalSeconds(21601);
-        String rejectedLog = capture(() -> assertRejected(rejected, "pollingIntervalSeconds must be <= 21600 "
-                + "(6 h), got: 21601. Higher values exceed the max.poll.interval.ms hard cap (6 h 10 min) and "
-                + "would cause the consumer to leave the group between polls."));
+        String rejectedLog = capture(() -> assertRejected(rejected, "'Polling Interval (Seconds)' "
+                + "(pollingIntervalSeconds) must be at most 21600 (6 h), got: 21601. Higher values exceed the "
+                + "max.poll.interval.ms hard cap (6 h 10 min) and would cause the consumer to leave the group "
+                + "between polls."));
         Assert.assertTrue(rejectedLog, rejectedLog.contains("consumer.start.failed"));
         Assert.assertFalse(rejectedLog, rejectedLog.contains("doStart called"));
 

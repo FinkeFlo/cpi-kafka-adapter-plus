@@ -2,6 +2,8 @@
 
 All adapter parameters are configured on the `CpiKafkaPlusEndpoint`. The sections below follow the UI tab layout in CPI — **Sender** parameters are for the _Kafka → CPI_ consumer channel, **Receiver** parameters for the _CPI → Kafka_ producer channel.
 
+A value that can never work fails the deployment with a message that names the field as the UI shows it, its parameter and the value it got: `'<UI label>' (<parameter>) must …, got: <value>`, for example `'Max Poll Records' (maxPollRecords) must be at least 1, got: 0`. A text value is quoted, so an empty value or spaces around it show. A value the adapter replaces with a working one, or a setting without effect, is logged once at deployment as ERROR (`consumer.config.*`, `producer.config.ineffective`); see [Troubleshooting](troubleshooting.md).
+
 ---
 
 ## Sender (Consumer)
@@ -125,7 +127,7 @@ For details on Avro integration, see [Avro / Schema Registry](features/avro-sche
 |-----------|---------|-------------|
 | `autoPauseEnabled` | `false` | Automatically pause the consumer after consecutive processing errors. |
 | `autoPauseErrorThreshold` | `5` | Consecutive processing errors required to activate auto-pause. Every failed IFlow call counts, including records that end up in the DLQ. |
-| `autoPauseCooldownSeconds` | `60` | Initial auto-pause duration in seconds; doubles after subsequent failures, capped at 900 seconds. |
+| `autoPauseCooldownSeconds` | `60` | Initial auto-pause duration in seconds; doubles after subsequent failures, capped at 900 seconds. A larger value is used as 900 and logged as `consumer.config.clamped` at deployment. |
 
 For details on DLQ and retry behavior, see [Dead Letter Queue](features/dead-letter-queue.md).
 

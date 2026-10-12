@@ -39,7 +39,8 @@ import org.slf4j.LoggerFactory;
 final class ConsumerCircuitBreaker {
 
     private static final Logger LOG = LoggerFactory.getLogger(ConsumerCircuitBreaker.class);
-    private static final long MAX_COOLDOWN_SECONDS = 900; // 15 minutes
+    /** Upper bound of every pause; a longer configured cooldown is logged at start (#255). */
+    static final long MAX_COOLDOWN_SECONDS = 900; // 15 minutes
 
     private final CpiKafkaPlusEndpoint endpoint;
     private final AdapterTracingHelper tracingHelper;

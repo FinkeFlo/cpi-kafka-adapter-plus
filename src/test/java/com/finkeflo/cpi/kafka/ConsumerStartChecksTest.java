@@ -129,11 +129,12 @@ public class ConsumerStartChecksTest {
         assertRejected(group, "groupId", "Consumer Group ID");
         CpiKafkaPlusEndpoint mode = endpoint();
         mode.setConsumptionMode(null);
-        Assert.assertEquals("consumptionMode must be SCHEDULED or STREAMING, got: null", startFailure(mode));
+        Assert.assertEquals("'Consumption Mode' (consumptionMode) must be SCHEDULED or STREAMING, got: ''",
+                startFailure(mode));
         CpiKafkaPlusEndpoint handling = endpoint();
         handling.setErrorHandling(null);
         Assert.assertEquals("'Error Handling' (errorHandling) must be RETRY (Retry Failed Message) or SKIP "
-                + "(Skip Failed Message), got: null", startFailure(handling));
+                + "(Skip Failed Message), got: ''", startFailure(handling));
     }
 
     @Test
@@ -224,7 +225,7 @@ public class ConsumerStartChecksTest {
         e.setDlqEnabled(true);
         e.setDlqTopic(" orders-dlq ");
         String message = startFailure(e);
-        Assert.assertTrue(message, message.contains("whitespace"));
+        Assert.assertTrue(message, message.contains("must not start or end with a space, got: ' orders-dlq '"));
         Assert.assertTrue(message, message.contains("'Dead Letter Topic'"));
     }
 
