@@ -72,6 +72,12 @@ public class RecordProcessorProgressTest {
     private final Set<String> failing = new HashSet<>();
     /** Like {@link #failing}, but the failure has a transient cause (the backend is unreachable). */
     private final Set<String> failingTransiently = new HashSet<>();
+    /** Fails transiently this many times for the id, then permanently on every further call. */
+    private final Map<String, Integer> transientThenPermanent = new HashMap<>();
+    /** The body of each route call, in the order of {@link #invoked}. */
+    private final List<String> bodies = new ArrayList<>();
+    /** The headers of each route call, in the order of {@link #invoked}. */
+    private final List<Map<String, Object>> headers = new ArrayList<>();
     private final AtomicBoolean stopAfterFirstRecord = new AtomicBoolean();
     private final OffsetCommitTracker tracker = new OffsetCommitTracker();
 
@@ -132,6 +138,23 @@ public class RecordProcessorProgressTest {
     }
 
     @Test
+    public void failedDlqWriteIsTracedAsSendFailed() throws Exception {
+        failing.add("0:0");
+        MockConsumer<byte[], byte[]> consumer = consumerWith(P0, "a", "b");
+        CpiKafkaPlusEndpoint endpoint = endpoint(true, null);
+        RecordingTracingHelper tracing = new RecordingTracingHelper(endpoint);
+        RecordProcessor processor = processor(endpoint, failingDlq(), null, tracing);
+
+        processSingle(processor, consumer);
+
+        Assert.assertEquals(1, tracing.traced.size());
+        Assert.assertEquals("SEND_FAILED", tracing.traced.get(0).get("dlqOutcome"));
+        Assert.assertEquals("orders-dlq", tracing.traced.get(0).get("dlqTopic"));
+        Assert.assertEquals("PERMANENT", tracing.traced.get(0).get("errorType"));
+        Assert.assertEquals("0", tracing.traced.get(0).get("retryAttempts"));
+    }
+
+    @Test
     public void withoutDlqTheFailedRecordIsRetriedByDefault() throws Exception {
         failing.add("0:1");
         MockConsumer<byte[], byte[]> consumer = consumerWith(P0, "a", "b", "c");
@@ -155,6 +178,42 @@ public class RecordProcessorProgressTest {
 
         Assert.assertEquals(Arrays.asList("0:0", "0:1", "0:2"), invoked);
         Assert.assertEquals(3L, committed(consumer, P0));
+    }
+
+    @Test
+    public void withoutDlqAFailedRecordIsNotRetriedWithinThePoll() throws Exception {
+        // Max Retries before DLQ only applies with a DLQ. Without one, the blocked partition retries
+        // the record on a later poll, after a backoff.
+        failingTransiently.add("0:0");
+        MockConsumer<byte[], byte[]> consumer = consumerWith(P0, "a", "b");
+        CpiKafkaPlusEndpoint endpoint = endpoint(false, null);
+        endpoint.setDlqMaxRetries(3);
+        RecordProcessor processor = processor(endpoint, null, null);
+
+        PollProgress progress = processSingle(processor, consumer);
+
+        Assert.assertEquals(Collections.singletonList("0:0"), invoked);
+        Assert.assertTrue(progress.isBlocked(P0));
+        Assert.assertEquals(0L, consumer.position(P0));
+    }
+
+    @Test
+    public void withoutDlqATransientFailureIsTracedWithoutADlqOutcome() throws Exception {
+        failingTransiently.add("0:0");
+        MockConsumer<byte[], byte[]> consumer = consumerWith(P0, "a", "b");
+        CpiKafkaPlusEndpoint endpoint = endpoint(false, null);
+        endpoint.setDlqMaxRetries(3);
+        RecordingTracingHelper tracing = new RecordingTracingHelper(endpoint);
+        RecordProcessor processor = processor(endpoint, null, null, tracing);
+
+        PollProgress progress = processSingle(processor, consumer);
+
+        Assert.assertEquals(Collections.singletonList("0:0"), invoked);
+        Assert.assertEquals(1, tracing.traced.size());
+        Assert.assertEquals("TRANSIENT", tracing.traced.get(0).get("errorType"));
+        Assert.assertEquals("0", tracing.traced.get(0).get("retryAttempts"));
+        Assert.assertNull(tracing.traced.get(0).get("dlqOutcome"));
+        Assert.assertTrue(progress.isBlocked(P0));
     }
 
     // --- #172: a commit failure is not a processing failure ---
@@ -213,6 +272,26 @@ public class RecordProcessorProgressTest {
         Assert.assertEquals(0L, consumer.position(P0));
     }
 
+    @Test
+    public void stopRequestBetweenRetriesDoesNotDeadLetter() throws Exception {
+        stopAfterFirstRecord.set(true);
+        failingTransiently.add("0:0");
+        MockConsumer<byte[], byte[]> consumer = consumerWith(P0, "a", "b");
+        CpiKafkaPlusEndpoint endpoint = endpoint(true, null);
+        endpoint.setDlqMaxRetries(2);
+        MockProducer<byte[], byte[]> dlq = okDlqProducer();
+        RecordProcessor processor = processor(endpoint, dlqHelper(dlq), null);
+
+        PollProgress progress = processSingle(processor, consumer);
+
+        Assert.assertEquals("no further attempt once the consumer stops",
+                Collections.singletonList("0:0"), invoked);
+        Assert.assertTrue("a stop is a shutdown, not a poison record", dlq.history().isEmpty());
+        Assert.assertTrue(progress.isStopped());
+        Assert.assertEquals(-1L, committed(consumer, P0));
+        Assert.assertEquals(0L, consumer.position(P0));
+    }
+
     // --- retryOnlyTransientErrors (on by default): only a transient failure is retried ---
 
     @Test
@@ -250,6 +329,55 @@ public class RecordProcessorProgressTest {
         Assert.assertEquals(1, dlq.history().size());
         Assert.assertEquals("PERMANENT", header(dlq.history().get(0), "CpiKafkaPlusDlqErrorType"));
         Assert.assertEquals("0", header(dlq.history().get(0), "CpiKafkaPlusDlqRetryCount"));
+        Assert.assertEquals(2L, committed(consumer, P0));
+    }
+
+    @Test
+    public void permanentFailureAfterATransientOneSkipsTheRetriesLeft() throws Exception {
+        transientThenPermanent.put("0:0", 1);
+        MockConsumer<byte[], byte[]> consumer = consumerWith(P0, "a", "b");
+        CpiKafkaPlusEndpoint endpoint = endpoint(true, null);
+        endpoint.setDlqMaxRetries(3);
+        MockProducer<byte[], byte[]> dlq = okDlqProducer();
+        RecordingTracingHelper tracing = new RecordingTracingHelper(endpoint);
+        RecordProcessor processor = processor(endpoint, dlqHelper(dlq), null, tracing);
+
+        processSingle(processor, consumer);
+
+        Assert.assertEquals("the two retries left are skipped", Arrays.asList("0:0", "0:0", "0:1"), invoked);
+        Assert.assertEquals(1, dlq.history().size());
+        Assert.assertEquals("PERMANENT", header(dlq.history().get(0), "CpiKafkaPlusDlqErrorType"));
+        // Pinned as it is: the retry that failed permanently is not counted, so one retry ran but the
+        // count says none.
+        Assert.assertEquals("0", header(dlq.history().get(0), "CpiKafkaPlusDlqRetryCount"));
+        Assert.assertEquals("PERMANENT", tracing.traced.get(0).get("errorType"));
+        Assert.assertEquals("0", tracing.traced.get(0).get("retryAttempts"));
+        Assert.assertEquals(2L, committed(consumer, P0));
+    }
+
+    @Test
+    public void withRetryOnlyTransientErrorsOffEveryFailureIsRetriedAndNotClassified() throws Exception {
+        failing.add("0:0");
+        MockConsumer<byte[], byte[]> consumer = consumerWith(P0, "a", "b");
+        CpiKafkaPlusEndpoint endpoint = endpoint(true, null);
+        endpoint.setDlqMaxRetries(2);
+        endpoint.setRetryOnlyTransientErrors(false);
+        MockProducer<byte[], byte[]> dlq = okDlqProducer();
+        RecordingTracingHelper tracing = new RecordingTracingHelper(endpoint);
+        RecordProcessor processor = processor(endpoint, dlqHelper(dlq), null, tracing);
+
+        processSingle(processor, consumer);
+
+        Assert.assertEquals("a permanent failure is retried as well",
+                Arrays.asList("0:0", "0:0", "0:0", "0:1"), invoked);
+        Assert.assertEquals(1, dlq.history().size());
+        Assert.assertNull("an unclassified failure has no error type",
+                header(dlq.history().get(0), "CpiKafkaPlusDlqErrorType"));
+        Assert.assertEquals("2", header(dlq.history().get(0), "CpiKafkaPlusDlqRetryCount"));
+        Assert.assertEquals(1, tracing.traced.size());
+        Assert.assertEquals("UNKNOWN", tracing.traced.get(0).get("errorType"));
+        Assert.assertEquals("2", tracing.traced.get(0).get("retryAttempts"));
+        Assert.assertEquals("MOVED", tracing.traced.get(0).get("dlqOutcome"));
         Assert.assertEquals(2L, committed(consumer, P0));
     }
 
@@ -307,6 +435,22 @@ public class RecordProcessorProgressTest {
     }
 
     @Test
+    public void deserializationFailureWithDlqIsDeadLetteredAtOnce() throws Exception {
+        MockConsumer<byte[], byte[]> consumer = consumerWith(P0, "BAD", "b");
+        CpiKafkaPlusEndpoint endpoint = avroEndpoint(true);
+        endpoint.setDlqMaxRetries(2);
+        MockProducer<byte[], byte[]> dlq = okDlqProducer();
+        RecordProcessor processor = processor(endpoint, dlqHelper(dlq), failingAvro(endpoint));
+
+        processSingle(processor, consumer);
+
+        Assert.assertEquals(1, dlq.history().size());
+        Assert.assertEquals("DESERIALIZATION", header(dlq.history().get(0), "CpiKafkaPlusDlqErrorType"));
+        Assert.assertEquals(Collections.singletonList("0:1"), invoked);
+        Assert.assertEquals(2L, committed(consumer, P0));
+    }
+
+    @Test
     public void deserializationFailureWithFailingDlqBlocks() throws Exception {
         MockConsumer<byte[], byte[]> consumer = consumerWith(P0, "BAD", "b");
         CpiKafkaPlusEndpoint endpoint = avroEndpoint(true);
@@ -342,6 +486,112 @@ public class RecordProcessorProgressTest {
 
         Assert.assertEquals(Collections.singletonList("0:1"), invoked);
         Assert.assertEquals(2L, committed(consumer, P0));
+    }
+
+    @Test
+    public void schemaInvalidRecordWithDlqIsDeadLetteredWithoutRetries() throws Exception {
+        MockConsumer<byte[], byte[]> consumer = consumerWith(P0, "{}", "{\"id\":\"1\"}");
+        CpiKafkaPlusEndpoint endpoint = endpoint(true, SCHEMA);
+        endpoint.setDlqMaxRetries(2);
+        MockProducer<byte[], byte[]> dlq = okDlqProducer();
+        RecordProcessor processor = processor(endpoint, dlqHelper(dlq), null);
+
+        processSingle(processor, consumer);
+
+        Assert.assertEquals(1, dlq.history().size());
+        Assert.assertEquals("0", header(dlq.history().get(0), "CpiKafkaPlusDlqRetryCount"));
+        Assert.assertEquals(Collections.singletonList("0:1"), invoked);
+        Assert.assertEquals(2L, committed(consumer, P0));
+    }
+
+    @Test
+    public void schemaInvalidRecordInABatchWithoutDlqIsDroppedEvenWhenRetrying() throws Exception {
+        MockConsumer<byte[], byte[]> consumer =
+                consumerWith(P0, "{\"id\":\"a\"}", "{}", "{\"id\":\"c\"}");
+        RecordProcessor processor = processor(batchEndpoint(false, SCHEMA), null, null);
+
+        PollProgress progress = processBatch(processor, consumer);
+
+        Assert.assertEquals("the batch runs without the invalid record",
+                Collections.singletonList("0:0-2"), invoked);
+        Assert.assertFalse(bodies.get(0).contains("\"offset\":1"));
+        Assert.assertFalse(progress.isBlocked(P0));
+        Assert.assertEquals(3L, committed(consumer, P0));
+    }
+
+    // --- commitStrategy=AUTO: the adapter commits nothing, and a resolved record is not rewound ---
+
+    @Test
+    public void withAutoCommitADeadLetteredRecordIsResolvedButNotCommitted() throws Exception {
+        failing.add("0:1");
+        MockConsumer<byte[], byte[]> consumer = consumerWith(P0, "a", "b", "c");
+        MockProducer<byte[], byte[]> dlq = okDlqProducer();
+        RecordProcessor processor = processor(endpoint(true, null), dlqHelper(dlq), null);
+
+        PollProgress progress = processSingle(processor, consumer, false);
+
+        Assert.assertEquals(1, dlq.history().size());
+        assertResolvedButNotCommitted(consumer, progress, 3L);
+    }
+
+    @Test
+    public void withAutoCommitASkippedRecordIsResolvedButNotCommitted() throws Exception {
+        failing.add("0:1");
+        MockConsumer<byte[], byte[]> consumer = consumerWith(P0, "a", "b", "c");
+        RecordProcessor processor = processor(skip(endpoint(false, null)), null, null);
+
+        PollProgress progress = processSingle(processor, consumer, false);
+
+        Assert.assertEquals(Arrays.asList("0:0", "0:1", "0:2"), invoked);
+        assertResolvedButNotCommitted(consumer, progress, 3L);
+    }
+
+    @Test
+    public void withAutoCommitASkippedBatchIsResolvedButNotCommitted() throws Exception {
+        failing.add("0:0-1");
+        MockConsumer<byte[], byte[]> consumer = consumerWith(P0, "a", "b");
+        RecordProcessor processor = processor(skip(batchEndpoint(false, null)), null, null);
+
+        PollProgress progress = processBatch(processor, consumer, false);
+
+        assertResolvedButNotCommitted(consumer, progress, 2L);
+    }
+
+    @Test
+    public void withAutoCommitAnUndeserializableRecordIsDeadLetteredButNotCommitted() throws Exception {
+        MockConsumer<byte[], byte[]> consumer = consumerWith(P0, "BAD", "b");
+        CpiKafkaPlusEndpoint endpoint = avroEndpoint(true);
+        MockProducer<byte[], byte[]> dlq = okDlqProducer();
+        RecordProcessor processor = processor(endpoint, dlqHelper(dlq), failingAvro(endpoint));
+
+        PollProgress progress = processSingle(processor, consumer, false);
+
+        Assert.assertEquals(1, dlq.history().size());
+        assertResolvedButNotCommitted(consumer, progress, 2L);
+    }
+
+    @Test
+    public void withAutoCommitASchemaInvalidRecordIsDroppedButNotCommitted() throws Exception {
+        MockConsumer<byte[], byte[]> consumer = consumerWith(P0, "{}", "{\"id\":\"1\"}");
+        RecordProcessor processor = processor(endpoint(false, SCHEMA), null, null);
+
+        PollProgress progress = processSingle(processor, consumer, false);
+
+        Assert.assertEquals(Collections.singletonList("0:1"), invoked);
+        assertResolvedButNotCommitted(consumer, progress, 2L);
+    }
+
+    @Test
+    public void withAutoCommitADeadLetteredSchemaInvalidRecordIsResolvedButNotCommitted() throws Exception {
+        MockConsumer<byte[], byte[]> consumer = consumerWith(P0, "{}", "{\"id\":\"1\"}");
+        MockProducer<byte[], byte[]> dlq = okDlqProducer();
+        RecordProcessor processor = processor(endpoint(true, SCHEMA), dlqHelper(dlq), null);
+
+        PollProgress progress = processSingle(processor, consumer, false);
+
+        Assert.assertEquals(1, dlq.history().size());
+        Assert.assertEquals(Collections.singletonList("0:1"), invoked);
+        assertResolvedButNotCommitted(consumer, progress, 2L);
     }
 
     // --- #182: what auto-pause gets to see ---
@@ -386,6 +636,23 @@ public class RecordProcessorProgressTest {
         Assert.assertEquals(Collections.singletonList("0:0-0"), invoked);
         Assert.assertEquals(1L, committed(consumer, P0));
         Assert.assertEquals(1L, consumer.position(P0));
+    }
+
+    @Test
+    public void theBatchCountsEveryInvalidRecordButOnlyTheDeadLetteredOnes() throws Exception {
+        // Offsets 1 and 3 are invalid: the DLQ takes the first and rejects the second.
+        MockConsumer<byte[], byte[]> consumer =
+                consumerWith(P0, "{\"id\":\"a\"}", "{}", "{\"id\":\"c\"}", "{}");
+        RecordProcessor processor = processor(batchEndpoint(true, SCHEMA), dlqFailingFromWrite(2), null);
+
+        PollProgress progress = processBatch(processor, consumer);
+
+        Assert.assertEquals(Collections.singletonList("0:0-2"), invoked);
+        Assert.assertEquals(2, headers.get(0).get("CpiKafkaPlusSchemaValidationFailures"));
+        Assert.assertEquals(1, headers.get(0).get("CpiKafkaPlusDlqCount"));
+        Assert.assertEquals(Long.valueOf(3L), progress.blockedOffset(P0));
+        Assert.assertEquals(3L, committed(consumer, P0));
+        Assert.assertEquals(3L, consumer.position(P0));
     }
 
     @Test
@@ -465,6 +732,22 @@ public class RecordProcessorProgressTest {
     }
 
     @Test
+    public void deserializationFailureInTheSchemaFilterIsSkippedWhenSkipping() throws Exception {
+        CpiKafkaPlusEndpoint endpoint = skip(batchEndpoint(false, SCHEMA));
+        endpoint.setSchemaRegistryEnabled(true);
+        endpoint.setSchemaRegistryUrl("http://localhost:1");
+        endpoint.setAvroValueDeserialization(true);
+        MockConsumer<byte[], byte[]> consumer = consumerWith(P0, "BAD", "{\"id\":\"b\"}");
+        RecordProcessor processor = processor(endpoint, null, failingAvro(endpoint));
+
+        PollProgress progress = processBatch(processor, consumer);
+
+        Assert.assertEquals(Collections.singletonList("0:1-1"), invoked);
+        Assert.assertFalse(progress.isBlocked(P0));
+        Assert.assertEquals(2L, committed(consumer, P0));
+    }
+
+    @Test
     public void batchFormatFailureWithoutDlqDoesNotEscapeThePoll() throws Exception {
         CpiKafkaPlusEndpoint endpoint = skip(batchEndpoint(false, null));
         endpoint.setSchemaRegistryEnabled(true);
@@ -477,6 +760,77 @@ public class RecordProcessorProgressTest {
 
         Assert.assertTrue(invoked.isEmpty());
         Assert.assertEquals(2L, committed(consumer, P0));
+    }
+
+    @Test
+    public void batchFormatFailureWithDlqFallsBackToSingleRecords() throws Exception {
+        CpiKafkaPlusEndpoint endpoint = avroBatchEndpoint(true);
+        endpoint.setDlqMaxRetries(2);
+        MockConsumer<byte[], byte[]> consumer = consumerWith(P0, "BAD", "b");
+        MockProducer<byte[], byte[]> dlq = okDlqProducer();
+        RecordProcessor processor = processor(endpoint, dlqHelper(dlq), failingAvro(endpoint));
+
+        PollProgress progress = processBatch(processor, consumer);
+
+        Assert.assertEquals(1, dlq.history().size());
+        Assert.assertEquals("DESERIALIZATION", header(dlq.history().get(0), "CpiKafkaPlusDlqErrorType"));
+        Assert.assertEquals("the good record runs on its own", Collections.singletonList("0:1-1"), invoked);
+        Assert.assertEquals(Boolean.TRUE, headers.get(0).get("CpiKafkaPlusFallbackMode"));
+        Assert.assertFalse(progress.isBlocked(P0));
+        Assert.assertEquals(2L, committed(consumer, P0));
+    }
+
+    @Test
+    public void formatFailureInTheFallbackHandsTheRawValueToTheRoute() throws Exception {
+        CpiKafkaPlusEndpoint endpoint = avroBatchEndpoint(true);
+        MockConsumer<byte[], byte[]> consumer = consumerWith(P0, "FLAKY");
+        MockProducer<byte[], byte[]> dlq = okDlqProducer();
+        RecordProcessor processor = processor(endpoint, dlqHelper(dlq), flakyAvro(endpoint));
+
+        processBatch(processor, consumer);
+
+        // The batch fails to format, the record deserializes on its own, and formatting the
+        // one-record batch fails again: the route gets the raw value rather than nothing.
+        Assert.assertEquals(Collections.singletonList("0:0-0"), invoked);
+        Assert.assertEquals("FLAKY", bodies.get(0));
+        Assert.assertTrue(dlq.history().isEmpty());
+        Assert.assertEquals(1L, committed(consumer, P0));
+    }
+
+    @Test
+    public void errorWhileFormattingABatchEscapesThePollEvenWhenSkipping() throws Exception {
+        NoClassDefFoundError error = new NoClassDefFoundError("io/confluent/kafka/schemaregistry/ParsedSchema");
+        CpiKafkaPlusEndpoint endpoint = skip(avroBatchEndpoint(false));
+        MockConsumer<byte[], byte[]> consumer = consumerWith(P0, "a", "ERR");
+        RecordProcessor processor = processor(endpoint, null, erroringAvro(endpoint, error));
+
+        Throwable escaped = processBatchUntilItEscapes(processor, consumer);
+
+        // An Error is not a data problem, so it does not skip the batch: the poll retries it.
+        Assert.assertEquals(RuntimeException.class, escaped.getClass());
+        Assert.assertSame(error, escaped.getCause());
+        Assert.assertTrue(invoked.isEmpty());
+        Assert.assertEquals(-1L, committed(consumer, P0));
+        Assert.assertEquals(0L, consumer.position(P0));
+    }
+
+    @Test
+    public void errorWhileFormattingABatchWithDlqEscapesFromTheFallback() throws Exception {
+        NoClassDefFoundError error = new NoClassDefFoundError("io/confluent/kafka/schemaregistry/ParsedSchema");
+        CpiKafkaPlusEndpoint endpoint = avroBatchEndpoint(true);
+        MockConsumer<byte[], byte[]> consumer = consumerWith(P0, "a", "ERR", "c");
+        MockProducer<byte[], byte[]> dlq = okDlqProducer();
+        RecordProcessor processor = processor(endpoint, dlqHelper(dlq), erroringAvro(endpoint, error));
+
+        Throwable escaped = processBatchUntilItEscapes(processor, consumer);
+
+        // With a DLQ the batch falls back to single records before the Error is looked at: the
+        // records before the failing one are processed, and the Error escapes from that record.
+        Assert.assertSame(error, escaped);
+        Assert.assertEquals(Collections.singletonList("0:0-0"), invoked);
+        Assert.assertTrue("an Error is not dead-lettered", dlq.history().isEmpty());
+        Assert.assertEquals(1L, committed(consumer, P0));
+        Assert.assertEquals(1L, consumer.position(P0));
     }
 
     @Test
@@ -530,11 +884,43 @@ public class RecordProcessorProgressTest {
 
     private PollProgress processBatch(RecordProcessor processor, MockConsumer<byte[], byte[]> consumer)
             throws Exception {
+        return processBatch(processor, consumer, true);
+    }
+
+    /** {@code commitAfterSuccess=false} is how the consumer runs with {@code commitStrategy=AUTO}. */
+    private PollProgress processBatch(RecordProcessor processor, MockConsumer<byte[], byte[]> consumer,
+                                      boolean commitAfterSuccess) throws Exception {
         ConsumerRecords<byte[], byte[]> records = consumer.poll(Duration.ZERO);
         PollProgress progress = new PollProgress(records);
-        processor.processBatchRecords(consumer, records, true, progress);
+        processor.processBatchRecords(consumer, records, commitAfterSuccess, progress);
         processor.rewind(consumer, progress);
         return progress;
+    }
+
+    /**
+     * Expects the poll's processing to throw and settles the poll as the consumer does then: the
+     * record it escaped from is blocked and the partition rewound.
+     */
+    private static Throwable processBatchUntilItEscapes(RecordProcessor processor,
+                                                        MockConsumer<byte[], byte[]> consumer) {
+        ConsumerRecords<byte[], byte[]> records = consumer.poll(Duration.ZERO);
+        PollProgress progress = new PollProgress(records);
+        try {
+            processor.processBatchRecords(consumer, records, true, progress);
+        } catch (Throwable t) {
+            progress.blockCurrent();
+            processor.rewind(consumer, progress);
+            return t;
+        }
+        throw new AssertionError("expected the failure to escape the poll");
+    }
+
+    private void assertResolvedButNotCommitted(MockConsumer<byte[], byte[]> consumer, PollProgress progress,
+                                               long next) {
+        Assert.assertEquals("the auto-commit commits, not the adapter", -1L, committed(consumer, P0));
+        Assert.assertTrue(tracker.isEmpty());
+        Assert.assertFalse(progress.isBlocked(P0));
+        Assert.assertEquals("resolved, so not rewound", next, consumer.position(P0));
     }
 
     private CpiKafkaPlusEndpoint batchEndpoint(boolean dlq, String jsonSchema) throws Exception {
@@ -547,9 +933,15 @@ public class RecordProcessorProgressTest {
 
     private PollProgress processSingle(RecordProcessor processor, MockConsumer<byte[], byte[]> consumer)
             throws Exception {
+        return processSingle(processor, consumer, true);
+    }
+
+    /** {@code commitAfterSuccess=false} is how the consumer runs with {@code commitStrategy=AUTO}. */
+    private PollProgress processSingle(RecordProcessor processor, MockConsumer<byte[], byte[]> consumer,
+                                       boolean commitAfterSuccess) throws Exception {
         ConsumerRecords<byte[], byte[]> records = consumer.poll(Duration.ZERO);
         PollProgress progress = new PollProgress(records);
-        processor.processSingleRecords(consumer, records, true, progress);
+        processor.processSingleRecords(consumer, records, commitAfterSuccess, progress);
         processor.rewind(consumer, progress);
         return progress;
     }
@@ -587,11 +979,24 @@ public class RecordProcessorProgressTest {
         return endpoint;
     }
 
+    private CpiKafkaPlusEndpoint avroBatchEndpoint(boolean dlq) throws Exception {
+        CpiKafkaPlusEndpoint endpoint = batchEndpoint(dlq, null);
+        endpoint.setSchemaRegistryEnabled(true);
+        endpoint.setSchemaRegistryUrl("http://localhost:1");
+        endpoint.setAvroValueDeserialization(true);
+        return endpoint;
+    }
+
     private RecordProcessor processor(CpiKafkaPlusEndpoint endpoint, DlqProducerHelper dlq,
                                       AvroDeserializerHelper avro) {
+        return processor(endpoint, dlq, avro, new AdapterTracingHelper(endpoint));
+    }
+
+    private RecordProcessor processor(CpiKafkaPlusEndpoint endpoint, DlqProducerHelper dlq,
+                                      AvroDeserializerHelper avro, AdapterTracingHelper tracing) {
         JsonSchemaValidator validator = endpoint.isJsonSchemaValidation()
                 ? new JsonSchemaValidator(endpoint.getJsonSchema()) : null;
-        return new RecordProcessor(endpoint, new AdapterTracingHelper(endpoint), validator, dlq, avro,
+        return new RecordProcessor(endpoint, tracing, validator, dlq, avro,
                 new RecordProcessor.ConsumerCallback() {
                     @Override
                     public void processExchange(Exchange exchange) throws Exception {
@@ -601,12 +1006,21 @@ public class RecordProcessorProgressTest {
                                         : exchange.getIn().getHeader("CpiKafkaPlusFirstOffset") + "-"
                                         + exchange.getIn().getHeader("CpiKafkaPlusLastOffset"));
                         invoked.add(id);
+                        bodies.add(exchange.getIn().getBody(String.class));
+                        headers.add(new HashMap<>(exchange.getIn().getHeaders()));
                         if (failing.contains(id)) {
                             throw new IllegalStateException("backend rejected " + id);
                         }
-                        if (failingTransiently.contains(id)) {
+                        Integer transientLeft = transientThenPermanent.get(id);
+                        if (failingTransiently.contains(id) || (transientLeft != null && transientLeft > 0)) {
+                            if (transientLeft != null) {
+                                transientThenPermanent.put(id, transientLeft - 1);
+                            }
                             throw new IllegalStateException("backend unreachable " + id,
                                     new java.net.ConnectException("Connection refused"));
+                        }
+                        if (transientLeft != null) {
+                            throw new IllegalStateException("backend rejected " + id);
                         }
                     }
 
@@ -738,5 +1152,50 @@ public class RecordProcessorProgressTest {
                 return value;
             }
         };
+    }
+
+    /** Throws {@code error} for the value "ERR", like a class that an adapter update took away. */
+    private static AvroDeserializerHelper erroringAvro(CpiKafkaPlusEndpoint endpoint, Error error) {
+        return new AvroDeserializerHelper(endpoint) {
+            @Override
+            public String deserialize(String topic, byte[] data) {
+                String value = new String(data, StandardCharsets.UTF_8);
+                if ("ERR".equals(value)) {
+                    throw error;
+                }
+                return value;
+            }
+        };
+    }
+
+    /** Fails the first and the third time it reads the value "FLAKY", and succeeds in between. */
+    private static AvroDeserializerHelper flakyAvro(CpiKafkaPlusEndpoint endpoint) {
+        AtomicInteger reads = new AtomicInteger();
+        return new AvroDeserializerHelper(endpoint) {
+            @Override
+            public String deserialize(String topic, byte[] data) {
+                String value = new String(data, StandardCharsets.UTF_8);
+                if ("FLAKY".equals(value) && reads.incrementAndGet() != 2) {
+                    throw new IllegalStateException("Schema Registry unreachable");
+                }
+                return value;
+            }
+        };
+    }
+
+    /** Records the context of every failure trace, which carries the failure's error type. */
+    private static final class RecordingTracingHelper extends AdapterTracingHelper {
+        final List<Map<String, String>> traced = new ArrayList<>();
+
+        RecordingTracingHelper(CpiKafkaPlusEndpoint endpoint) {
+            super(endpoint);
+        }
+
+        @Override
+        public void traceError(Exchange exchange, Exception e, Map<String, String> context,
+                               boolean senderDirection) {
+            traced.add(new HashMap<>(context));
+            super.traceError(exchange, e, context, senderDirection);
+        }
     }
 }
