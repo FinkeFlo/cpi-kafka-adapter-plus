@@ -128,6 +128,23 @@ final class BundleClassWarmup {
     private BundleClassWarmup() {}
 
     /**
+     * The Camel version of the runtime, for the start line: the Implementation-Version of camel-api,
+     * else the version of the bundle that provides it; {@code null} when neither can be read.
+     *
+     * @param anchor a class of this bundle, whose class loader sees the OSGi framework API
+     */
+    static String camelVersion(Class<?> anchor) {
+        try {
+            Class<?> api = org.apache.camel.CamelContext.class;
+            Package pkg = api.getPackage();
+            String version = pkg != null ? pkg.getImplementationVersion() : null;
+            return version != null ? version : OsgiBundleInfo.of(api, anchor).getVersion();
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /**
      * Starts the warm-up once per class space. Safe to call from every component/consumer/producer
      * start; all but the first call return immediately.
      *
@@ -142,9 +159,10 @@ final class BundleClassWarmup {
         }
         OsgiBundleInfo bundle = OsgiBundleInfo.of(anchor);
         LOG.error("[CPI-KAFKA-PLUS-DIAG] class-warmup.start trigger={} loader={} bundleId={} bundleVersion={} "
-                        + "bundleLastModified={} revisions={}",
+                        + "bundleLastModified={} revisions={} java={} javaVendor='{}' camel={}",
                 trigger, System.identityHashCode(anchor.getClassLoader()), bundle.getBundleId(),
-                bundle.getVersion(), bundle.getLastModified(), bundle.getRevisionCount());
+                bundle.getVersion(), bundle.getLastModified(), bundle.getRevisionCount(),
+                System.getProperty("java.version"), System.getProperty("java.vendor"), camelVersion(anchor));
 
         Report adapterReport;
         try {

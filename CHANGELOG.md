@@ -8,6 +8,9 @@ and the project follows [Semantic Versioning](https://semver.org/). See
 iFlow compatibility.
 
 ## [Unreleased]
+### Added
+- The start line `class-warmup.start`, written once per adapter version when its first Kafka endpoint starts, now names the runtime: `java` (Java version), `javaVendor` and `camel` (Camel version). SAP's adapter development documentation still names Java 8, while the adapter needs Java 11 or later; the README now says so. See issue #251.
+
 ### Changed
 - Internal refactoring, no change in behaviour, configuration or log output: the receiver's node-fault escalation (`producer.node.fault.escalation`, with JVM state and the thread dump at diagnostics level FULL) moved from `CpiKafkaPlusProducer` into its own class `NodeFaultEscalation`. The event still logs under the `CpiKafkaPlusProducer` logger category.
 - Internal refactoring, no change in behaviour, configuration or log output: the member suffix from `CF_INSTANCE_INDEX` or `HOSTNAME` (used in the sender's `group.instance.id` and the receiver's `transactional.id`) and the topic hash in `transactional.id` now come from one class, `NodeIdentity`, instead of `CpiKafkaPlusConsumer` and `CpiKafkaPlusProducer`. The ids stay the same.
