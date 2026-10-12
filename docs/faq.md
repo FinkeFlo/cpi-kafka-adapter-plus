@@ -75,9 +75,11 @@ a record that has not been processed, dead-lettered or deliberately skipped — 
 write fails is retried, and so is a record during which the adapter itself failed. See
 [Error Handling Without DLQ](features/dead-letter-queue.md#error-handling-without-dlq).
 
-With **Auto Commit (Periodic)** (`AUTO`), Kafka commits offsets in the background on a
-timer regardless of whether processing succeeded. This is not recommended for
-production-critical scenarios.
+With **Auto Commit (Periodic, may lose messages)** (`AUTO`), the Kafka client commits the
+consumer position periodically instead of the adapter committing after each record or batch.
+Records that were polled but not processed yet can be committed and lost, for example when the
+integration flow is stopped while a long-running IFlow call is still in progress. This is not
+recommended for production-critical scenarios, and it cannot be combined with **Drain Backlog**.
 
 ### What happens when a rebalance occurs during processing?
 
@@ -111,7 +113,7 @@ Yes. Set the following headers on the exchange before sending:
 | `kafka.PARTITION_KEY` | Target partition (numeric string) |
 | `kafka.KEY` | Record key |
 
-Both are evaluated per message. See [Kafka Headers](features/kafka-headers.md) for the full list.
+All three are evaluated per message. See [Kafka Headers](features/kafka-headers.md) for the full list.
 
 ### When does the receiver send a tombstone (a record with a `null` value)?
 
@@ -124,8 +126,16 @@ integration flow cannot reach the Kafka receiver with an empty body by accident.
 tombstone is explicit: `value: null` (`JSON_ARRAY`) or an empty `<value/>` (`XML_LIST`), see
 [Producer Batch](features/producer-batch.md).
 
-### What happens if the producer batch exceeds the Kafka message size limit?
+### What happens if a message exceeds the Kafka message size limit?
 
-The producer will throw an exception and the iFlow execution fails. To avoid this,
-tune `max.request.size` and `message.max.bytes` on the broker, or reduce the number
-of records per batch on the sender side.
+The limit applies to each Kafka record, not to the CPI message as a whole. With **Batch Send Mode**
+`NONE` the whole message body is one record. With `JSON_ARRAY` or `XML_LIST` every element of the
+batch is a record of its own, so only the size of the largest element counts, not that of the
+batch.
+
+A record larger than **Max Request Size (KB)** (`maxRequestSizeKb`, default 5120 KB) is rejected
+by the Kafka client with a `RecordTooLargeException` (error code `KP-PROD-003`, classification
+`FATAL_DATA_ERROR`), and the message fails. Raise **Max Request Size (KB)** and make sure the broker
+accepts records of that size as well (`message.max.bytes` on the broker, `max.message.bytes` on the
+topic); otherwise the broker rejects them with the same exception. Smaller batches do not help when
+a single element is too large.

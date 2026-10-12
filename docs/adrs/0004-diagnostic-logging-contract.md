@@ -43,6 +43,13 @@ The adapter adopts a single, enforced diagnostic logging contract implemented in
 
 **Heartbeat is throttled.** The emit-cycle heartbeat that keeps a long-running consumer visible is logged at `ERROR` (for reachability), but no more than once per five minutes. Unthrottled it dominated the tenant log while conveying nothing beyond "still alive".
 
+> **Note (2026-10-12):** the emit-cycle heartbeat is no longer logged at `ERROR` every five minutes.
+> Only a state change goes to `ERROR` (`reason=STATE_CHANGE`: the first heartbeat after the start and
+> every change of `initialized`); the periodic line (`reason=INTERVAL`, at most once per five
+> minutes) goes to `INFO` and does not reach the tenant trace file. The receiver's
+> `producer.heartbeat` is still logged at `ERROR`, on the first successful send and then at most
+> once per five minutes.
+
 ### What it is not
 
 The contract does not replace the troubleshooting runbook. The ADR records the *why*; the runbook in `docs/troubleshooting.md` is the *how*. Duplicating the field reference and grep recipes here would create two sources that drift apart.
@@ -69,6 +76,9 @@ Not a real option. The CPI runtime is a managed service. The customer does not h
 **Longer log lines.** A line with a full cause chain and 12 frames per level is roughly 1,500–2,500 characters. That is intentional: the alternative is no stack trace at all.
 
 **More `ERROR` volume.** Because `WARN` is invisible, events that would naturally be warnings are now errors. The cost is managed: the heartbeat is throttled (one line per five minutes), binding failures are reported once per endpoint, and producer reinitialisation is logged once per failure.
+
+> **Note (2026-10-12):** the consumer's periodic heartbeat is now logged at `INFO` (see the note under
+> *Heartbeat is throttled*), so it adds `ERROR` lines only for its state changes.
 
 **Changing the marker invalidates existing runbooks.** Any alerting or monitoring that matched on the old marker will stop matching. The troubleshooting documentation names the new marker and must be updated before the adapter is deployed.
 
