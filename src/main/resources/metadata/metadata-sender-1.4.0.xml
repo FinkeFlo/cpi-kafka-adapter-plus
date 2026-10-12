@@ -141,7 +141,7 @@
                 </AttributeReference>
                 <AttributeReference>
                     <ReferenceName>commitStrategy</ReferenceName>
-                    <description>When to commit offsets back to Kafka. 'After Successful Processing' ensures at-least-once delivery (recommended). 'Auto Commit' lets the Kafka client commit the consumer position periodically instead: records that were polled but not processed yet can be committed and lost, for example when the integration flow is stopped while a long-running IFlow call is still in progress. Not allowed together with 'Drain Backlog': the deployment fails.</description>
+                    <description>When to commit offsets back to Kafka. 'After Successful Processing' ensures at-least-once delivery (recommended). 'Auto Commit' lets the Kafka client commit the consumer position periodically instead: records that were polled but not processed yet can be committed and lost, for example when the integration flow is stopped while a long-running IFlow call is still in progress. With 'Scheduled Polling' it cannot be combined with 'Drain Backlog': the deployment fails.</description>
                 </AttributeReference>
             </AttributeGroup>
             <AttributeGroup id="pollingConfig">
