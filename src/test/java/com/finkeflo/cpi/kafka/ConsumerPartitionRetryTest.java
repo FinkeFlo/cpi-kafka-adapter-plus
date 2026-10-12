@@ -41,7 +41,7 @@ import org.junit.Test;
 /**
  * The retry of a blocked partition is announced ({@code consumer.partition.retry}) and backed off
  * from the offset the partition resumes at, its first open record, which can lie before the record
- * that blocked it (#244).
+ * that blocked it (#244). A retry that the poll ran out of time for waits until it is due (#192).
  */
 public class ConsumerPartitionRetryTest {
 
@@ -49,6 +49,7 @@ public class ConsumerPartitionRetryTest {
 
     private DefaultCamelContext ctx;
     private CpiKafkaPlusConsumer consumer;
+    private PartitionBackoff backoff;
 
     @Before
     public void setUp() throws Exception {
@@ -60,9 +61,10 @@ public class ConsumerPartitionRetryTest {
         // Never started: without a Kafka consumer the rewind and the pause fail and are only logged.
         // What this test checks, the retry line and the backoff, comes after them.
         consumer = new CpiKafkaPlusConsumer(endpoint, exchange -> { });
-        Field backoff = CpiKafkaPlusConsumer.class.getDeclaredField("retryBackoff");
-        backoff.setAccessible(true);
-        backoff.set(consumer, new PartitionBackoff(1000L, 300_000L));
+        backoff = new PartitionBackoff(1000L, 300_000L);
+        Field field = CpiKafkaPlusConsumer.class.getDeclaredField("retryBackoff");
+        field.setAccessible(true);
+        field.set(consumer, backoff);
     }
 
     @After
@@ -99,20 +101,52 @@ public class ConsumerPartitionRetryTest {
         Assert.assertFalse("blocked where it resumes: " + line, line.contains("blockedAt="));
     }
 
+    @Test
+    public void aDeferredRetryWaitsUntilItIsDueWithoutCountingAsAFailure() throws Exception {
+        long due = System.currentTimeMillis() + 60_000L;
+        PollProgress progress = progress(100, 105);
+        progress.resolved(P0, 100);
+        progress.deferred(P0, 101, due);
+
+        List<String> lines = settleLines(progress);
+
+        Assert.assertFalse(lines.toString(), String.join("\n", lines).contains("consumer.partition.retry"));
+        Assert.assertEquals(Collections.singleton(P0), backoff.waiting(due - 1));
+        Assert.assertTrue(backoff.waiting(due).isEmpty());
+        Assert.assertEquals("the next failure at the offset starts at the base delay", 1000L,
+                backoff.blocked(P0, 101, due));
+    }
+
     /** One poll of the records {@code first..last} of P0, blocked at {@code blockedAt}. */
     private static PollProgress progress(long first, long last, long blockedAt) {
-        List<ConsumerRecord<byte[], byte[]>> records = new ArrayList<>();
-        for (long offset = first; offset <= last; offset++) {
-            records.add(new ConsumerRecord<>("orders", 0, offset, (byte[]) null, new byte[0]));
-        }
-        PollProgress progress = new PollProgress(new ConsumerRecords<>(Collections.singletonMap(P0, records),
-                Collections.emptyMap()));
+        PollProgress progress = progress(first, last);
         progress.blocked(P0, blockedAt);
         return progress;
     }
 
+    /** One poll of the records {@code first..last} of P0. */
+    private static PollProgress progress(long first, long last) {
+        List<ConsumerRecord<byte[], byte[]>> records = new ArrayList<>();
+        for (long offset = first; offset <= last; offset++) {
+            records.add(new ConsumerRecord<>("orders", 0, offset, (byte[]) null, new byte[0]));
+        }
+        return new PollProgress(new ConsumerRecords<>(Collections.singletonMap(P0, records),
+                Collections.emptyMap()));
+    }
+
     /** Settles the poll as the consumer does after processing it, and returns its retry line. */
     private String settle(PollProgress progress) throws Exception {
+        List<String> lines = settleLines(progress);
+        for (String line : lines) {
+            if (line.contains("consumer.partition.retry")) {
+                return line;
+            }
+        }
+        throw new AssertionError("no consumer.partition.retry line in:\n" + String.join("\n", lines));
+    }
+
+    /** Settles the poll as the consumer does after processing it, and returns the lines it logged. */
+    private List<String> settleLines(PollProgress progress) throws Exception {
         Method settle = CpiKafkaPlusConsumer.class.getDeclaredMethod("settlePoll", PollProgress.class);
         settle.setAccessible(true);
         PrintStream original = System.err;
@@ -125,11 +159,12 @@ public class ConsumerPartitionRetryTest {
         }
         // Kafka clients left behind by other tests keep logging on their own threads.
         String own = "[" + Thread.currentThread().getName() + "] ";
+        List<String> lines = new ArrayList<>();
         for (String line : new String(captured.toByteArray(), StandardCharsets.UTF_8).split("\\R")) {
-            if (line.startsWith(own) && line.contains("consumer.partition.retry")) {
-                return line;
+            if (line.startsWith(own)) {
+                lines.add(line);
             }
         }
-        throw new AssertionError("no consumer.partition.retry line in:\n" + captured);
+        return lines;
     }
 }

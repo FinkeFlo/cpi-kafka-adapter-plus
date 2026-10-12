@@ -99,6 +99,31 @@ public class PartitionBackoffTest {
     }
 
     @Test
+    public void aDeferredRetryHoldsThePartitionBackWithoutCountingAsAFailure() {
+        PartitionBackoff backoff = new PartitionBackoff(1_000L, 300_000L);
+        backoff.blocked(P0, 7, 0L);
+
+        backoff.deferUntil(P0, 7, 50_000L);
+
+        Assert.assertEquals(Collections.singleton(P0), backoff.waiting(49_999L));
+        Assert.assertEquals(Collections.singleton(P0), backoff.due(50_000L));
+        Assert.assertEquals("the second failure at the offset, not the third", 2_000L,
+                backoff.blocked(P0, 7, 50_000L));
+    }
+
+    @Test
+    public void aDeferredRetryAtAnotherOffsetStartsOver() {
+        PartitionBackoff backoff = new PartitionBackoff(1_000L, 300_000L);
+        backoff.blocked(P0, 7, 0L);
+        backoff.blocked(P0, 7, 0L);
+
+        backoff.deferUntil(P0, 8, 0L);
+
+        Assert.assertTrue(backoff.waiting(0L).isEmpty());
+        Assert.assertEquals(1_000L, backoff.blocked(P0, 8, 0L));
+    }
+
+    @Test
     public void revokedPartitionsAreForgotten() {
         PartitionBackoff backoff = new PartitionBackoff(1_000L, 300_000L);
         backoff.blocked(P0, 7, 0L);

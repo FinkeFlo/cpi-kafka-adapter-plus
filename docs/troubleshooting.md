@@ -506,6 +506,30 @@ and the channel starts all the same:
   *Initial Pause Duration (sec)* below 1 is used as 1, and an *Initial Pause Duration (sec)* above 900
   as 900, the longest pause there is. Up to 1.4.1 a value above 900 was cut without a line.
 
+### `consumer.poll.timeLimit` and `consumer.retry.deferred`
+
+The sender ended a poll early so that it calls `poll()` again in time. If a consumer does not call
+`poll()` within `max.poll.interval.ms`, Kafka hands its partitions to another member of the group,
+which processes the same records again. That limit is 10 minutes with *Streaming (Continuous)* and
+*Polling Interval (Seconds)* plus 10 minutes with *Scheduled Polling*, at most 6 h 10 min. The
+adapter therefore starts no record, batch or retry later than halfway through it after a poll:
+`pollTimeLimitMs` is that half, `pollElapsedMs` the time since the poll.
+
+* `consumer.poll.timeLimit`: records of the poll were not started. `offset` is the first of them;
+  they come with the next poll. At most one line per poll.
+* `consumer.retry.deferred`: retry `retry` of `maxRetries` for the record at `offset` would have
+  started after the limit, `retryInMs` after its failed attempt. The partition is rewound to the
+  record and paused until the retry is due, the other partitions keep flowing, and the next poll of
+  the partition runs that retry instead of starting the record over. After its last retry the record
+  goes to the dead-letter topic as before.
+
+Neither line means that a record was lost or processed twice. If they appear often, the records of
+a poll take too long: lower *Max Poll Records* (`maxPollRecords`), *Retries before DLQ (additional
+attempts)* (`dlqMaxRetries`) or *Retry Delay (Seconds)* (`retryDelaySeconds`), or find out why the
+integration flow is slow. A single flow call that takes longer than half of `max.poll.interval.ms`
+can still exceed it. Up to 1.4.1 the adapter carried on regardless, and the consumer could lose its
+partitions in the middle of a poll.
+
 ### `producer.metadata.prewarm outcome=FAILED`
 
 The up-front metadata fetch did not succeed. This is not itself a failure: the send path performs the
