@@ -277,6 +277,8 @@ Confirm it in this order:
    `offset`, the serialised cause, and `consequence='offset not committed, record will be
    retried'`. It is followed by `consumer.partition.retry` with the same `offset` and the delay
    until the next attempt (`retryInMs`). The repeated offset in successive lines is the stalled one.
+   If an earlier record of the same poll is still open too, the partition resumes there: `offset`
+   is that record, and `blockedAt` the one whose dead-letter send failed.
 2. Compare the group's committed offset with the partition's high watermark. A constant gap that
    equals the number of deliveries since the stall began confirms it.
 3. Check whether a rebuild was attempted and what it achieved, using the fields above.

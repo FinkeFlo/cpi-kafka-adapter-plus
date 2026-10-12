@@ -152,8 +152,10 @@ with every further failure at the same offset up to 5 minutes (or **Retry Delay*
 longer than 1 second). Other partitions keep flowing.
 
 The trace shows `dlq.send.failed … consequence='offset not committed, record will be retried'`
-followed by `consumer.partition.retry` with the `offset` and `retryInMs`. Fix the cause and the
-partition continues on its own with the next retry.
+followed by `consumer.partition.retry` with the `offset` and `retryInMs`. If an earlier record of
+the same poll is still open as well, `offset` is that record, where the partition resumes, and
+`blockedAt` is the record whose DLQ write failed. Fix the cause and the partition continues on its
+own with the next retry.
 
 This applies to every way a record reaches the DLQ: failed IFlow processing, failed
 deserialization and failed JSON Schema validation.

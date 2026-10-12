@@ -25,6 +25,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
 
@@ -752,17 +753,21 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
      * Seeks each partition back to the smallest offset present in the polled records.
      * Used by the drain loop to "un-poll" records that should not be processed in the
      * current cycle (e.g. when fewer records than {@code minBacklogToDrain} were returned
-     * on an extra drain cycle). Without this, those records would be lost until the next
-     * rebalance, because {@code consumer.position()} has already advanced past them.
+     * on an extra drain cycle), and by the keep-alive poll. Without this, those records would be
+     * skipped, because {@code consumer.position()} has already advanced past them.
      */
     private void seekBackToFirstOffsets(ConsumerRecords<byte[], byte[]> records) {
         try {
             BundleBackedClassLoader.runWithBundleClassLoader(getClass(),
                     () -> KeepAlive.seekToFirstOffsets(kafkaConsumer, records));
-        } catch (Exception e) {
-            LOG.warn("[CPI-KAFKA-PLUS-DIAG] drain: failed to seek back to first offsets, "
-                    + "records may be re-polled on next cycle anyway: exClass={} exMsg='{}'",
-                    e.getClass().getName(), e.getMessage());
+        } catch (RuntimeException e) {
+            // A failed seek is logged per partition; this is anything else, and it leaves every
+            // position past the records just polled (#244).
+            AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("consumer.rewind.failed")
+                    .with("topic", endpoint.getEffectiveTopic())
+                    .with("partitions", records.partitions())
+                    .with("consequence", "the positions stay past records that were not processed; "
+                            + "the next commit can pass them"), e);
         }
     }
 
@@ -785,15 +790,20 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
             return;
         }
         long now = System.currentTimeMillis();
+        Map<TopicPartition, Long> rewindPositions = progress.rewindPositions();
         for (TopicPartition tp : progress.partitions()) {
             Long blockedAt = progress.blockedOffset(tp);
             if (blockedAt != null) {
-                long delayMs = backoff.blocked(tp, blockedAt, now);
+                // The partition resumes at its first open record, which can lie before the record that
+                // blocked it, e.g. a failed batch in front of a record whose DLQ write failed (#244).
+                Long resumeAt = rewindPositions.getOrDefault(tp, blockedAt);
+                long delayMs = backoff.blocked(tp, resumeAt, now);
                 pauseForBackoff(tp);
                 AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("consumer.partition.retry")
                         .with("topic", tp.topic())
                         .with("partition", tp.partition())
-                        .with("offset", blockedAt)
+                        .with("offset", resumeAt)
+                        .withOptional("blockedAt", blockedAt.equals(resumeAt) ? null : blockedAt)
                         .with("retryInMs", delayMs)
                         .with("consequence", "nothing at or after this offset is committed until it succeeds"));
             } else if (progress.commitOffset(tp) >= 0) {

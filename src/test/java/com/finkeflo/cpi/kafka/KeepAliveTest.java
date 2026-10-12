@@ -20,6 +20,9 @@
  */
 package com.finkeflo.cpi.kafka;
 
+import java.io.ByteArrayOutputStream;
+import java.io.PrintStream;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -112,6 +115,77 @@ public class KeepAliveTest {
 
         Assert.assertEquals(5L, consumer.position(p0));
         Assert.assertEquals(2L, consumer.position(p1));
+    }
+
+    @Test
+    public void aFailedSeekDoesNotKeepTheOtherPartitionsFromBeingRewound() throws Exception {
+        List<TopicPartition> sought = new ArrayList<>();
+        MockConsumer<byte[], byte[]> firstSeekFails = new MockConsumer<byte[], byte[]>("earliest") {
+            @Override
+            public synchronized void seek(TopicPartition partition, long offset) {
+                sought.add(partition);
+                if (sought.size() == 1) {
+                    throw new IllegalStateException("seek failed");
+                }
+                super.seek(partition, offset);
+            }
+        };
+        firstSeekFails.assign(Arrays.asList(p0, p1));
+        Map<TopicPartition, List<ConsumerRecord<byte[], byte[]>>> byPartition = new HashMap<>();
+        byPartition.put(p0, Collections.singletonList(record(0, 5L)));
+        byPartition.put(p1, Collections.singletonList(record(1, 2L)));
+
+        String logged = capture(() -> KeepAlive.seekToFirstOffsets(firstSeekFails,
+                new ConsumerRecords<>(byPartition, Collections.emptyMap())));
+
+        Assert.assertEquals("both partitions are sought", 2, sought.size());
+        TopicPartition failed = sought.get(0);
+        TopicPartition rewound = sought.get(1);
+        Assert.assertEquals(rewound.equals(p0) ? 5L : 2L, firstSeekFails.position(rewound));
+        // Still assigned, so its position stays past records that were not processed (#244).
+        Assert.assertTrue(logged, logged.contains(" ERROR "));
+        Assert.assertTrue(logged, logged.contains("consumer.rewind.failed topic=t partition=" + failed.partition()
+                + " offset=" + (failed.equals(p0) ? 5L : 2L) + " "));
+    }
+
+    @Test
+    public void aSeekOnAPartitionNoLongerAssignedIsOnlyWarnedAbout() throws Exception {
+        // setUp assigns p0 only; p1 was revoked, and its new owner starts from the committed offset.
+        String logged = capture(() -> Assert.assertFalse(KeepAlive.seekBack(consumer, p1, 3L)));
+
+        Assert.assertTrue(logged, logged.contains(" WARN ") && logged.contains("no longer assigned"));
+        Assert.assertFalse(logged, logged.contains(" ERROR "));
+    }
+
+    @Test
+    public void aSuccessfulSeekLogsNothing() throws Exception {
+        String logged = capture(() -> Assert.assertTrue(KeepAlive.seekBack(consumer, p0, 0L)));
+
+        Assert.assertEquals("", logged);
+        Assert.assertEquals(0L, consumer.position(p0));
+    }
+
+    /**
+     * The lines this thread logs while {@code action} runs. Clients left by earlier tests keep
+     * logging from their own threads meanwhile.
+     */
+    private static String capture(Runnable action) throws Exception {
+        PrintStream original = System.err;
+        ByteArrayOutputStream captured = new ByteArrayOutputStream();
+        System.setErr(new PrintStream(captured, true, "UTF-8"));
+        try {
+            action.run();
+        } finally {
+            System.setErr(original);
+        }
+        String thisThread = "[" + Thread.currentThread().getName() + "] ";
+        StringBuilder lines = new StringBuilder();
+        for (String line : new String(captured.toByteArray(), StandardCharsets.UTF_8).split("\\R")) {
+            if (line.startsWith(thisThread)) {
+                lines.append(line).append('\n');
+            }
+        }
+        return lines.toString();
     }
 
     private static ConsumerRecord<byte[], byte[]> record(int partition, long offset) {

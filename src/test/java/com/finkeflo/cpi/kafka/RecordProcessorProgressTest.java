@@ -349,11 +349,10 @@ public class RecordProcessorProgressTest {
         Assert.assertEquals("the two retries left are skipped", Arrays.asList("0:0", "0:0", "0:1"), invoked);
         Assert.assertEquals(1, dlq.history().size());
         Assert.assertEquals("PERMANENT", header(dlq.history().get(0), "CpiKafkaPlusDlqErrorType"));
-        // Pinned as it is: the retry that failed permanently is not counted, so one retry ran but the
-        // count says none.
-        Assert.assertEquals("0", header(dlq.history().get(0), "CpiKafkaPlusDlqRetryCount"));
+        // One retry ran, the one that failed permanently, and it is counted (#244).
+        Assert.assertEquals("1", header(dlq.history().get(0), "CpiKafkaPlusDlqRetryCount"));
         Assert.assertEquals("PERMANENT", tracing.traced.get(0).get("errorType"));
-        Assert.assertEquals("0", tracing.traced.get(0).get("retryAttempts"));
+        Assert.assertEquals("1", tracing.traced.get(0).get("retryAttempts"));
         Assert.assertEquals(2L, committed(consumer, P0));
     }
 

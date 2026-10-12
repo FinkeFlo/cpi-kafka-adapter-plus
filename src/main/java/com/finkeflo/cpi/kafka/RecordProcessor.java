@@ -289,14 +289,8 @@ final class RecordProcessor {
      */
     void rewind(Consumer<byte[], byte[]> kafkaConsumer, PollProgress progress) {
         for (Map.Entry<TopicPartition, Long> e : progress.rewindPositions().entrySet()) {
-            try {
-                kafkaConsumer.seek(e.getKey(), e.getValue());
+            if (KeepAlive.seekBack(kafkaConsumer, e.getKey(), e.getValue())) {
                 LOG.debug("[CPI-KAFKA-PLUS-DIAG] rewind: partition {} back to offset {}", e.getKey(), e.getValue());
-            } catch (RuntimeException seekError) {
-                // Typically a partition revoked during this poll; its new owner starts from the
-                // committed offset, which never passes an unresolved record.
-                LOG.warn("[CPI-KAFKA-PLUS-DIAG] rewind: could not seek partition {} back to offset {}: {}",
-                        e.getKey(), e.getValue(), seekError.getMessage());
             }
         }
     }
@@ -490,6 +484,9 @@ final class RecordProcessor {
                 callback.processExchange(exchange);
             } catch (Exception e) {
                 lastError = e;
+                // Counted before a permanent failure breaks off, so the retry that failed
+                // permanently is included (#244).
+                actualRetries = attempt;
 
                 if (stopRequested(progress)) {
                     logStoppedDuringRoute("record", record, e);
@@ -503,8 +500,6 @@ final class RecordProcessor {
                     permanentError = true;
                     break;
                 }
-
-                actualRetries = attempt;
 
                 if (attempt < maxRetries && !sleepWithBackoff(attempt, record)) {
                     // Interrupted between two attempts: a shutdown, not a poison record. Leave it
