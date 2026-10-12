@@ -13,7 +13,7 @@ When **Enable Dead Letter Queue** (`dlqEnabled`) is turned on, records that fail
 | `dlqEnabled` | `false` | Enable Dead Letter Queue routing for failed records |
 | `dlqTopic` | _(required)_ | Kafka topic to send failed records to |
 | `dlqMaxRetries` | `3` | Number of retries after the first failed attempt before a record is sent to the DLQ (UI: "Retries before DLQ (additional attempts)") |
-| `dlqCredentialAlias` | _(empty)_ | SASL credential alias for the DLQ Kafka cluster. Only visible when DLQ is enabled. Leave empty to reuse the main consumer credentials. |
+| `dlqCredentialAlias` | _(empty)_ | SASL credential alias for writing to the DLQ topic, if that needs other credentials than the main connection. The DLQ topic is always on the same cluster (`bootstrapServers`). Only visible when DLQ is enabled. Leave empty to reuse the main consumer credentials. |
 | `retryOnlyTransientErrors` | `true` | Only retry transient errors (timeouts, connection failures). Permanent errors are sent directly to DLQ. (UI: "Retry Transient Errors Only") |
 | `retryDelaySeconds` | `0` | Initial delay between retries in seconds. Doubles after each retry (exponential backoff), capped at 300s. |
 
@@ -92,7 +92,7 @@ The adapter walks the full exception cause chain. If a `RuntimeException` wraps 
 
 ### DLQ Error Type Header
 
-DLQ records include a `CpiKafkaPlusDlqErrorType` header. Normal processing failures use `PERMANENT` or `TRANSIENT`; deserialization poison pills use `DESERIALIZATION`.
+With **Retry Transient Errors Only** (`retryOnlyTransientErrors`) switched on, a record that failed in the IFlow reaches the DLQ with the header `CpiKafkaPlusDlqErrorType`: `PERMANENT` if the error was permanent and the remaining retries were skipped, `TRANSIENT` if all retries failed. With the switch off, the header is absent, because the adapter does not classify the error then. Records that cannot be deserialized (poison pills) always carry `DESERIALIZATION`; records that failed JSON Schema validation carry no error type.
 
 ## Retry Delay with Exponential Backoff
 
@@ -122,6 +122,9 @@ When using batch processing (`batchMode=true` with **JSON Array** (`JSON_ARRAY`)
 3. Each record is then retried individually with the full retry logic
 4. Only records that fail all individual retries are sent to the DLQ
 
+Each record of this fallback reaches the IFlow as a batch of one record in the same envelope, with
+the header `CpiKafkaPlusFallbackMode=true` (see [Kafka Headers](kafka-headers.md#batch-mode)).
+
 This means a single bad record does not drag the entire batch into the DLQ.
 
 ### Example: 5-Record Batch with One Bad Record
@@ -144,7 +147,7 @@ This means a single bad record does not drag the entire batch into the DLQ.
 
 ## JSON Schema Validation and DLQ
 
-Records that fail **JSON Schema Validation** (`jsonSchemaValidation`) are sent to the DLQ **immediately without retries** (`retryCount=0`), since schema validation errors are deterministic and retrying would produce the same result.
+Records that fail **JSON Schema Validation** (`jsonSchemaValidation`) are sent to the DLQ **immediately without retries** (`CpiKafkaPlusDlqRetryCount` = `0`, no `CpiKafkaPlusDlqErrorType`), since schema validation errors are deterministic and retrying would produce the same result.
 
 **Without DLQ:** Records that fail **JSON Schema Validation** (`jsonSchemaValidation`) are **silently discarded** — the offset is committed so the record is not reprocessed, but the record is not forwarded to the IFlow. A WARN-level log entry is written for each discarded record; WARN does not reach the tenant trace in production, so enable **Report Validation Failures in CPI Monitoring** (`jsonSchemaReportError`) to see these records as failed messages.
 
@@ -207,7 +210,7 @@ Each record sent to the DLQ includes the original headers plus DLQ metadata. The
 
 ### Normal Processing Failures
 
-Records that fail during IFlow processing include these headers:
+Records that fail during IFlow processing, and records that fail JSON Schema validation, include these headers:
 
 | Header | Description |
 |--------|-------------|
@@ -216,8 +219,8 @@ Records that fail during IFlow processing include these headers:
 | `CpiKafkaPlusDlqOriginalPartition` | Original partition number |
 | `CpiKafkaPlusDlqOriginalOffset` | Original offset within the partition |
 | `CpiKafkaPlusDlqTimestamp` | ISO 8601 timestamp of when the record was sent to DLQ |
-| `CpiKafkaPlusDlqRetryCount` | Number of retries attempted before DLQ routing |
-| `CpiKafkaPlusDlqErrorType` | `PERMANENT` or `TRANSIENT` — error classification |
+| `CpiKafkaPlusDlqRetryCount` | Number of retries before DLQ routing (attempts − 1), including a retry that failed with a permanent error; `0` for JSON Schema violations |
+| `CpiKafkaPlusDlqErrorType` | `PERMANENT` or `TRANSIENT`, only with **Retry Transient Errors Only** (`retryOnlyTransientErrors`) switched on; absent otherwise and for JSON Schema violations (see [DLQ Error Type Header](#dlq-error-type-header)) |
 
 ### Deserialization / Poison-Pill Failures
 
@@ -225,7 +228,7 @@ Records that cannot be deserialized include these headers:
 
 | Header | Description |
 |--------|-------------|
-| `CpiKafkaPlusDlqError` | Error message |
+| `CpiKafkaPlusDlqError` | Error message or exception class name |
 | `CpiKafkaPlusDlqErrorClass` | Exception class name |
 | `CpiKafkaPlusDlqCauseClass` | Cause exception class name |
 | `CpiKafkaPlusDlqCauseMessage` | Cause exception message |
@@ -234,6 +237,8 @@ Records that cannot be deserialized include these headers:
 | `CpiKafkaPlusDlqOriginalOffset` | Original offset within the partition |
 | `CpiKafkaPlusDlqTimestamp` | ISO 8601 timestamp of when the record was sent to DLQ |
 | `CpiKafkaPlusDlqErrorType` | `DESERIALIZATION` |
+
+Such a record is not retried, so it carries no `CpiKafkaPlusDlqRetryCount`.
 
 These headers allow consumers of the DLQ topic to trace the origin of each failed record and understand the failure context.
 

@@ -714,8 +714,8 @@
          mapped to transaction.two.phase.commit.enable (KIP-939), which the adapter now pins to
          false unconditionally, so the option had no effect in either position. The endpoint setter
          is retained so existing iFlow URIs still resolve. -->
-    <!-- retries: removed from UI — Kafka uses Integer.MAX_VALUE with idempotence,
-         deliveryTimeoutSeconds is the effective limit. Can be re-enabled if needed. -->
+    <!-- retries: removed for good – no endpoint option exists. The Kafka client retries a send
+         until deliveryTimeoutSeconds expires, so that is the effective limit. -->
     <AttributeMetadata>
         <Name>deliveryTimeoutSeconds</Name>
         <Usage>false</Usage>

@@ -202,15 +202,21 @@ the node field above is the evidence to attach to a ticket.
 
 When the same fault (keyed by exception class and error code) recurs **5 times within 20 minutes**
 on one JVM despite the adapter's mitigation, a `producer.node.fault.escalation` line is emitted.
+Only failed sends of the shared, non-transactional producer that are classified
+`FATAL_PRODUCER_UNUSABLE` or `UNKNOWN_FATAL` count; a `RETRIABLE` failure such as a timeout or a
+`FATAL_DATA_ERROR` never escalates, however often it recurs.
 This is the single most actionable diagnostic line the adapter can produce: it means the node is
 experiencing a persistent problem that automatic recovery cannot fix.
 
 ```
-[CPI-KAFKA-PLUS-DIAG] producer.node.fault.escalation faultClass=TimeoutException
-  errorCode=KP-PROD-002 classification=RETRIABLE countInWindow=5 windowMinutes=20
-  producerPath=SHARED topic=… thread=… advice='The same fault has recurred 5 times
-  within 20 minutes on this JVM despite mitigation…'
+[CPI-KAFKA-PLUS-DIAG] producer.node.fault.escalation faultClass=java.lang.IllegalMonitorStateException
+  errorCode=KP-META-002 classification=UNKNOWN_FATAL countInWindow=5 windowMinutes=20
+  producerPath=SHARED clientId=… topic=… thread=… advice='The same fault has recurred 5 times
+  within 20 minutes on this JVM despite mitigation…' jvmUptimeMs=… jvmThreadCount=… …
 ```
+
+The line always carries the JVM state (`jvmUptimeMs`, `jvmThreadCount`, `jvmHeapUsedMB`, …); with
+`diagnosticsLevel` `FULL` it also carries a bounded thread dump (`threadDump`).
 
 **What to do:**
 
@@ -220,8 +226,11 @@ experiencing a persistent problem that automatic recovery cannot fix.
 3. Collect the evidence (error code, classification, node address) and open a support ticket
    requesting that the node be recycled or the integration flow redeployed.
 
-The escalation fires once per fault identity per 20-minute window. If the fault stops and returns,
-it fires again. Successful sends reset the window.
+The 20-minute window starts at the first occurrence of a fault, and the escalation fires at most
+once per window, at the fifth occurrence. Successful sends do not reset the window: a fault that
+stops and returns within the same 20 minutes does not fire again. The count starts over only when
+the window has expired or when a different fault occurs, so two faults that alternate never
+escalate.
 
 ## Producer rebuild tracking
 
@@ -464,8 +473,9 @@ supported:
 | `STANDARD` (default) | All failure paths log the full serialised cause chain. Sufficient for root-causing most production incidents. |
 | `FULL` | Adds one thing: a bounded thread dump attached to `producer.node.fault.escalation`, capped at 20 threads and 10 frames each, with lock owners resolved. That dump is the only evidence that can settle a monitor-ownership question, and it is the reason `FULL` exists. |
 
-`STANDARD` is fully diagnostic on its own. Do not run at `FULL` permanently: the extra output adds
-volume and latency on every send. Switch to `FULL` only when you need the additional detail, then
-switch back.
+`STANDARD` is fully diagnostic on its own. `FULL` costs nothing on a normal send: the thread dump is
+taken only when a node-fault escalation fires, at most once per 20-minute window, and makes that one
+line longer by up to about 5,000 characters. Switch to `FULL` while you investigate a node fault,
+then switch back.
 
 See [Configuration](configuration.md) for how to set this option.

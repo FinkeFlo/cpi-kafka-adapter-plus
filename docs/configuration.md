@@ -12,7 +12,7 @@ All adapter parameters are configured on the `CpiKafkaPlusEndpoint`. The section
 |-----------|---------|-------------|
 | `bootstrapServers` | _(required)_ | Kafka bootstrap servers, comma-separated. |
 | `topic` | _(required)_ | Kafka topic or comma-separated topics to consume from. |
-| `groupId` | — | Consumer group ID. |
+| `groupId` | _(required)_ | Consumer group ID. |
 
 **Security**
 
@@ -20,7 +20,7 @@ All adapter parameters are configured on the `CpiKafkaPlusEndpoint`. The section
 |-----------|---------|-------------|
 | `securityProtocol` | `SASL_SSL` | Security protocol, covering transport and authentication in one value: `SASL_SSL` (UI: "SASL_SSL (SASL over TLS)"), `SSL` (UI: "SSL (TLS, client certificate optional via Keystore Alias)") — TLS with a client certificate (mTLS) only when `sslKeystoreAlias` names a key pair, `SASL_PLAINTEXT` (UI: "SASL_PLAINTEXT (no TLS)"), `PLAINTEXT` (UI: "PLAINTEXT (no TLS, no authentication)"). Managed brokers such as Confluent Cloud accept TLS only. |
 | `saslMechanism` | `PLAIN` | SASL mechanism: `PLAIN`, `SCRAM-SHA-256`, `SCRAM-SHA-512`. |
-| `credentialAlias` | — | Credential alias for SASL username/password from CPI Secure Store. |
+| `credentialAlias` | _(required)_ | Credential alias for SASL username/password from CPI Secure Store. Required when `securityProtocol` is `SASL_SSL` or `SASL_PLAINTEXT`. |
 | `sslKeystoreAlias` | — | Leave empty for brokers with a publicly trusted certificate (e.g. Confluent Cloud) — the JVM default truststore is used and TLS is still active. Setting any alias makes the adapter trust the certificates of the whole CPI tenant keystore instead of the JVM default truststore, so the broker's CA certificate (or its self-signed certificate) must then be in the tenant keystore. For client-certificate authentication (mTLS) the alias must name a key pair. |
 
 For detailed security setup, see [Authentication](security/authentication.md).
@@ -72,7 +72,7 @@ For detailed security setup, see [Authentication](security/authentication.md).
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `jsonSchemaValidation` | `false` | Enable JSON Schema validation of incoming messages. A message that fails validation never reaches the IFlow: it goes to the DLQ if one is enabled, otherwise it is discarded and its offset committed. `errorHandling` does not apply to it. |
-| `jsonSchema` | — | Inline JSON Schema for message validation. |
+| `jsonSchema` | _(required)_ | Inline JSON Schema for message validation. Required when `jsonSchemaValidation` is `true`. |
 | `jsonSchemaReportError` | `false` | Also write a failed MPL entry with the validation error for every message that fails validation (the payload only in its trace, if trace is active). When `false`, a discarded message leaves only a WARN log line, which does not reach the tenant trace in production. |
 
 For more details, see [JSON Schema Validation](features/json-schema-validation.md).
@@ -92,7 +92,7 @@ In `XML_LIST` mode, each `<value>` element carries a `format` attribute (`"xml"`
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `schemaRegistryEnabled` | `false` | Enable Confluent Schema Registry integration. |
-| `schemaRegistryUrl` | — | Confluent Schema Registry URL. |
+| `schemaRegistryUrl` | _(required)_ | Confluent Schema Registry URL. Required when `schemaRegistryEnabled` is `true`. |
 | `schemaRegistryCredentialAlias` | — | Credential alias for Schema Registry authentication. |
 | `avroOutputFormat` | `JSON` | Avro output format: `JSON`, `XML`. |
 | `avroValueDeserialization` | `true` | Deserialize message values using Avro. Requires Schema Registry. |
@@ -113,7 +113,7 @@ For details on Avro integration, see [Avro / Schema Registry](features/avro-sche
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `dlqEnabled` | `false` | Enable Dead Letter Queue routing for failed messages. |
-| `dlqTopic` | — | Topic name for the Dead Letter Queue. |
+| `dlqTopic` | _(required)_ | Topic name for the Dead Letter Queue. Required when `dlqEnabled` is `true`. |
 | `dlqMaxRetries` | `3` | Retries after the first failed attempt before a record is routed to the DLQ (UI: "Retries before DLQ (additional attempts)"): `3` means up to 4 attempts in total, `0` routes it after the first failure. |
 | `dlqCredentialAlias` | — | SASL credential alias for writing to the DLQ topic, if that needs other credentials than the main connection. The DLQ topic is always on the same cluster (`bootstrapServers`); leave empty to reuse `credentialAlias`. |
 | `retryOnlyTransientErrors` | `true` | **Sender (consumer) direction only.** Retry only transient errors; send permanent errors directly to the DLQ (UI: "Retry Transient Errors Only"). The receiver direction uses `producerRetryOnlyTransientErrors`. |
@@ -146,7 +146,7 @@ For details on DLQ and retry behavior, see [Dead Letter Queue](features/dead-let
 |-----------|---------|-------------|
 | `securityProtocol` | `SASL_SSL` | Security protocol, covering transport and authentication in one value: `SASL_SSL` (UI: "SASL_SSL (SASL over TLS)"), `SSL` (UI: "SSL (TLS, client certificate optional via Keystore Alias)") — TLS with a client certificate (mTLS) only when `sslKeystoreAlias` names a key pair, `SASL_PLAINTEXT` (UI: "SASL_PLAINTEXT (no TLS)"), `PLAINTEXT` (UI: "PLAINTEXT (no TLS, no authentication)"). Managed brokers such as Confluent Cloud accept TLS only. |
 | `saslMechanism` | `PLAIN` | SASL mechanism: `PLAIN`, `SCRAM-SHA-256`, `SCRAM-SHA-512`. |
-| `credentialAlias` | — | Credential alias for SASL username/password from CPI Secure Store. |
+| `credentialAlias` | _(required)_ | Credential alias for SASL username/password from CPI Secure Store. Required when `securityProtocol` is `SASL_SSL` or `SASL_PLAINTEXT`. |
 | `sslKeystoreAlias` | — | Leave empty for brokers with a publicly trusted certificate (e.g. Confluent Cloud) — the JVM default truststore is used and TLS is still active. Setting any alias makes the adapter trust the certificates of the whole CPI tenant keystore instead of the JVM default truststore, so the broker's CA certificate (or its self-signed certificate) must then be in the tenant keystore. For client-certificate authentication (mTLS) the alias must name a key pair. |
 
 For detailed security setup, see [Authentication](security/authentication.md).
@@ -180,7 +180,7 @@ For detailed security setup, see [Authentication](security/authentication.md).
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `enableTransactions` | `false` | Enable transactional batching (creates a new transactional producer per batch). Applies only to `producerBatchMode` `JSON_ARRAY` or `XML_LIST`; with `NONE` messages are sent without a transaction. |
-| `transactionalIdPrefix` | — | Prefix for `transactional.id` (e.g. `my-app-txn`). Required if `enableTransactions` is `true`. |
+| `transactionalIdPrefix` | _(required)_ | Prefix for `transactional.id` (e.g. `my-app-txn`). Required with transactional batching: `enableTransactions` with `producerBatchMode` `JSON_ARRAY` or `XML_LIST`. |
 | `maxConcurrentTransactions` | `5` | Maximum number of concurrent transactional producers per worker node. |
 
 **Performance Tuning**
@@ -197,7 +197,7 @@ For detailed security setup, see [Authentication](security/authentication.md).
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `jsonSchemaValidation` | `false` | Enable JSON Schema validation of outgoing messages. An invalid message fails the exchange and is not sent. Skipped, with a warning, when `producerBatchMode` is `JSON_ARRAY` or `XML_LIST`. |
-| `jsonSchema` | — | Inline JSON Schema for message validation. |
+| `jsonSchema` | _(required)_ | Inline JSON Schema for message validation. Required when `jsonSchemaValidation` is `true`. |
 | `jsonSchemaReportError` | `false` | An invalid message always fails the exchange, whatever this setting says. `true` also writes the rejected payload to the MPL trace, if trace is active for the integration flow. |
 
 For more details, see [JSON Schema Validation](features/json-schema-validation.md).
@@ -207,7 +207,7 @@ For more details, see [JSON Schema Validation](features/json-schema-validation.m
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `schemaRegistryEnabled` | `false` | Enable Confluent Schema Registry integration. |
-| `schemaRegistryUrl` | — | Confluent Schema Registry URL. |
+| `schemaRegistryUrl` | _(required)_ | Confluent Schema Registry URL. Required when `schemaRegistryEnabled` is `true`. |
 | `schemaRegistryCredentialAlias` | — | Credential alias for Schema Registry authentication. |
 | `autoRegisterSchemas` | `false` | Automatically register schemas with Schema Registry. |
 | `subjectNameStrategy` | `TopicNameStrategy` | Subject naming strategy. Only `TopicNameStrategy` (subject `<topic>-value`) is supported: with `RecordNameStrategy` or `TopicRecordNameStrategy` (UI: "RecordNameStrategy (not supported – deployment fails)", "TopicRecordNameStrategy (not supported – deployment fails)") and `avroValueSerialization` the channel does not start, because the record name cannot be derived from the JSON input. Both values stay selectable only so that saved configurations remain valid. |

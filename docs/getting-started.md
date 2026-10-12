@@ -20,7 +20,7 @@ The adapter now appears as an artifact inside the package.
 Select the adapter artifact in the package and click **Deploy**. The adapter runtime becomes available on the tenant once the deployment completes.
 
 !!! note "Verify availability"
-    After deployment, open any IFlow and add a Sender or Receiver channel — **CPI Kafka Plus** should appear in the adapter type list.
+    After deployment, open any IFlow and add a Sender or Receiver channel — **KafkaAdapterPlus** should appear in the adapter type list.
 
 ## Updating to a newer version
 

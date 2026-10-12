@@ -113,7 +113,7 @@ Yes. Set the following headers on the exchange before sending:
 | `kafka.PARTITION_KEY` | Target partition (numeric string) |
 | `kafka.KEY` | Record key |
 
-Both are evaluated per message. See [Kafka Headers](features/kafka-headers.md) for the full list.
+All three are evaluated per message. See [Kafka Headers](features/kafka-headers.md) for the full list.
 
 ### When does the receiver send a tombstone (a record with a `null` value)?
 
@@ -126,8 +126,16 @@ integration flow cannot reach the Kafka receiver with an empty body by accident.
 tombstone is explicit: `value: null` (`JSON_ARRAY`) or an empty `<value/>` (`XML_LIST`), see
 [Producer Batch](features/producer-batch.md).
 
-### What happens if the producer batch exceeds the Kafka message size limit?
+### What happens if a message exceeds the Kafka message size limit?
 
-The producer will throw an exception and the iFlow execution fails. To avoid this,
-tune `max.request.size` and `message.max.bytes` on the broker, or reduce the number
-of records per batch on the sender side.
+The limit applies to each Kafka record, not to the CPI message as a whole. With **Batch Send Mode**
+`NONE` the whole message body is one record. With `JSON_ARRAY` or `XML_LIST` every element of the
+batch is a record of its own, so only the size of the largest element counts, not that of the
+batch.
+
+A record larger than **Max Request Size (KB)** (`maxRequestSizeKb`, default 5120 KB) is rejected
+by the Kafka client with a `RecordTooLargeException` (error code `KP-PROD-003`, classification
+`FATAL_DATA_ERROR`), and the message fails. Raise **Max Request Size (KB)** and make sure the broker
+accepts records of that size as well (`message.max.bytes` on the broker, `max.message.bytes` on the
+topic); otherwise the broker rejects them with the same exception. Smaller batches do not help when
+a single element is too large.

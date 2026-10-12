@@ -390,13 +390,16 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
     @UriParam(label = "processing", defaultValue = "STANDARD",
             description = "Diagnostic output level. STANDARD (default): every failure gets one structured ERROR line "
                     + "with the full serialised cause chain — sufficient to root-cause most production incidents. "
-                    + "FULL: adds expensive/verbose extras (success baselines, JVM/thread state, per-record detail) "
-                    + "for deep investigation. Use FULL only when actively debugging; STANDARD is the normal operational mode.")
+                    + "FULL adds one thing on the receiver: a bounded thread dump attached to the node-fault "
+                    + "escalation, which always carries the JVM state. It costs nothing on a normal send. "
+                    + "Use FULL only while investigating such a fault.")
     private String diagnosticsLevel = "STANDARD";
 
     @UriParam(label = "errorHandling", defaultValue = "true",
             description = "Write the full Kafka adapter error diagnostic as an MPL attachment "
-                    + "('KafkaAdapterError'). Disable to keep only searchable MPL headers/attributes.")
+                    + "('KafkaAdapterError'). Disable to keep only searchable MPL headers/attributes. "
+                    + "Sender only: on the receiver it currently has no effect, because a failing receiver "
+                    + "channel fails the exchange and CPI writes the MPL entry without the attachment.")
     private boolean writeMplErrorAttachment = true;
 
     public CpiKafkaPlusEndpoint() {
@@ -737,9 +740,6 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
     public String getAllowedHeaders() { return allowedHeaders; }
     public void setAllowedHeaders(String allowedHeaders) { this.allowedHeaders = allowedHeaders; }
 
-    // public int getRetries() { return retries; }
-    // public void setRetries(int retries) { this.retries = retries; }
-
     public int getDeliveryTimeoutSeconds() { return deliveryTimeoutSeconds; }
     public void setDeliveryTimeoutSeconds(int deliveryTimeoutSeconds) { this.deliveryTimeoutSeconds = deliveryTimeoutSeconds; }
 
@@ -758,7 +758,7 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
     public String getDiagnosticsLevel() { return diagnosticsLevel; }
     public void setDiagnosticsLevel(String diagnosticsLevel) { this.diagnosticsLevel = diagnosticsLevel; }
 
-    /** True when diagnostics level is set to FULL for verbose/expensive output. */
+    /** True at diagnostics level FULL: the receiver's node-fault escalation then adds a thread dump. */
     public boolean isDiagnosticsLevelFull() { return "FULL".equalsIgnoreCase(diagnosticsLevel); }
 
     public boolean isWriteMplErrorAttachment() { return writeMplErrorAttachment; }

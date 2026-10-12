@@ -777,8 +777,8 @@
         <isparameterized>true</isparameterized>
         <GuiLabels guid="b1000004-0000-0000-0000-000000000007"><Label language="EN">Enable Idempotent Producer</Label></GuiLabels>
     </AttributeMetadata>
-    <!-- retries: removed from UI — Kafka uses Integer.MAX_VALUE with idempotence,
-         deliveryTimeoutSeconds is the effective limit. Can be re-enabled if needed. -->
+    <!-- retries: removed for good – no endpoint option exists. The Kafka client retries a send
+         until deliveryTimeoutSeconds expires, so that is the effective limit. -->
     <AttributeMetadata>
         <Name>deliveryTimeoutSeconds</Name>
         <Usage>false</Usage>
