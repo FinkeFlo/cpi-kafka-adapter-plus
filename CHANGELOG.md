@@ -20,6 +20,7 @@ iFlow compatibility.
 
 ### Fixed
 - Sender with **Auto-Pause on Errors**: records could be skipped after an auto-pause. While the channel is paused, a keep-alive poll keeps it in the consumer group; when a rebalance assigned a partition during that poll, the poll returned the partition's records and the consumer moved past them without processing them. They are now rewound, as the regular keep-alive poll already did, so the next poll after the pause reads them. Both keep-alive polls now share one implementation (`KeepAlive`). See issue #230 (N-D-1).
+- Sender: a failed record whose exception cause chain loops back on itself (A → B → A, which `Throwable.initCause` allows, for example when a script wraps the exception that triggered its retry) kept the poll thread spinning forever: 100 % CPU, no log line, deaf to an interrupt, alive after undeploy, and the next node hung on the same record after the rebalance. Every walk over a cause chain now stops at a cause it has already seen (and after 64 links), so such a record is retried, dead-lettered or skipped like any other failed record. See issue #241.
 
 ## [1.4.1] - 2026-10-06
 ### Fixed

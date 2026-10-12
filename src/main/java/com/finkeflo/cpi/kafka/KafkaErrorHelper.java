@@ -150,8 +150,7 @@ final class KafkaErrorHelper {
      * transient here and {@link Classification#UNKNOWN_FATAL} there.
      */
     static boolean isTransientForRedelivery(Exception e) {
-        Throwable current = e;
-        while (current != null) {
+        for (Throwable current : CauseChain.of(e)) {
             if (current instanceof java.net.ConnectException
                     || current instanceof java.net.SocketException
                     || current instanceof java.net.SocketTimeoutException
@@ -163,7 +162,6 @@ final class KafkaErrorHelper {
                     && KAFKA_RETRIABLE_EXCEPTION.isInstance(current)) {
                 return true;
             }
-            current = current.getCause();
         }
         return false;
     }
@@ -197,14 +195,14 @@ final class KafkaErrorHelper {
      * Stops early if a fatal exception is found.
      */
     static Throwable extractKafkaCause(Exception e) {
-        Throwable cause = e.getCause();
-        while (cause != null && cause.getCause() != null && cause.getCause() != cause) {
+        Throwable deepest = null;
+        for (Throwable cause : CauseChain.of(e.getCause())) {
             if (isFatalKafkaException(cause)) {
                 return cause;
             }
-            cause = cause.getCause();
+            deepest = cause;
         }
-        return cause != null ? cause : e;
+        return deepest != null ? deepest : e;
     }
 
     /**

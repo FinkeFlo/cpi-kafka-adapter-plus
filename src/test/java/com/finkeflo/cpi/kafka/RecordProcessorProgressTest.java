@@ -74,6 +74,8 @@ public class RecordProcessorProgressTest {
     private final Set<String> failingTransiently = new HashSet<>();
     /** Fails transiently this many times for the id, then permanently on every further call. */
     private final Map<String, Integer> transientThenPermanent = new HashMap<>();
+    /** Like {@link #failing}, but the exception's cause chain is cyclic: A → B → A (#241). */
+    private final Set<String> failingCyclically = new HashSet<>();
     /** The body of each route call, in the order of {@link #invoked}. */
     private final List<String> bodies = new ArrayList<>();
     /** The headers of each route call, in the order of {@link #invoked}. */
@@ -880,6 +882,51 @@ public class RecordProcessorProgressTest {
         Assert.assertEquals(1L, consumer.position(P0));
     }
 
+    // --- a cyclic cause chain (#241): dead-lettered, not an endless walk on the poll thread ---
+
+    @Test(timeout = 10_000L)
+    public void routeFailureWithACyclicCauseIsDeadLettered() throws Exception {
+        assertCyclicRouteFailureIsDeadLettered(false, true, "PERMANENT");
+    }
+
+    @Test(timeout = 10_000L)
+    public void routeFailureWithACyclicCauseIsDeadLetteredWithoutTransientCheck() throws Exception {
+        assertCyclicRouteFailureIsDeadLettered(false, false, null);
+    }
+
+    @Test(timeout = 10_000L)
+    public void batchRouteFailureWithACyclicCauseIsDeadLettered() throws Exception {
+        assertCyclicRouteFailureIsDeadLettered(true, true, "PERMANENT");
+    }
+
+    @Test(timeout = 10_000L)
+    public void batchRouteFailureWithACyclicCauseIsDeadLetteredWithoutTransientCheck() throws Exception {
+        assertCyclicRouteFailureIsDeadLettered(true, false, null);
+    }
+
+    private void assertCyclicRouteFailureIsDeadLettered(boolean batch, boolean retryOnlyTransientErrors,
+                                                        String errorType) throws Exception {
+        // the batch, then the record the batch fell back to; in single mode only the record
+        failingCyclically.addAll(Arrays.asList("0:0-2", "0:1-1", "0:1"));
+        MockConsumer<byte[], byte[]> consumer = consumerWith(P0, "a", "b", "c");
+        CpiKafkaPlusEndpoint endpoint = batch ? batchEndpoint(true, null) : endpoint(true, null);
+        endpoint.setRetryOnlyTransientErrors(retryOnlyTransientErrors);
+        MockProducer<byte[], byte[]> dlq = okDlqProducer();
+        RecordProcessor processor = processor(endpoint, dlqHelper(dlq), null);
+
+        if (batch) {
+            processBatch(processor, consumer);
+            Assert.assertEquals(Arrays.asList("0:0-2", "0:0-0", "0:1-1", "0:2-2"), invoked);
+        } else {
+            processSingle(processor, consumer);
+            Assert.assertEquals(Arrays.asList("0:0", "0:1", "0:2"), invoked);
+        }
+        Assert.assertEquals(1, dlq.history().size());
+        Assert.assertEquals("1", header(dlq.history().get(0), "CpiKafkaPlusDlqOriginalOffset"));
+        Assert.assertEquals(errorType, header(dlq.history().get(0), "CpiKafkaPlusDlqErrorType"));
+        Assert.assertEquals(3L, committed(consumer, P0));
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────────────
 
     private PollProgress processBatch(RecordProcessor processor, MockConsumer<byte[], byte[]> consumer)
@@ -1010,6 +1057,11 @@ public class RecordProcessorProgressTest {
                         headers.add(new HashMap<>(exchange.getIn().getHeaders()));
                         if (failing.contains(id)) {
                             throw new IllegalStateException("backend rejected " + id);
+                        }
+                        if (failingCyclically.contains(id)) {
+                            IllegalStateException first = new IllegalStateException("backend rejected " + id);
+                            first.initCause(new IllegalArgumentException("retry of " + id, first));
+                            throw first;
                         }
                         Integer transientLeft = transientThenPermanent.get(id);
                         if (failingTransiently.contains(id) || (transientLeft != null && transientLeft > 0)) {

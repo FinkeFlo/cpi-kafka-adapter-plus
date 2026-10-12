@@ -25,8 +25,6 @@ import javax.net.ssl.SSLHandshakeException;
 import org.apache.kafka.common.errors.AuthenticationException;
 import org.apache.kafka.common.errors.AuthorizationException;
 import org.apache.kafka.common.errors.FencedInstanceIdException;
-import org.apache.kafka.common.errors.SaslAuthenticationException;
-import org.apache.kafka.common.errors.SslAuthenticationException;
 
 /**
  * Sorts a failed poll of the sender's Kafka consumer ({@link CpiKafkaPlusConsumer}) into the
@@ -100,20 +98,13 @@ final class PollFailureClassifier {
      * message of the policy error ({@link CpiKafkaPlusConsumer#buildStoppedByErrorPolicyException}).
      */
     static Throwable findNonRetryablePollFailureCause(Throwable failure) {
-        Throwable current = failure;
-        while (current != null) {
-            if (current instanceof SaslAuthenticationException
-                    || current instanceof AuthenticationException
+        for (Throwable current : CauseChain.of(failure)) {
+            // AuthenticationException covers SaslAuthenticationException and SslAuthenticationException.
+            if (current instanceof AuthenticationException
                     || current instanceof AuthorizationException
-                    || current instanceof SslAuthenticationException
                     || current instanceof SSLHandshakeException) {
                 return current;
             }
-            Throwable next = current.getCause();
-            if (next == current) {
-                break;
-            }
-            current = next;
         }
         return null;
     }
@@ -124,16 +115,10 @@ final class PollFailureClassifier {
      * {@code group.instance.id} (KIP-345 conflict, issue #146).
      */
     static boolean isFencedInstanceIdFailure(Throwable failure) {
-        Throwable current = failure;
-        while (current != null) {
+        for (Throwable current : CauseChain.of(failure)) {
             if (current instanceof FencedInstanceIdException) {
                 return true;
             }
-            Throwable next = current.getCause();
-            if (next == current) {
-                break;
-            }
-            current = next;
         }
         return false;
     }
