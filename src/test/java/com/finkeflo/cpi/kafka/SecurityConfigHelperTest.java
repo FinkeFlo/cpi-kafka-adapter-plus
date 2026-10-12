@@ -29,7 +29,10 @@ import java.util.concurrent.atomic.AtomicReference;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLEngine;
 
+import org.apache.kafka.common.config.SaslConfigs;
 import org.apache.kafka.common.config.SslConfigs;
+import org.apache.kafka.common.config.types.Password;
+import org.apache.kafka.common.security.JaasContext;
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Test;
@@ -46,16 +49,37 @@ public class SecurityConfigHelperTest {
 
     /**
      * A line break ends a quoted JAAS value, and Kafka quotes the rest of the password in its error
-     * (#245). Every ISO control character is refused, in the user name as in the password, and the
-     * message names where the credential comes from but no part of it.
+     * (#245). CR and LF are refused, in the user name as in the password, and the message names where
+     * the credential comes from but no part of it.
      */
     @Test
-    public void controlCharactersInACredentialAreRejectedWithoutTheValue() {
-        for (String control : new String[] {"\n", "\r", "\r\n", "\t", "\u0000", "\u007f", "\u0085"}) {
-            String value = "QuuxHeadPart" + control + "QuuxTailPart";
+    public void lineBreaksInACredentialAreRejectedWithoutTheValue() {
+        for (String lineBreak : new String[] {"\n", "\r", "\r\n"}) {
+            String value = "QuuxHeadPart" + lineBreak + "QuuxTailPart";
             assertUnusable("password", () -> SecurityConfigHelper.buildJaasConfig("PLAIN", "user", value, SOURCE));
             assertUnusable("user name", () -> SecurityConfigHelper.buildJaasConfig("SCRAM-SHA-512", value, "pass",
                     SOURCE));
+        }
+    }
+
+    /**
+     * Kafka's JAAS parser keeps every other character of a quoted value, so a credential with a tab or
+     * another control character logged in up to 1.4.1 and must still reach Kafka unchanged.
+     */
+    @Test
+    public void otherControlCharactersReachKafkaUnchanged() {
+        for (String control : new String[] {"\t", "\u0000", "\u0001", "\u000b", "\f", "\u001b", "\u007f",
+                "\u0085", "\u2028"}) {
+            String user = "us" + control + "er";
+            String password = "pa" + control + "ss \\ \"quoted\"";
+            String jaas = SecurityConfigHelper.buildJaasConfig("SCRAM-SHA-256", user, password, SOURCE);
+
+            Map<String, Object> configs = new HashMap<>();
+            configs.put(SaslConfigs.SASL_JAAS_CONFIG, new Password(jaas));
+            Map<String, ?> options = JaasContext.loadClientContext(configs).configurationEntries().get(0)
+                    .getOptions();
+            Assert.assertEquals(user, options.get("username"));
+            Assert.assertEquals(password, options.get("password"));
         }
     }
 
@@ -100,9 +124,9 @@ public class SecurityConfigHelperTest {
             build.run();
             Assert.fail("expected the " + what + " to be rejected");
         } catch (SecurityConfigHelper.UnusableCredentialException expected) {
-            Assert.assertEquals("The " + what + " stored under " + SOURCE + " contains a line break or another "
-                    + "control character, which the Kafka client's JAAS configuration cannot take. Please store "
-                    + "the credential without it.", expected.getMessage());
+            Assert.assertEquals("The " + what + " stored under " + SOURCE + " contains a line break, which the "
+                    + "Kafka client's JAAS configuration cannot take. Please store the credential without it.",
+                    expected.getMessage());
         }
     }
 

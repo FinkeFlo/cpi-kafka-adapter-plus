@@ -108,15 +108,14 @@ public final class SecurityConfigHelper {
      *
      * @param source where the credentials come from, named in the message of a rejection, e.g.
      *        {@code 'Credential Alias' (credentialAlias) 'kafka-credentials'}
-     * @throws UnusableCredentialException if the user name or the password contains a control
-     *         character, CR and LF included
+     * @throws UnusableCredentialException if the user name or the password contains a line break
      */
     static String buildJaasConfig(String mechanism, String username, String password, String source) {
         // Kafka reads the configuration with a StreamTokenizer: a quoted value ends at a line break,
         // and the rest of the password becomes a key that Kafka's error message then quotes. So the
         // message names where the credential comes from, never the value or a part of it.
-        rejectControlCharacters(username, "user name", source);
-        rejectControlCharacters(password, "password", source);
+        rejectLineBreaks(username, "user name", source);
+        rejectLineBreaks(password, "password", source);
         String loginModule;
         String mech = mechanism.toUpperCase();
         if ("SCRAM-SHA-256".equals(mech) || "SCRAM-SHA-512".equals(mech)) {
@@ -129,16 +128,15 @@ public final class SecurityConfigHelper {
         return String.format("%s required username=\"%s\" password=\"%s\";", loginModule, safeUser, safePass);
     }
 
-    private static void rejectControlCharacters(String value, String what, String source) {
-        if (value == null) {
-            return;
-        }
-        for (int i = 0; i < value.length(); i++) {
-            if (Character.isISOControl(value.charAt(i))) {
-                throw new UnusableCredentialException("The " + what + " stored under " + source
-                        + " contains a line break or another control character, which the Kafka client's "
-                        + "JAAS configuration cannot take. Please store the credential without it.");
-            }
+    /**
+     * Only CR and LF end a quoted value. The tokenizer keeps every other character, a tab or another
+     * control character included, so such a credential logs in as before and is not refused.
+     */
+    private static void rejectLineBreaks(String value, String what, String source) {
+        if (value != null && (value.indexOf('\n') >= 0 || value.indexOf('\r') >= 0)) {
+            throw new UnusableCredentialException("The " + what + " stored under " + source
+                    + " contains a line break, which the Kafka client's JAAS configuration cannot take. "
+                    + "Please store the credential without it.");
         }
     }
 

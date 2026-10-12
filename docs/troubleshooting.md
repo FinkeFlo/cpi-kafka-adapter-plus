@@ -338,7 +338,10 @@ value or spaces around it show.
   *SASL Mechanism* other than `PLAIN`, `SCRAM-SHA-256` or `SCRAM-SHA-512`.
 
 Apart from the *Transactional ID Prefix*, these values never worked: each failed at the first poll, send,
-dead letter or Schema Registry call instead. Fix the value and redeploy.
+dead letter or Schema Registry call instead. A sender with such a *Dead Letter Topic* may still have run
+without a problem, because only its first dead letter fails, and that record then blocks its partition
+(see [When the DLQ Write Fails](features/dead-letter-queue.md#when-the-dlq-write-fails)). Fix the value and
+redeploy.
 
 1.4.2 also deploys a few values that failed before. Spaces around a number, a switch, a credential alias,
 the *Bootstrap Servers* or the *Schema Registry URL* are removed, an empty entry in *Bootstrap Servers*,
@@ -458,9 +461,9 @@ Initialisation failed. `bootstrapServers` and `securityProtocol` are in the line
 cause chain usually names the problem directly — a rejected credential, a TLS handshake failure, or
 an unreachable broker.
 
-A SASL credential with a line break or another control character is refused before the client is
-built: the cause names the alias, e.g. `The password stored under 'Credential Alias' (credentialAlias)
-'my-kafka-user' contains a line break or another control character`, never the value. The sender
+A SASL credential with a line break is refused before the client is built: the cause names the alias,
+e.g. `The password stored under 'Credential Alias' (credentialAlias) 'my-kafka-user' contains a line
+break`, never the value. The sender
 reports the same in `consumer.init.failed`, the DLQ producer in `dlq.producer.init.failed`. See
 [Authentication](security/authentication.md#cpi-secure-store).
 

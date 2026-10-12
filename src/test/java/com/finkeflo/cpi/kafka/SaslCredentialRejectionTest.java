@@ -87,7 +87,8 @@ public class SaslCredentialRejectionTest {
         Assert.assertNotNull("expected the send to fail", failure.get());
         String message = chain(failure.get());
         Assert.assertTrue(message, message.contains("The password stored under 'Credential Alias' "
-                + "(credentialAlias) 'kafka-user' contains a line break or another control character"));
+                + "(credentialAlias) 'kafka-user' contains a line break, which the Kafka client's JAAS "
+                + "configuration cannot take"));
         assertNoPartOfThePassword(message);
         Assert.assertTrue(logged, logged.contains("producer.init.failed"));
         Assert.assertTrue(logged, logged.contains("(credentialAlias) ''kafka-user''"));
@@ -104,7 +105,8 @@ public class SaslCredentialRejectionTest {
 
         Assert.assertTrue(logged, logged.contains("consumer.init.failed"));
         Assert.assertTrue(logged, logged.contains("The password stored under ''Credential Alias'' "
-                + "(credentialAlias) ''kafka-user'' contains a line break or another control character"));
+                + "(credentialAlias) ''kafka-user'' contains a line break, which the Kafka client''s JAAS "
+                + "configuration cannot take"));
         assertNoPartOfThePassword(logged);
     }
 
@@ -126,7 +128,8 @@ public class SaslCredentialRejectionTest {
         Assert.assertNotNull("expected the DLQ producer to fail", failure.get());
         String message = chain(failure.get());
         Assert.assertTrue(message, message.contains("The password stored under 'DLQ SASL Credential Alias' "
-                + "(dlqCredentialAlias) 'kafka-user' contains a line break or another control character"));
+                + "(dlqCredentialAlias) 'kafka-user' contains a line break, which the Kafka client's JAAS "
+                + "configuration cannot take"));
         assertNoPartOfThePassword(message);
         Assert.assertTrue(logged, logged.contains("dlq.producer.init.failed"));
         assertNoPartOfThePassword(logged);
