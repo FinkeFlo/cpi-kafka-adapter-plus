@@ -188,7 +188,9 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
     private long bufferMemoryKb = 32768;
 
     @UriParam(label = "producer", defaultValue = "true",
-            description = "Enable idempotent producer (exactly-once semantics)")
+            description = "Enable the idempotent producer: the broker discards the duplicates of the producer's "
+                    + "own internal retries. Not end-to-end exactly-once: a message the caller sends twice "
+                    + "is written twice.")
     private boolean enableIdempotence = true;
 
     @UriParam(label = "producer", defaultValue = "false",
@@ -196,7 +198,8 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
     private boolean enableTransactions = false;
 
     @UriParam(label = "producer",
-            description = "Prefix for transactional.id (e.g. my-app-txn). Required if enableTransactions is true.")
+            description = "Prefix for transactional.id (e.g. my-app-txn). Required with transactional batching "
+                    + "(enableTransactions with producerBatchMode JSON_ARRAY or XML_LIST).")
     private String transactionalIdPrefix;
 
     @UriParam(label = "producer", defaultValue = "5",
@@ -355,7 +358,8 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
     private boolean autoRegisterSchemas = false;
 
     @UriParam(label = "avro", defaultValue = "TopicNameStrategy",
-            description = "Subject naming strategy: TopicNameStrategy, RecordNameStrategy, TopicRecordNameStrategy")
+            description = "Subject naming strategy. Only TopicNameStrategy is supported: with RecordNameStrategy or "
+                    + "TopicRecordNameStrategy and Avro serialization the endpoint does not start.")
     private String subjectNameStrategy = "TopicNameStrategy";
 
     @UriParam(label = "avro",

@@ -165,7 +165,7 @@ For detailed security setup, see [Authentication](security/authentication.md).
 |-----------|---------|-------------|
 | `acks` | `all` | Producer acknowledgments: `all`, `1`, `0`. Only used with `enableIdempotence=false`; otherwise the adapter always sends with `all`. |
 | `enableIdempotence` | `true` | Enable idempotent producer: the broker discards duplicates from the producer's own internal retries. Forces `acks=all`. Not end-to-end exactly-once: a message the caller sends twice is written twice. |
-| `deliveryTimeoutSeconds` | `120` | Maximum delivery time in seconds, including retries. With `enableTransactions` the adapter derives `transaction.timeout.ms` from this value (plus up to 30 s commit headroom, never below 60 s), so the maximum is 870 s — above that a broker rejects the producer. |
+| `deliveryTimeoutSeconds` | `120` | Maximum delivery time in seconds, including retries. With transactional batching (`enableTransactions` with `producerBatchMode` `JSON_ARRAY` or `XML_LIST`) the adapter derives `transaction.timeout.ms` from this value (plus up to 30 s commit headroom, never below 60 s), so the maximum is then 870 s — above that a broker rejects the producer. |
 
 **Header Mapping**
 
@@ -210,7 +210,7 @@ For more details, see [JSON Schema Validation](features/json-schema-validation.m
 | `schemaRegistryUrl` | — | Confluent Schema Registry URL. |
 | `schemaRegistryCredentialAlias` | — | Credential alias for Schema Registry authentication. |
 | `autoRegisterSchemas` | `false` | Automatically register schemas with Schema Registry. |
-| `subjectNameStrategy` | `TopicNameStrategy` | Subject naming strategy. Only `TopicNameStrategy` (subject `<topic>-value`) is supported: with `RecordNameStrategy` or `TopicRecordNameStrategy` every message fails, because the record name cannot be derived from the JSON input. |
+| `subjectNameStrategy` | `TopicNameStrategy` | Subject naming strategy. Only `TopicNameStrategy` (subject `<topic>-value`) is supported: with `RecordNameStrategy` or `TopicRecordNameStrategy` (UI: "RecordNameStrategy (not supported – deployment fails)", "TopicRecordNameStrategy (not supported – deployment fails)") and `avroValueSerialization` the channel does not start, because the record name cannot be derived from the JSON input. Both values stay selectable only so that saved configurations remain valid. |
 | `avroValueSerialization` | `true` | Serialize message values using Avro. Requires Schema Registry. |
 
 For details on Avro integration, see [Avro / Schema Registry](features/avro-schema-registry.md).

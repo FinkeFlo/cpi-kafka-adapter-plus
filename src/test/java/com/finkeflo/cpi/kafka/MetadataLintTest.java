@@ -96,7 +96,7 @@ public class MetadataLintTest {
         // Whether the UI checks a Restriction against an externalized {{parameter}} literally is a
         // tenant question (#206 c); this pattern predates the question.
         KNOWN_VIOLATIONS.put("restriction-rejects-parameter sender.pollingIntervalSeconds", "#206");
-        // Every message fails with these strategies; whether to drop them or fail at start is #183.
+        // Kept by VERSIONING.md rule 3; rejected at start since #225.
         KNOWN_VIOLATIONS.put("fixed-value-rejected receiver.subjectNameStrategy=RecordNameStrategy", "#183");
         KNOWN_VIOLATIONS.put("fixed-value-rejected receiver.subjectNameStrategy=TopicRecordNameStrategy", "#183");
         // The producer never writes the MPL attachment; implement or hide is #201.

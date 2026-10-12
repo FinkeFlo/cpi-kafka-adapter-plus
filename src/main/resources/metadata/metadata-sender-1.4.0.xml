@@ -167,7 +167,7 @@
                 <AttributeReference>
                     <ReferenceName>batchTimeout</ReferenceName>
                     <description>Maximum time in milliseconds a single Kafka poll() call blocks waiting for records before returning (the consumer poll timeout). Default: 5000 (5 seconds). This is the per-poll wait time, not a batch-fill timer: it applies to every poll cycle regardless of batch mode.</description>
-                    <ErrorMessage>Please enter a positive number in milliseconds (e.g. 5000)</ErrorMessage>
+                    <ErrorMessage>Please enter a whole number of 0 or more in milliseconds (e.g. 5000)</ErrorMessage>
                 </AttributeReference>
             </AttributeGroup>
         </Tab>
@@ -191,12 +191,12 @@
                 <AttributeReference>
                     <ReferenceName>fetchMinBytes</ReferenceName>
                     <description>Minimum data in bytes the broker waits to accumulate before answering a fetch request (fetch.min.bytes). Higher values let the broker batch more records per poll under low load, at the cost of added latency (bounded by 'Fetch Max Wait'). Default: 1 (respond immediately, current behavior).</description>
-                    <ErrorMessage>Please enter a positive number (e.g. 1)</ErrorMessage>
+                    <ErrorMessage>Please enter a whole number of 0 or more (e.g. 1)</ErrorMessage>
                 </AttributeReference>
                 <AttributeReference>
                     <ReferenceName>fetchMaxWaitMs</ReferenceName>
                     <description>Maximum time in milliseconds the broker waits for 'Fetch Min Bytes' to accumulate before answering anyway (fetch.max.wait.ms). Only relevant when 'Fetch Min Bytes' is greater than 1. Default: 500.</description>
-                    <ErrorMessage>Please enter a positive number (e.g. 500)</ErrorMessage>
+                    <ErrorMessage>Please enter a whole number of 0 or more (e.g. 500)</ErrorMessage>
                 </AttributeReference>
             </AttributeGroup>
             <AttributeGroup id="backlogDrain">
@@ -848,8 +848,8 @@
         <GuiLabels guid="b1000005-0000-0000-0000-000000000005"><Label language="EN">Subject Name Strategy</Label></GuiLabels>
         <FixedValues>
             <FixedValue><Value>TopicNameStrategy</Value><GuiLabels guid="b1000005-0000-0000-0000-000000000051"><Label language="EN">TopicNameStrategy</Label></GuiLabels></FixedValue>
-            <FixedValue><Value>RecordNameStrategy</Value><GuiLabels guid="b1000005-0000-0000-0000-000000000052"><Label language="EN">RecordNameStrategy</Label></GuiLabels></FixedValue>
-            <FixedValue><Value>TopicRecordNameStrategy</Value><GuiLabels guid="b1000005-0000-0000-0000-000000000053"><Label language="EN">TopicRecordNameStrategy</Label></GuiLabels></FixedValue>
+            <FixedValue><Value>RecordNameStrategy</Value><GuiLabels guid="b1000005-0000-0000-0000-000000000052"><Label language="EN">RecordNameStrategy (not supported – deployment fails)</Label></GuiLabels></FixedValue>
+            <FixedValue><Value>TopicRecordNameStrategy</Value><GuiLabels guid="b1000005-0000-0000-0000-000000000053"><Label language="EN">TopicRecordNameStrategy (not supported – deployment fails)</Label></GuiLabels></FixedValue>
         </FixedValues>
     </AttributeMetadata>
     <AttributeMetadata>

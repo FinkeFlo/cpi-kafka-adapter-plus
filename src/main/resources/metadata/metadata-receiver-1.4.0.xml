@@ -145,7 +145,7 @@
                 </AttributeReference>
                 <AttributeReference>
                     <ReferenceName>deliveryTimeoutSeconds</ReferenceName>
-                    <description>Maximum time in seconds for message delivery, including retries. Default: 120 seconds (2 minutes). If delivery fails within this time, the send is reported as failed. With transactions enabled the adapter derives transaction.timeout.ms from this value, so the broker keeps the transaction open for at least as long as the client waits; the maximum is 870 seconds, above which a broker rejects the producer.</description>
+                    <description>Maximum time in seconds for message delivery, including retries. Default: 120 seconds (2 minutes). If delivery fails within this time, the send is reported as failed. With transactional batching (Enable Transactions with Batch Send Mode JSON Array or XML List) the adapter derives transaction.timeout.ms from this value, so the broker keeps the transaction open for at least as long as the client waits; the maximum is then 870 seconds, above which a broker rejects the producer.</description>
                     <ErrorMessage>Please enter a positive number in seconds (e.g. 120 for 2 minutes)</ErrorMessage>
                 </AttributeReference>
             </AttributeGroup>
@@ -211,11 +211,11 @@
                 <AttributeReference>
                     <ReferenceName>producerBatchSizeKb</ReferenceName>
                     <description>Maximum size of a producer batch in kilobytes. Default: 1024 KB (1 MB). The producer groups records into batches per partition for efficiency.</description>
-                    <ErrorMessage>Please enter a positive number in KB (e.g. 1024 for 1 MB)</ErrorMessage>
+                    <ErrorMessage>Please enter a whole number of 0 or more in KB (e.g. 1024 for 1 MB)</ErrorMessage>
                 </AttributeReference>
                 <AttributeReference>
                     <ReferenceName>bufferMemoryKb</ReferenceName>
-                    <description>Total memory in kilobytes available for buffering unsent records. Default: 32768 KB (32 MB). If the buffer is full, the producer blocks until space is available or delivery.timeout.ms is exceeded.</description>
+                    <description>Total memory in kilobytes available for buffering unsent records. Default: 32768 KB (32 MB). If the buffer is full, a send waits for free space for at most 30 seconds (or the Delivery Timeout, if that is shorter) and then fails.</description>
                     <ErrorMessage>Please enter a positive number in KB (e.g. 32768 for 32 MB)</ErrorMessage>
                 </AttributeReference>
             </AttributeGroup>
@@ -295,7 +295,7 @@
                 </AttributeReference>
                 <AttributeReference>
                     <ReferenceName>subjectNameStrategy</ReferenceName>
-                    <description>Strategy for deriving the Schema Registry subject name. Only TopicNameStrategy (default, subject = topic name + "-value") is supported: with RecordNameStrategy or TopicRecordNameStrategy every message fails, because the record name cannot be derived from the JSON input.</description>
+                    <description>Strategy for deriving the Schema Registry subject name. Only TopicNameStrategy (default, subject = topic name + "-value") is supported: with RecordNameStrategy or TopicRecordNameStrategy and 'Serialize Values as Avro' the deployment fails, because the record name cannot be derived from the JSON input. The two values stay selectable only so that saved configurations remain valid.</description>
                     <EditCondition>
                         <AttributeName>schemaRegistryEnabled</AttributeName>
                         <AttributeValue>true</AttributeValue>
@@ -794,8 +794,8 @@
         <GuiLabels guid="b1000005-0000-0000-0000-000000000005"><Label language="EN">Subject Name Strategy</Label></GuiLabels>
         <FixedValues>
             <FixedValue><Value>TopicNameStrategy</Value><GuiLabels guid="b1000005-0000-0000-0000-000000000051"><Label language="EN">TopicNameStrategy</Label></GuiLabels></FixedValue>
-            <FixedValue><Value>RecordNameStrategy</Value><GuiLabels guid="b1000005-0000-0000-0000-000000000052"><Label language="EN">RecordNameStrategy</Label></GuiLabels></FixedValue>
-            <FixedValue><Value>TopicRecordNameStrategy</Value><GuiLabels guid="b1000005-0000-0000-0000-000000000053"><Label language="EN">TopicRecordNameStrategy</Label></GuiLabels></FixedValue>
+            <FixedValue><Value>RecordNameStrategy</Value><GuiLabels guid="b1000005-0000-0000-0000-000000000052"><Label language="EN">RecordNameStrategy (not supported – deployment fails)</Label></GuiLabels></FixedValue>
+            <FixedValue><Value>TopicRecordNameStrategy</Value><GuiLabels guid="b1000005-0000-0000-0000-000000000053"><Label language="EN">TopicRecordNameStrategy (not supported – deployment fails)</Label></GuiLabels></FixedValue>
         </FixedValues>
     </AttributeMetadata>
     <AttributeMetadata>
