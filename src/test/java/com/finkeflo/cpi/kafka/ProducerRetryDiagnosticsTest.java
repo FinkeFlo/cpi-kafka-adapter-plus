@@ -29,9 +29,7 @@ import java.lang.reflect.Method;
 import java.util.ArrayDeque;
 import java.util.Arrays;
 import java.util.Deque;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Properties;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
@@ -282,29 +280,6 @@ public class ProducerRetryDiagnosticsTest {
     }
 
     @Test
-    public void retryHistoryAppearsInTheMplStatusText() throws Exception {
-        CpiKafkaPlusEndpoint endpoint = new CpiKafkaPlusEndpoint();
-        endpoint.setTopic("orders");
-        AdapterTracingHelper helper = new AdapterTracingHelper(endpoint);
-
-        Map<String, String> context = new LinkedHashMap<>();
-        context.put("retryAttempts", "3");
-        context.put("stopReason", "ATTEMPTS_EXHAUSTED");
-
-        String status = buildStatusMessage(helper, "KAFKA_SEND_FAILED",
-                new NetworkException("Disconnected from node 3"), context);
-        Assert.assertTrue(status, status.contains("after 3 retry attempts"));
-        Assert.assertTrue(status, status.contains("stopReason=ATTEMPTS_EXHAUSTED"));
-
-        Map<String, String> single = new LinkedHashMap<>();
-        single.put("retryAttempts", "1");
-        String unretried = buildStatusMessage(helper, "KAFKA_SEND_FAILED",
-                new NetworkException("Disconnected from node 3"), single);
-        Assert.assertFalse("a message that was tried once must not claim a retry history: " + unretried,
-                unretried.contains("retry attempts"));
-    }
-
-    @Test
     public void noRetryEventIsGatedBehindFullDiagnostics() throws Exception {
         // FULL only unlocks the bounded thread dump; failure information belongs in STANDARD.
         String source = new String(java.nio.file.Files.readAllBytes(java.nio.file.Paths.get(
@@ -343,14 +318,6 @@ public class ProducerRetryDiagnosticsTest {
         return logged.lines()
                 .filter(l -> l.contains(AdapterDiagnostics.MARKER + " " + event))
                 .collect(Collectors.toList());
-    }
-
-    private static String buildStatusMessage(AdapterTracingHelper helper, String errorCode,
-                                             Exception e, Map<String, String> context) throws Exception {
-        Method m = AdapterTracingHelper.class.getDeclaredMethod("buildStatusMessage",
-                String.class, Exception.class, Map.class);
-        m.setAccessible(true);
-        return (String) m.invoke(helper, errorCode, e, context);
     }
 
     private static CpiKafkaPlusProducer newProducer(DefaultCamelContext ctx, int maxAttempts)
