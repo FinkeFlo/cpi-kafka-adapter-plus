@@ -54,11 +54,19 @@ final class OsgiBundleInfo {
     }
 
     static OsgiBundleInfo of(Class<?> anchor) {
+        return of(anchor, anchor);
+    }
+
+    /**
+     * The bundle of {@code cls}, looked up through the OSGi framework API that {@code anchor}'s class
+     * loader sees. For a class of another bundle, whose own class loader may not see that API.
+     */
+    static OsgiBundleInfo of(Class<?> cls, Class<?> anchor) {
         try {
             ClassLoader loader = anchor.getClassLoader();
             Class<?> frameworkUtil = Class.forName("org.osgi.framework.FrameworkUtil", false, loader);
             Class<?> bundleType = Class.forName("org.osgi.framework.Bundle", false, loader);
-            Object bundle = frameworkUtil.getMethod("getBundle", Class.class).invoke(null, anchor);
+            Object bundle = frameworkUtil.getMethod("getBundle", Class.class).invoke(null, cls);
             if (bundle != null) {
                 return new OsgiBundleInfo(bundle, bundleType);
             }

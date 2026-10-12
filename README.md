@@ -84,6 +84,11 @@ See [docs/configuration.md](docs/configuration.md) for detailed adapter configur
 
 Deploy the generated ESA archive to SAP CPI via the Integration Content API or the CPI Web UI.
 
+The adapter needs a Cloud Integration runtime with Java 11 or later (the bundle declares
+`osgi.ee` JavaSE 11, although SAP's adapter development documentation still names Java 8) and
+Apache Camel 3.14 (it is built against 3.14.7). The first Kafka endpoint of every adapter version
+logs the runtime's Java version, Java vendor and Camel version in its `class-warmup.start` line.
+
 ## License
 
 This project is licensed under the **GNU Affero General Public License v3.0 (AGPL-3.0)**. See [LICENSE](LICENSE) for details.

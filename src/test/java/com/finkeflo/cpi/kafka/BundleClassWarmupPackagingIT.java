@@ -23,6 +23,7 @@ package com.finkeflo.cpi.kafka;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
+import java.lang.reflect.Method;
 import java.net.URL;
 import java.net.URLClassLoader;
 import java.nio.file.Files;
@@ -159,6 +160,48 @@ public class BundleClassWarmupPackagingIT {
         }
         Assert.assertTrue("classes failed to load outside the tolerated set:\n  " + String.join("\n  ", unexpected),
                 unexpected.isEmpty());
+    }
+
+    /**
+     * The bundle embeds the at.yawk.lz4 fork, and inside the bundle Kafka's LZ4 streams run its pure
+     * Java safe implementation. org.lz4:lz4-java 1.8.0, shipped up to 1.4.1, ran {@code JavaUnsafe}
+     * there and is affected by CVE-2025-12183 and CVE-2025-66566 (#240).
+     */
+    @Test
+    public void lz4RunsTheMaintainedForkInPureJavaInsideTheBundle() throws Exception {
+        File jar = locateBundleJar();
+        Path tmp = Files.createTempDirectory("lz4-it");
+        List<URL> urls = new ArrayList<>();
+        urls.add(jar.toURI().toURL());
+        Path lz4Jar = null;
+        try (JarFile jf = new JarFile(jar)) {
+            for (String clause : jf.getManifest().getMainAttributes().getValue("Bundle-ClassPath").split(",")) {
+                String nested = clause.split(";")[0].trim();
+                if (nested.isEmpty() || ".".equals(nested)) {
+                    continue;
+                }
+                Path out = tmp.resolve(new File(nested).getName());
+                try (InputStream in = jf.getInputStream(jf.getJarEntry(nested))) {
+                    Files.copy(in, out, StandardCopyOption.REPLACE_EXISTING);
+                }
+                urls.add(out.toUri().toURL());
+                if (out.getFileName().toString().startsWith("lz4-java")) {
+                    lz4Jar = out;
+                }
+            }
+        }
+        Assert.assertNotNull("no lz4-java jar on the Bundle-ClassPath", lz4Jar);
+        try (JarFile lz4 = new JarFile(lz4Jar.toFile())) {
+            Assert.assertNotNull("the embedded lz4-java is not the at.yawk.lz4 fork: " + lz4Jar.getFileName(),
+                    lz4.getJarEntry("META-INF/maven/at.yawk.lz4/lz4-java/pom.properties"));
+        }
+
+        try (ChildFirstClassLoader loader = new ChildFirstClassLoader(urls.toArray(new URL[0]), getClass().getClassLoader())) {
+            Method lz4Implementation = Class.forName(CodecWarmup.class.getName(), true, loader)
+                    .getDeclaredMethod("lz4Implementation");
+            lz4Implementation.setAccessible(true);
+            Assert.assertEquals("JavaSafe", lz4Implementation.invoke(null));
+        }
     }
 
     /**
