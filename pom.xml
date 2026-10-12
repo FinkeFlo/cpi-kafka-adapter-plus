@@ -10,6 +10,14 @@
     <name>Kafka Adapter Plus</name>
     <description>Custom Apache Kafka adapter for SAP Cloud Integration (CPI) with advanced batch processing, Avro/Schema Registry support, and SASL/SSL security.</description>
 
+    <licenses>
+        <license>
+            <name>GNU Affero General Public License v3.0</name>
+            <url>https://www.gnu.org/licenses/agpl-3.0.txt</url>
+            <distribution>repo</distribution>
+        </license>
+    </licenses>
+
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <!-- maven.compiler.release (not source/target): source/target still link against the
@@ -302,12 +310,17 @@
                         <phase>validate</phase>
                         <goals><goal>check-file-header</goal></goals>
                     </execution>
+                    <!-- Generated into target/, never into the project root: the plugin used to register
+                         its output directory as a resource root for **/*.txt, and with the project
+                         root that put every *.txt of the working tree into the bundle (#249). The
+                         bundle takes the file explicitly instead (Include-Resource below). -->
                     <execution>
                         <id>add-third-party</id>
                         <phase>generate-resources</phase>
                         <goals><goal>add-third-party</goal></goals>
                         <configuration>
-                            <outputDirectory>${project.basedir}</outputDirectory>
+                            <outputDirectory>${project.build.directory}/generated-resources/license</outputDirectory>
+                            <addOutputDirectoryAsResourceDir>false</addOutputDirectoryAsResourceDir>
                         </configuration>
                     </execution>
                 </executions>
@@ -376,6 +389,21 @@
                             snappy-java;scope=runtime
                         </Embed-Dependency>
                         <Embed-Transitive>true</Embed-Transitive>
+                        <!-- {maven-resources} is src/main/resources. The licence files go under
+                             META-INF/, together with the LICENSE and NOTICE of kafka-clients, whose
+                             unpacked classes would otherwise ship without them. bnd only takes the
+                             packages named in Private-Package from target/classes, so Kafka's
+                             kafka-version.properties needs naming too: without it Kafka reports its
+                             client version as "unknown" (#249). -->
+                        <Include-Resource>
+                            {maven-resources},
+                            META-INF/LICENSE=${project.basedir}/LICENSE,
+                            META-INF/NOTICE=${project.basedir}/NOTICE,
+                            META-INF/THIRD-PARTY.txt=${project.build.directory}/generated-resources/license/THIRD-PARTY.txt,
+                            META-INF/kafka-clients/LICENSE=${project.build.directory}/kafka-clients-resources/LICENSE,
+                            META-INF/kafka-clients/NOTICE=${project.build.directory}/kafka-clients-resources/NOTICE,
+                            kafka/kafka-version.properties=${project.build.directory}/kafka-clients-resources/kafka/kafka-version.properties
+                        </Include-Resource>
                     </instructions>
                     <excludeDependencies>false</excludeDependencies>
                 </configuration>
@@ -512,6 +540,28 @@
                             <excludes>META-INF/*.SF,META-INF/*.DSA,META-INF/*.RSA,META-INF/versions/*/module-info.class</excludes>
                         </configuration>
                     </execution>
+                    <!-- The non-class files of kafka-clients that the bundle ships (Include-Resource),
+                         kept apart from target/classes so that they cannot be mistaken for the
+                         adapter's own LICENSE and NOTICE. -->
+                    <execution>
+                        <id>unpack-kafka-clients-resources</id>
+                        <phase>process-resources</phase>
+                        <goals>
+                            <goal>unpack</goal>
+                        </goals>
+                        <configuration>
+                            <artifactItems>
+                                <artifactItem>
+                                    <groupId>org.apache.kafka</groupId>
+                                    <artifactId>kafka-clients</artifactId>
+                                    <version>${kafka.version}</version>
+                                    <outputDirectory>${project.build.directory}/kafka-clients-resources</outputDirectory>
+                                    <includes>LICENSE,NOTICE,kafka/kafka-version.properties</includes>
+                                </artifactItem>
+                            </artifactItems>
+                            <markersDirectory>${project.build.directory}/dependency-maven-plugin-markers/kafka-clients-resources</markersDirectory>
+                        </configuration>
+                    </execution>
                     <execution>
                         <id>copy-dependencies</id>
                         <phase>package</phase>
@@ -542,12 +592,13 @@
                         <goals><goal>run</goal></goals>
                         <configuration>
                             <target>
-                                <!-- THIRD-PARTY.txt is generated, not committed. An Ant <include>
-                                     skips a missing file silently, so guard it explicitly: without
-                                     this the adapter would ship without its licence list. -->
-                                <fail message="THIRD-PARTY.txt is missing. It is generated by license-maven-plugin during generate-resources; run a full lifecycle build (e.g. 'mvn package'), not a bare 'mvn antrun:run'.">
+                                <!-- THIRD-PARTY.txt is generated, not committed. An Ant <copy> of a
+                                     fileset skips a missing file silently, so guard it explicitly:
+                                     without this the adapter project would be staged without its
+                                     licence list. -->
+                                <fail message="target/generated-resources/license/THIRD-PARTY.txt is missing. It is generated by license-maven-plugin during generate-resources; run a full lifecycle build (e.g. 'mvn package'), not a bare 'mvn antrun:run'.">
                                     <condition>
-                                        <not><available file="${project.basedir}/THIRD-PARTY.txt"/></not>
+                                        <not><available file="${project.build.directory}/generated-resources/license/THIRD-PARTY.txt"/></not>
                                     </condition>
                                 </fail>
                                 <!-- The lz4 fork's OSGi manifest does not resolve on CPI: staged as a
@@ -570,7 +621,6 @@
                                         <!-- Licence and documentation shipped with the project -->
                                         <include name="LICENSE"/>
                                         <include name="NOTICE"/>
-                                        <include name="THIRD-PARTY.txt"/>
                                         <include name="README.md"/>
                                         <include name="CHANGELOG.md"/>
                                         <include name="docs/**"/>
@@ -582,6 +632,8 @@
                                         <exclude name="**/.DS_Store"/>
                                     </fileset>
                                 </copy>
+                                <copy file="${project.build.directory}/generated-resources/license/THIRD-PARTY.txt"
+                                      todir="${project.build.directory}/${project.build.finalName}" overwrite="true"/>
                                 <copy todir="${project.build.directory}/${project.build.finalName}/target" overwrite="true">
                                     <fileset dir="${project.build.directory}">
                                         <include name="*.jar"/>
