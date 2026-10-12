@@ -180,7 +180,7 @@ For detailed security setup, see [Authentication](security/authentication.md).
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `enableTransactions` | `false` | Enable transactional batching (creates a new transactional producer per batch). Applies only to `producerBatchMode` `JSON_ARRAY` or `XML_LIST`; with `NONE` messages are sent without a transaction. |
-| `transactionalIdPrefix` | — | Prefix for `transactional.id` (e.g. `my-app-txn`). Required if `enableTransactions` is `true`. |
+| `transactionalIdPrefix` | — | Prefix for `transactional.id` (e.g. `my-app-txn`). Required if `enableTransactions` is `true`. Each transaction slot has its own id, `<prefix>-<topic hash>-<node>-<slot>`, and the adapter keeps every one of them within 249 characters: a prefix that makes the id of the last slot (`maxConcurrentTransactions` − 1) longer fails the deployment, and the message says by how many characters to shorten it. |
 | `maxConcurrentTransactions` | `5` | Maximum number of concurrent transactional producers per worker node. |
 
 **Performance Tuning**

@@ -118,27 +118,48 @@ public class TransactionalProducerPoolTest {
         Assert.assertNotEquals("every start draws a new suffix", id, restarted.get().transactionalId(0));
     }
 
+    /**
+     * The last slot has the longest id, one character more from slot 10 on. With the 13 characters
+     * of a random member suffix, a 224-character prefix gives 249 characters up to slot 9 and 250
+     * for slot 10 (#262).
+     */
     @Test
-    public void startAcceptsAnIdOf249CharactersAndRejectsOneOf250() throws Exception {
-        // "<prefix>-c6fb053c-3-0" is the prefix plus 13 characters.
-        String longest = repeat('p', 236);
+    public void startChecksTheIdOfTheLastSlot() throws Exception {
+        String prefix = repeat('p', 224);
+        String suffix = "r0123456789ab";
         AtomicReference<TransactionalProducerPool> started = new AtomicReference<>();
-        capture(() -> started.set(TransactionalProducerPool.start(() -> longest, TOPIC, () -> "3", 1)));
-        Assert.assertEquals(249, started.get().transactionalId(0).length());
+        capture(() -> started.set(TransactionalProducerPool.start(() -> prefix, TOPIC, () -> suffix, 10)));
+        Assert.assertEquals("exactly 249 characters are accepted", 249, started.get().transactionalId(9).length());
 
-        String tooLong = repeat('p', 237);
         String logged = capture(() -> {
             try {
-                TransactionalProducerPool.start(() -> tooLong, TOPIC, () -> "3", 1);
+                TransactionalProducerPool.start(() -> prefix, TOPIC, () -> suffix, 11);
                 Assert.fail("expected the start to fail");
             } catch (IllegalArgumentException expected) {
-                Assert.assertEquals("The computed transactional.id '" + tooLong + "-c6fb053c-3-0' is 250 "
-                        + "characters long. Please shorten transactionalIdPrefix to keep it under 249 characters.",
-                        expected.getMessage());
+                Assert.assertEquals("'Transactional ID Prefix' (transactionalIdPrefix) must be at most 223 "
+                        + "characters long, got: 224 characters. With 11 for 'Max Concurrent Transactions', the "
+                        + "transactional.id of the last slot, '" + prefix + "-c6fb053c-" + suffix + "-10', would "
+                        + "have 250 characters, and the adapter allows at most 249. Please shorten the prefix by "
+                        + "at least 1 character.", expected.getMessage());
             }
         });
         Assert.assertFalse("a rejected start logs no start-up line:\n" + logged,
-                logged.contains("Transactional batching enabled"));
+                ownLines(logged).contains("Transactional batching enabled"));
+    }
+
+    @Test
+    public void startSaysByHowMuchToShortenThePrefix() {
+        try {
+            TransactionalProducerPool.start(() -> repeat('p', 300), TOPIC, () -> "3", 1);
+            Assert.fail("expected the start to fail");
+        } catch (IllegalArgumentException expected) {
+            // "<prefix>-c6fb053c-3-0" is the prefix plus 13 characters.
+            Assert.assertTrue(expected.getMessage(), expected.getMessage().startsWith("'Transactional ID Prefix' "
+                    + "(transactionalIdPrefix) must be at most 236 characters long, got: 300 characters. With 1 "
+                    + "for 'Max Concurrent Transactions', the transactional.id of the last slot, '"));
+            Assert.assertTrue(expected.getMessage(), expected.getMessage().endsWith("would have 313 characters, "
+                    + "and the adapter allows at most 249. Please shorten the prefix by at least 64 characters."));
+        }
     }
 
     @Test
@@ -322,6 +343,18 @@ public class TransactionalProducerPoolTest {
             System.setErr(original);
         }
         return new String(captured.toByteArray(), StandardCharsets.UTF_8);
+    }
+
+    /** The lines of {@code logged} from this thread: clients of other tests keep logging on theirs. */
+    private static String ownLines(String logged) {
+        String own = "[" + Thread.currentThread().getName() + "] ";
+        StringBuilder out = new StringBuilder();
+        for (String line : logged.split("\\R")) {
+            if (line.startsWith(own)) {
+                out.append(line).append('\n');
+            }
+        }
+        return out.toString();
     }
 
     private static Properties stubProps() {

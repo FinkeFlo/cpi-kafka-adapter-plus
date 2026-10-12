@@ -44,6 +44,9 @@ final class TransactionalProducerPool {
 
     static final Duration TXN_PRODUCER_CLOSE_TIMEOUT = Duration.ofSeconds(5);
 
+    /** The adapter's own budget for a {@code transactional.id}; Kafka only needs a non-empty one. */
+    private static final int MAX_TRANSACTIONAL_ID_LENGTH = 249;
+
     private final java.util.concurrent.Semaphore txnSlotSemaphore;
     private final boolean[] txnSlotInUse;
     private final Supplier<String> transactionalIdPrefix;
@@ -76,7 +79,7 @@ final class TransactionalProducerPool {
      * @param transactionalIdPrefix read again for every id
      * @param memberSuffix {@link NodeIdentity#memberSuffix()} outside tests; {@code null} from it
      *        means a random suffix and a WARN
-     * @throws IllegalArgumentException if the id would be longer than 249 characters
+     * @throws IllegalArgumentException if the id of the last slot would be longer than 249 characters
      */
     static TransactionalProducerPool start(Supplier<String> transactionalIdPrefix, String topic,
                                            Supplier<String> memberSuffix, int slots) {
@@ -104,15 +107,19 @@ final class TransactionalProducerPool {
         // fencing: each new producer bumps the epoch and invalidates all concurrent ones.
         String topicHash = NodeIdentity.computeTopicHash(topic);
 
-        // Validate that the resulting id fits within a safe length budget before any producer
-        // is created. Prefix + hash + memberSuffix + slotId + separators must stay short enough
-        // to be handled by all Kafka broker versions without truncation.
-        String exampleId = formatTransactionalId(transactionalIdPrefix.get(), topicHash,
-                resolvedMemberSuffix, 0);
-        if (exampleId.length() > 249) {
-            throw new IllegalArgumentException(
-                    "The computed transactional.id '" + exampleId + "' is " + exampleId.length()
-                    + " characters long. Please shorten transactionalIdPrefix to keep it under 249 characters.");
+        // Validate that every id fits within the length budget before any producer is created.
+        // The last slot has the longest id: from slot 10 on, its number has two digits.
+        String prefix = transactionalIdPrefix.get();
+        String exampleId = formatTransactionalId(prefix, topicHash, resolvedMemberSuffix, 0);
+        String longestId = formatTransactionalId(prefix, topicHash, resolvedMemberSuffix, Math.max(1, slots) - 1);
+        if (longestId.length() > MAX_TRANSACTIONAL_ID_LENGTH) {
+            int excess = longestId.length() - MAX_TRANSACTIONAL_ID_LENGTH;
+            throw new IllegalArgumentException("'Transactional ID Prefix' (transactionalIdPrefix) must be at most "
+                    + (prefix.length() - excess) + " characters long, got: " + prefix.length() + " characters. "
+                    + "With " + slots + " for 'Max Concurrent Transactions', the transactional.id of the last "
+                    + "slot, '" + longestId + "', would have " + longestId.length() + " characters, and the "
+                    + "adapter allows at most " + MAX_TRANSACTIONAL_ID_LENGTH + ". Please shorten the prefix by "
+                    + "at least " + excess + (excess == 1 ? " character." : " characters."));
         }
 
         TransactionalProducerPool pool = new TransactionalProducerPool(transactionalIdPrefix, topicHash,

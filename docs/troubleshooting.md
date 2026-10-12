@@ -287,6 +287,16 @@ Note when counting dead-letter records that the adapter partitions them by the o
 so a multi-partition dead-letter topic spreads them across all partitions. Reading only partition 0
 will make records look lost that are not.
 
+### A channel does not start after updating to 1.4.2
+
+1.4.2 rejects a few more settings at deployment. The deployment error names the field with its UI label
+and parameter name, as in 1.4.1.
+
+* **Receiver:** a *Transactional ID Prefix* that makes the `transactional.id` of the last transaction slot
+  longer than 249 characters. 1.4.1 checked the first slot only, whose id is one character shorter from
+  11 *Max Concurrent Transactions* on, so this check can stop a channel that deployed before. Shorten the
+  prefix by the number of characters the message gives.
+
 ### A channel does not start after updating to 1.4.1
 
 1.4.1 rejects settings that could never work at deployment instead of failing at every poll or send. The

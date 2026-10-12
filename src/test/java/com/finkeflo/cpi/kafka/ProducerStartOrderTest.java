@@ -112,9 +112,11 @@ public class ProducerStartOrderTest {
         e.setMaxConcurrentTransactions(1);
         // TransactionalProducerPool.start(); the member suffix depends on the node
         String tooLong = rejection(e);
-        Assert.assertTrue(tooLong, tooLong.matches("The computed transactional\\.id 'x{240}-[0-9a-f]{8}-[^']+-0' "
-                + "is \\d+ characters long\\. Please shorten transactionalIdPrefix to keep it under 249 "
-                + "characters\\."));
+        Assert.assertTrue(tooLong, tooLong.matches("'Transactional ID Prefix' \\(transactionalIdPrefix\\) must be "
+                + "at most \\d+ characters long, got: 240 characters\\. With 1 for 'Max Concurrent Transactions', "
+                + "the transactional\\.id of the last slot, 'x{240}-[0-9a-f]{8}-[^']+-0', would have \\d+ "
+                + "characters, and the adapter allows at most 249\\. Please shorten the prefix by at least \\d+ "
+                + "characters?\\."));
         e.setTransactionalIdPrefix("orders-tx");
         assertRejected(e, "Please set producerRetryMaxAttempts between 1 and 5 (configured value: 6). This is "
                 + "the total number of attempts, not the number of additional ones; 1 switches the retry off.");
