@@ -403,6 +403,26 @@ and both counters restart afterwards — the line therefore appears once per rec
 failed poll, and seeing it repeat at a steady cadence means the outage is ongoing rather than that
 the adapter is thrashing. The individual poll failures are logged separately with the cause.
 
+### `poll: FencedInstanceIdException`
+
+Two consumers joined the same consumer group with the same `group.instance.id`, and the broker
+fenced this one. The adapter uses static membership: the id is the *Consumer Group ID* followed by
+the worker's Cloud Foundry instance index (`<groupId>-0`, `<groupId>-1`, …), or by the host name
+outside Cloud Foundry. Two channels with the same group ID therefore collide on every worker index
+they share: a copied integration flow that kept the group ID, two sender channels with the same
+group ID, or two stages (DEV, QAS, PROD) on the same Kafka cluster.
+
+The line says how long the consumer waits before it rejoins: 40 seconds plus up to 10 seconds,
+doubling with each further fencing up to 2 minutes, and back to 40 seconds after a successful poll.
+Meanwhile the channel reports a connection error. When it rejoins, it fences the other consumer in
+turn, so the two take turns and both stall.
+
+Give each integration flow and each tenant its own **Consumer Group ID**, for example
+`cpi-order-consumer-dev`, `-qas` and `-prod`. A new group ID starts without committed offsets, so
+**Auto Offset Reset** decides where it begins. Transactional receivers have the same problem with
+**Transactional ID Prefix**: two channels with the same prefix that write the same topic fence each
+other's transactions (`ProducerFencedException`, error code `KP-TXN-001`).
+
 ### `class-warmup.*` at start-up
 
 Four to five lines per adapter bundle revision, written once when the first Kafka endpoint of that

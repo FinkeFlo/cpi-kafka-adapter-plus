@@ -275,9 +275,7 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
         // Step 2: Stop the Camel scheduler FIRST — awaits in-flight poll() invocations
         //         to return, so the KafkaConsumer is no longer in use afterwards.
         //         Previously super.doStop() was called LAST, causing close() below to
-        //         race with the active poll thread and frequently skip LeaveGroup.
-        //         Missing LeaveGroup = coordinator waits full session.timeout.ms
-        //         (45s on Confluent Cloud by default) before marking member dead.
+        //         race with the active poll thread.
         super.doStop();
 
         // Step 2b: super.doStop() cancels the scheduler task with an interrupt but does NOT
@@ -292,10 +290,13 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
         waitForPollingToStop(POLL_DRAIN_TIMEOUT_MS);
 
         // Step 3: Close the KafkaConsumer on a thread that now has exclusive access.
-        //         Timeout 15s allows the client to flush any pending commit and send
-        //         LeaveGroup to the coordinator (bounded by request.timeout.ms=30s).
-        //         This is the single most important change for fast rebalance after
-        //         undeploy/redeploy of the integration flow.
+        //         Timeout 15s allows the client to flush any pending commit.
+        //         A static member (group.instance.id set, see buildConsumerProperties) sends no
+        //         LeaveGroup on close (kafka-clients 4.3.1, AbstractCoordinator
+        //         .shouldSendLeaveGroupRequest): the broker keeps its partitions until
+        //         session.timeout.ms (30 s) has passed, and a member that rejoins with the
+        //         same id within that time gets them back without a rebalance (KIP-345).
+        //         Only a dynamic member leaves the group here (#193).
         if (kafkaConsumer != null) {
             final KafkaConsumer<byte[], byte[]> consumerRef = kafkaConsumer;
             try {
@@ -1357,10 +1358,12 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
 
     /**
      * Computes the effective {@code max.poll.interval.ms} value based on the user-configured
-     * {@code pollingIntervalSeconds}. The Kafka client's heartbeat thread (KIP-62) sends a
-     * proactive {@code LeaveGroup} request when {@code poll()} has not been called within
-     * {@code max.poll.interval.ms}; with a hardcoded 5-min default this triggered a self-leave
-     * for IFlows configured with longer polling intervals (issue #45).
+     * {@code pollingIntervalSeconds}. When {@code poll()} has not been called within
+     * {@code max.poll.interval.ms}, the Kafka client's heartbeat thread (KIP-62) gives up the
+     * membership: a dynamic member sends a {@code LeaveGroup} request, a static member sends none
+     * and stops heartbeating, so the broker removes it after {@code session.timeout.ms}. With a
+     * hardcoded 5-min default this dropped IFlows configured with longer polling intervals from
+     * their group (issue #45).
      *
      * <p>Bounds:
      * <ul>
@@ -1448,9 +1451,10 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
         }
 
         // max.poll.interval.ms must be >= the Camel polling tick. Otherwise the Java
-        // client (heartbeat thread, KIP-62) sends a LeaveGroup request between poll()
-        // calls and the consumer drops from the group (symptom: State=EMPTY, 0 active
-        // consumers, duplicate processing on rejoin). See issue #45.
+        // client (heartbeat thread, KIP-62) gives up the membership between poll() calls
+        // (a static member without a LeaveGroup request, so the broker removes it after
+        // session.timeout.ms) and the consumer drops from the group (symptom: State=EMPTY,
+        // 0 active consumers, duplicate processing on rejoin). See issue #45.
         int maxPollIntervalMs = maxPollIntervalMs();
         String maxPollBranch;
         if (maxPollIntervalMs == 22_200_000) {
@@ -1501,6 +1505,9 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
         // (e.g. local Camel test). If neither is available, static membership is
         // skipped and the consumer falls back to dynamic membership (auto-UUID
         // member.id, every reconnect counts as a new member -> rebalance).
+        // The id is the same for every channel with this group ID on a worker with this
+        // suffix, so two such channels (a copied iFlow, or the same group ID on another
+        // tenant of the same cluster) fence each other with FencedInstanceIdException (#193).
         String memberSuffix = NodeIdentity.memberSuffix();
         if (memberSuffix != null) {
             String groupInstanceId = endpoint.getGroupId() + "-" + memberSuffix;

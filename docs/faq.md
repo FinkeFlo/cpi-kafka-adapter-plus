@@ -95,14 +95,30 @@ committed will be redelivered to whichever consumer takes over the partition.
 
 This is caused by `max.poll.interval.ms` being shorter than the configured
 **Polling Interval (Seconds)**. The adapter automatically sets `max.poll.interval.ms`
-to `pollingIntervalSeconds + 10 min` (10 min with *Streaming (Continuous)*) so the heartbeat
-thread does not send a `LeaveGroup` between polls. If you see unexpected rebalances, verify that
-`pollingIntervalSeconds` is within the supported range (1 – 21600).
+to `pollingIntervalSeconds + 10 min` (10 min with *Streaming (Continuous)*) so the consumer
+keeps its group membership between polls. A consumer that does not call `poll()` within
+`max.poll.interval.ms` gives its membership up. With static membership, which the adapter uses
+whenever it knows the worker (`CF_INSTANCE_INDEX`, else the host name), it sends no `LeaveGroup`
+but stops sending heartbeats, and the broker removes it after `session.timeout.ms` (30 s). If you
+see unexpected rebalances, verify that `pollingIntervalSeconds` is within the supported range
+(1 – 21600).
 
 Processing the records of a poll does not exceed it either: the adapter starts no record, batch
 or retry later than halfway through `max.poll.interval.ms` after a poll and leaves the rest to the
 next poll (see [Dead Letter Queue](features/dead-letter-queue.md#retries-and-maxpollintervalms)).
 Only a single integration flow call that takes longer than that half can still exceed it.
+
+### After an undeploy, why do the partitions stay with the old consumer for 30 seconds?
+
+Because of static membership, the consumer sends no `LeaveGroup` when the integration flow stops:
+kafka-clients 4.3.1 sends it only for a member without `group.instance.id`. The broker keeps the
+member's partitions until `session.timeout.ms` (30 s) has passed. A consumer that rejoins with the
+same `group.instance.id` within that time, for example after a quick redeploy, gets them back
+without a rebalance; otherwise the group rebalances after 30 s and the other members take over.
+
+The same `group.instance.id` is also why two integration flows must not share a
+**Consumer Group ID**: see
+[`poll: FencedInstanceIdException`](troubleshooting.md#poll-fencedinstanceidexception).
 
 ---
 
