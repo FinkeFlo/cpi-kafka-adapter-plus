@@ -60,11 +60,12 @@ import org.slf4j.LoggerFactory;
  * <ol>
  *   <li><b>Synchronous</b>: all {@code com.finkeflo.cpi.kafka.*} classes, initialised. Cheap
  *       (~70 classes) and covers the adapter's own stop/error paths. Followed by one
- *       compress/decompress round trip per Kafka codec ({@link CodecWarmup}): snappy, zstd and
- *       lz4 extract their native library from the bundle jar via {@code getResourceAsStream} on
+ *       compress/decompress round trip per Kafka codec ({@link CodecWarmup}): snappy and zstd
+ *       extract their native library from the bundle jar via {@code getResourceAsStream} on
  *       first use — a <em>resource</em> lookup that class loading alone does not cover and that
  *       fails just the same on a purged revision (verified on DEV: {@code SnappyError
- *       FAILED_TO_LOAD_NATIVE_LIBRARY} on the first snappy batch after an update).</li>
+ *       FAILED_TO_LOAD_NATIVE_LIBRARY} on the first snappy batch after an update). lz4 runs in
+ *       pure Java inside the bundle and loads no native library.</li>
  *   <li><b>Background daemon thread</b>: every {@code .class} in the bundle root and in every
  *       {@code Bundle-ClassPath} jar, loaded without initialisation. Kafka codec, consumer and
  *       record packages go first. Failures are expected for classes whose optional dependencies
@@ -158,8 +159,9 @@ final class BundleClassWarmup {
 
         try {
             CodecWarmup.Result codecs = CodecWarmup.warmAll();
-            LOG.error("[CPI-KAFKA-PLUS-DIAG] class-warmup.codecs.completed codecs={} failed={} durationMs={}",
-                    codecs.summary(), codecs.failed(), codecs.durationMs);
+            LOG.error("[CPI-KAFKA-PLUS-DIAG] class-warmup.codecs.completed codecs={} lz4Implementation={} failed={} "
+                            + "durationMs={}",
+                    codecs.summary(), codecs.lz4Implementation, codecs.failed(), codecs.durationMs);
         } catch (Throwable t) {
             LOG.error("[CPI-KAFKA-PLUS-DIAG] class-warmup.codecs.failed exClass={} exMsg='{}'",
                     t.getClass().getName(), t.getMessage());

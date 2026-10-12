@@ -99,15 +99,6 @@
             <artifactId>kafka-clients</artifactId>
             <version>${kafka.version}</version>
             <exclusions>
-                <!-- Kafka 3.9.2+ swaps the lz4 codec to the at.yawk.lz4 fork, whose OSGi
-                     manifest is broken for CPI (Bundle-Version: 0, mandatory Import-Package:
-                     java.lang). That fork gets packaged as a standalone subsystem bundle and
-                     the CPI OSGi resolver cannot satisfy it, so the adapter fails to install.
-                     Exclude it and pin the well-behaved org.lz4:lz4-java below instead. -->
-                <exclusion>
-                    <groupId>at.yawk.lz4</groupId>
-                    <artifactId>lz4-java</artifactId>
-                </exclusion>
                 <!-- Exclude fat zstd-jni to replace it with a smaller linux_amd64 classifier -->
                 <exclusion>
                     <groupId>com.github.luben</groupId>
@@ -116,13 +107,18 @@
             </exclusions>
         </dependency>
 
-        <!-- Pin the CPI-compatible lz4 codec (proper OSGi bundle, embedded in the fat bundle
-             via Embed-Dependency; org.lz4 is in the copy-dependencies excludeGroupIds so it is
-             NOT emitted as a separate subsystem jar). Keeps CPI deployability across Kafka bumps. -->
+        <!-- The lz4 codec: the at.yawk.lz4 fork that kafka-clients depends on, declared so its
+             version is visible here. org.lz4:lz4-java 1.8.0, pinned until 1.4.1, is affected by
+             CVE-2025-12183 and CVE-2025-66566 and is not maintained any more (#240). The fork's
+             own OSGi manifest does not resolve on CPI (it imports java.* packages), so it must
+             never ship as a bundle of its own: Embed-Dependency puts it on the Bundle-ClassPath of
+             the adapter bundle, where its manifest is not read, at.yawk.lz4 is in the
+             copy-dependencies excludeGroupIds, and stage-adapter-project fails the build if it
+             still reaches target/libs. -->
         <dependency>
-            <groupId>org.lz4</groupId>
+            <groupId>at.yawk.lz4</groupId>
             <artifactId>lz4-java</artifactId>
-            <version>1.8.0</version>
+            <version>1.10.2</version>
             <scope>runtime</scope>
         </dependency>
 
@@ -284,43 +280,6 @@
     <build>
         <defaultGoal>install</defaultGoal>
         <plugins>
-            <!-- Guard against transitive dependencies that are known to break CPI's OSGi
-                 resolver. A plain `mvn package` cannot detect these - the failure only
-                 surfaces at CPI deploy time - so we fail the build up front instead.
-                 at.yawk.lz4:lz4-java is a fork with a broken OSGi manifest (Bundle-Version: 0,
-                 mandatory Import-Package: java.lang) that Kafka 3.9.2+ pulls in transitively;
-                 it must never end up in the .esa. Add further known-bad artifacts here as they
-                 are discovered. -->
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-enforcer-plugin</artifactId>
-                <version>3.6.3</version>
-                <executions>
-                    <execution>
-                        <id>ban-cpi-incompatible-dependencies</id>
-                        <phase>validate</phase>
-                        <goals><goal>enforce</goal></goals>
-                        <configuration>
-                            <rules>
-                                <bannedDependencies>
-                                    <excludes>
-                                        <!-- OSGi-broken lz4 fork; use org.lz4:lz4-java instead -->
-                                        <exclude>at.yawk.lz4:lz4-java</exclude>
-                                    </excludes>
-                                    <message>
-                                        A CPI-incompatible dependency was found on the classpath
-                                        (see banned list). This artifact breaks the CPI OSGi
-                                        resolver and would make the adapter fail to deploy. Add an
-                                        exclusion + a pinned, OSGi-clean replacement in pom.xml.
-                                    </message>
-                                    <searchTransitive>true</searchTransitive>
-                                </bannedDependencies>
-                            </rules>
-                            <fail>true</fail>
-                        </configuration>
-                    </execution>
-                </executions>
-            </plugin>
             <plugin>
                 <groupId>org.codehaus.mojo</groupId>
                 <artifactId>license-maven-plugin</artifactId>
@@ -563,7 +522,7 @@
                             <outputDirectory>${project.build.directory}/libs</outputDirectory>
                             <!-- Exclude everything - all deps embedded in bundle -->
                             <includeScope>runtime</includeScope>
-                            <excludeGroupIds>com.sap.cloud.adk,org.apache.camel,org.slf4j,log4j,org.apache.kafka,org.apache.avro,io.confluent,com.fasterxml.jackson.core,com.fasterxml.jackson.dataformat,com.fasterxml.jackson.datatype,com.google.guava,com.google.errorprone,org.checkerframework,com.google.j2objc,javax.xml.bind,jakarta,org.glassfish,com.sun.xml,commons-codec,commons-io,org.apache.commons,org.lz4,org.xerial,com.github.luben,io.swagger,org.yaml,net.minidev,org.ow2.asm,com.google.re2j,org.apache.aries,org.osgi,org.apache.maven,com.google.code.findbugs,com.networknt,com.ethlo.time,com.eclipsesource.minimal-json,com.sun.activation</excludeGroupIds>
+                            <excludeGroupIds>com.sap.cloud.adk,org.apache.camel,org.slf4j,log4j,org.apache.kafka,org.apache.avro,io.confluent,com.fasterxml.jackson.core,com.fasterxml.jackson.dataformat,com.fasterxml.jackson.datatype,com.google.guava,com.google.errorprone,org.checkerframework,com.google.j2objc,javax.xml.bind,jakarta,org.glassfish,com.sun.xml,commons-codec,commons-io,org.apache.commons,at.yawk.lz4,org.xerial,com.github.luben,io.swagger,org.yaml,net.minidev,org.ow2.asm,com.google.re2j,org.apache.aries,org.osgi,org.apache.maven,com.google.code.findbugs,com.networknt,com.ethlo.time,com.eclipsesource.minimal-json,com.sun.activation</excludeGroupIds>
                         </configuration>
                     </execution>
                 </executions>
@@ -589,6 +548,16 @@
                                 <fail message="THIRD-PARTY.txt is missing. It is generated by license-maven-plugin during generate-resources; run a full lifecycle build (e.g. 'mvn package'), not a bare 'mvn antrun:run'.">
                                     <condition>
                                         <not><available file="${project.basedir}/THIRD-PARTY.txt"/></not>
+                                    </condition>
+                                </fail>
+                                <!-- The lz4 fork's OSGi manifest does not resolve on CPI: staged as a
+                                     bundle of its own, it would make the adapter fail to deploy. It
+                                     belongs on the Bundle-ClassPath only (#240). -->
+                                <fail message="target/libs contains the lz4 codec. It must only be embedded in the adapter bundle: keep at.yawk.lz4 in the copy-dependencies excludeGroupIds in pom.xml.">
+                                    <condition>
+                                        <resourcecount when="greater" count="0">
+                                            <fileset dir="${project.build.directory}/libs" includes="lz4-java*.jar" erroronmissingdir="false"/>
+                                        </resourcecount>
                                     </condition>
                                 </fail>
                                 <mkdir dir="${project.build.directory}/${project.build.finalName}/target"/>

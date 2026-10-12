@@ -20,6 +20,7 @@
  */
 package com.finkeflo.cpi.kafka;
 
+import java.util.Arrays;
 import java.util.Locale;
 
 import org.apache.kafka.common.KafkaException;
@@ -50,6 +51,14 @@ public class CodecWarmupTest {
         }
         Assert.assertFalse(result.outcomes.containsKey(CompressionType.NONE.name));
         Assert.assertTrue(result.summary(), result.summary().contains("snappy:ok"));
+    }
+
+    @Test
+    public void namesTheLz4ImplementationKafkaUses() {
+        // Loaded by the system class loader here, lz4-java may pick JNI; inside the bundle it runs
+        // JavaSafe (BundleClassWarmupPackagingIT).
+        String implementation = CodecWarmup.warmAll().lz4Implementation;
+        Assert.assertTrue(implementation, Arrays.asList("JNI", "JavaUnsafe", "JavaSafe").contains(implementation));
     }
 
     @Test
