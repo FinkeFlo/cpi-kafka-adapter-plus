@@ -63,7 +63,9 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
     @UriParam(label = "connection", description = "Kafka Topic(s) to consume from (comma-separated for multiple)")
     private String topic;
 
-    @UriParam(label = "connection", description = "Consumer Group ID")
+    @UriParam(label = "connection",
+            description = "Consumer Group ID. One per integration flow and tenant: two channels with the same "
+                    + "group ID on the same worker fence each other (static membership).")
     private String groupId;
 
     // --- Security ---
@@ -207,7 +209,8 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
 
     @UriParam(label = "producer",
             description = "Prefix for transactional.id (e.g. my-app-txn). Required with transactional batching "
-                    + "(enableTransactions with producerBatchMode JSON_ARRAY or XML_LIST).")
+                    + "(enableTransactions with producerBatchMode JSON_ARRAY or XML_LIST). Unique per integration "
+                    + "flow and tenant for the same topic and cluster: equal prefixes fence each other.")
     private String transactionalIdPrefix;
 
     @UriParam(label = "producer", defaultValue = "5",

@@ -16,7 +16,7 @@ An externalized parameter bypasses the dropdowns, and its value reaches the adap
 |-----------|---------|-------------|
 | `bootstrapServers` | _(required)_ | Kafka bootstrap servers, comma-separated `host:port` addresses, each optionally with a listener prefix such as `SASL_SSL://`. Spaces around the addresses and empty entries, such as after a trailing comma, are removed. An address Kafka cannot read as `host:port`, or a port above 65535, fails the deployment. |
 | `topic` | _(required)_ | Kafka topic or comma-separated topics to consume from. |
-| `groupId` | _(required)_ | Consumer group ID. |
+| `groupId` | _(required)_ | Consumer group ID. The worker nodes that run the integration flow share it and split the partitions among them. Use one per integration flow and tenant: the adapter uses static membership with the `group.instance.id` `<groupId>-<worker index>`, so two channels with the same group ID fence each other on every worker index they share (see [Troubleshooting](troubleshooting.md#poll-fencedinstanceidexception)). |
 
 **Security**
 
@@ -184,7 +184,7 @@ For detailed security setup, see [Authentication](security/authentication.md).
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `enableTransactions` | `false` | Enable transactional batching (creates a new transactional producer per batch). Applies only to `producerBatchMode` `JSON_ARRAY` or `XML_LIST`; with `NONE` messages are sent without a transaction. |
-| `transactionalIdPrefix` | _(required)_ | Prefix for `transactional.id` (e.g. `my-app-txn`). Required with transactional batching: `enableTransactions` with `producerBatchMode` `JSON_ARRAY` or `XML_LIST`. Each transaction slot has its own id, `<prefix>-<topic hash>-<node>-<slot>`, and the adapter keeps every one of them within 249 characters: a prefix that makes the id of the last slot (`maxConcurrentTransactions` − 1) longer fails the deployment, and the message says by how many characters to shorten it. |
+| `transactionalIdPrefix` | _(required)_ | Prefix for `transactional.id` (e.g. `my-app-txn`). Required with transactional batching: `enableTransactions` with `producerBatchMode` `JSON_ARRAY` or `XML_LIST`. Each transaction slot has its own id, `<prefix>-<topic hash>-<node>-<slot>`, and the adapter keeps every one of them within 249 characters: a prefix that makes the id of the last slot (`maxConcurrentTransactions` − 1) longer fails the deployment, and the message says by how many characters to shorten it. The prefix must be unique per integration flow and tenant among all channels that write the same topic on the same cluster: the id names neither the integration flow nor the tenant, so a copied iFlow, or another tenant with the same prefix and topic, fences this channel's transactions (`ProducerFencedException`, error code `KP-TXN-001`). |
 | `maxConcurrentTransactions` | `5` | Maximum number of concurrent transactional producers per worker node. |
 
 **Performance Tuning**

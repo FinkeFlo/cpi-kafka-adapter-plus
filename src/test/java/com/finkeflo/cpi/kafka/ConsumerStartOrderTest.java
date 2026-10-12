@@ -152,7 +152,7 @@ public class ConsumerStartOrderTest {
         e.setPollingIntervalSeconds(21601);
         assertRejected(e, "'Polling Interval (Seconds)' (pollingIntervalSeconds) must be at most 21600 (6 h), "
                 + "got: 21601. Higher values exceed the max.poll.interval.ms hard cap (6 h 10 min) and would "
-                + "cause the consumer to leave the group between polls.");
+                + "make the consumer drop out of its group between polls.");
         e.setPollingIntervalSeconds(60);
         assertStarts(e);
     }
@@ -231,8 +231,8 @@ public class ConsumerStartOrderTest {
         rejected.setPollingIntervalSeconds(21601);
         String rejectedLog = capture(() -> assertRejected(rejected, "'Polling Interval (Seconds)' "
                 + "(pollingIntervalSeconds) must be at most 21600 (6 h), got: 21601. Higher values exceed the "
-                + "max.poll.interval.ms hard cap (6 h 10 min) and would cause the consumer to leave the group "
-                + "between polls."));
+                + "max.poll.interval.ms hard cap (6 h 10 min) and would make the consumer drop out of its "
+                + "group between polls."));
         Assert.assertTrue(rejectedLog, rejectedLog.contains("consumer.start.failed"));
         Assert.assertFalse(rejectedLog, rejectedLog.contains("doStart called"));
 

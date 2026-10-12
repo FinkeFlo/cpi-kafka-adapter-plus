@@ -228,7 +228,7 @@ final class SenderConfigValidator {
     /**
      * Validates that {@code pollingIntervalSeconds} is in the supported range {@code (0, 21600]}.
      * Values above 21600 (6 h) would exceed the {@code max.poll.interval.ms} hard cap of
-     * 6 h 10 min and cause the consumer to leave its group between polls (issue #45).
+     * 6 h 10 min and make the consumer drop out of its group between polls (issue #45).
      * The 6-h limit is chosen as a whole-hour value so polls align with predictable clock
      * times (e.g. every 6 h: 00:00, 06:00, 12:00, 18:00).
      */
@@ -241,7 +241,7 @@ final class SenderConfigValidator {
             throw new IllegalArgumentException(UiLabels.field("pollingIntervalSeconds")
                     + " must be at most 21600 (6 h), got: " + pollingIntervalSeconds
                     + ". Higher values exceed the max.poll.interval.ms hard cap (6 h 10 min) "
-                    + "and would cause the consumer to leave the group between polls.");
+                    + "and would make the consumer drop out of its group between polls.");
         }
     }
 }

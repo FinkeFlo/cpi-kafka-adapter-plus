@@ -55,7 +55,7 @@
                 </AttributeReference>
                 <AttributeReference>
                     <ReferenceName>groupId</ReferenceName>
-                    <description>Consumer group ID, e.g. cpi-order-consumer. All adapter instances sharing the same group ID will split the partition load across them. Note: If multiple stages (e.g. DEV, QAS, PROD) connect to the same Kafka cluster, each stage must use a different consumer group ID (e.g. cpi-order-consumer-dev / -qas / -prod). Sharing one group ID across stages causes continuous rebalances and unstable consumption.</description>
+                    <description>Consumer group ID, e.g. cpi-order-consumer. The worker nodes that run this integration flow share it and split the partitions among them. Use one group ID per integration flow and tenant, e.g. cpi-order-consumer-dev / -qas / -prod for three stages on one Kafka cluster: a copied iFlow keeps the group ID, and two channels with the same group ID on the same worker fence each other (static membership), so both stall.</description>
                     <ErrorMessage>Please enter a consumer group ID (e.g. cpi-order-consumer)</ErrorMessage>
                 </AttributeReference>
             </AttributeGroup>
@@ -151,7 +151,7 @@
                 </GuiLabels>
                 <AttributeReference>
                     <ReferenceName>pollingIntervalSeconds</ReferenceName>
-                    <description>Time in seconds between poll cycles. Each cycle fetches up to 'Max Poll Records' from Kafka. Range: 1 to 21600 (1 second to 6 hours). Default: 5 seconds. Whole-hour values align polls with predictable clock times: 3600=1h, 7200=2h, 10800=3h, 14400=4h, 18000=5h, 21600=6h. Values above 21600 are rejected at IFlow start because they would exceed the max.poll.interval.ms hard cap (6 h 10 min) and cause the Kafka consumer to leave its group between polls. Ignored when 'Consumption Mode' is Streaming.</description>
+                    <description>Time in seconds between poll cycles. Each cycle fetches up to 'Max Poll Records' from Kafka. Range: 1 to 21600 (1 second to 6 hours). Default: 5 seconds. Whole-hour values align polls with predictable clock times: 3600=1h, 7200=2h, 10800=3h, 14400=4h, 18000=5h, 21600=6h. Values above 21600 are rejected at IFlow start because they would exceed the max.poll.interval.ms hard cap (6 h 10 min) and make the Kafka consumer drop out of its group between polls. Ignored when 'Consumption Mode' is Streaming.</description>
                     <Restriction>Constraint.isValidRegex(^([1-9][0-9]{0,3}|1[0-9]{4}|20[0-9]{3}|21[0-4][0-9]{2}|215[0-9]{2}|21600)$)</Restriction>
                     <ErrorMessage>Please enter a number between 1 and 21600 (1 second to 6 hours)</ErrorMessage>
                     <EditCondition>

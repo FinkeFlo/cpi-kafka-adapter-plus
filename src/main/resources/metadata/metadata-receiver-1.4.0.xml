@@ -177,7 +177,7 @@
                 </AttributeReference>
                 <AttributeReference>
                     <ReferenceName>transactionalIdPrefix</ReferenceName>
-                    <description>Prefix for transactional.id (for example my-app-txn). Required when transactional batching is enabled.</description>
+                    <description>Prefix for transactional.id (for example my-app-txn). Required when transactional batching is enabled. Must be unique per integration flow and tenant among all channels that write the same topic on the same Kafka cluster: a copied iFlow keeps the prefix, and equal prefixes fence each other's transactions.</description>
                     <ErrorMessage>Please enter a Transactional ID Prefix when transactions are enabled</ErrorMessage>
                     <EditCondition>
                         <AttributeName>enableTransactions</AttributeName>
