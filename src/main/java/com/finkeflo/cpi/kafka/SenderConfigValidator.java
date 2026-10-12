@@ -56,13 +56,15 @@ final class SenderConfigValidator {
         }
         boolean streaming = endpoint.isStreamingMode();
 
-        // Consumer-specific validations
-        String errorHandling = endpoint.getErrorHandling();
-        if (errorHandling == null
-                || !("RETRY".equalsIgnoreCase(errorHandling) || "SKIP".equalsIgnoreCase(errorHandling))) {
-            throw new IllegalArgumentException(
-                    "errorHandling must be RETRY (Retry Failed Message) or SKIP (Skip Failed Message), got: "
-                    + errorHandling);
+        // Consumer-specific validations. With a DLQ, Error Handling is hidden and never used, so a
+        // stale value must not block the start (#174).
+        if (!endpoint.isDlqEnabled()) {
+            String errorHandling = endpoint.getErrorHandling();
+            if (errorHandling == null
+                    || !("RETRY".equalsIgnoreCase(errorHandling) || "SKIP".equalsIgnoreCase(errorHandling))) {
+                throw new IllegalArgumentException("'Error Handling' (errorHandling) must be RETRY "
+                        + "(Retry Failed Message) or SKIP (Skip Failed Message), got: " + errorHandling);
+            }
         }
         if (endpoint.isDlqEnabled()) {
             String dlqTopic = endpoint.getDlqTopic();

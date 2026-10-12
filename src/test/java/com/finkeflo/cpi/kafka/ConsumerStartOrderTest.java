@@ -66,7 +66,7 @@ public class ConsumerStartOrderTest {
         e.setDiagnosticsLevel("VERBOSE");
         e.setConsumptionMode("BATCH");
         e.setErrorHandling("DROP");
-        e.setDlqEnabled(true);
+        e.setDlqEnabled(false);   // Error Handling is checked only without a DLQ; switched on below
         e.setDlqTopic(" ");
         e.setGroupId(" ");
         e.setCommitStrategy("MANUAL");
@@ -90,9 +90,10 @@ public class ConsumerStartOrderTest {
         e.setDiagnosticsLevel("STANDARD");
         assertRejected(e, "consumptionMode must be SCHEDULED or STREAMING, got: BATCH");
         e.setConsumptionMode("SCHEDULED");
-        assertRejected(e, "errorHandling must be RETRY (Retry Failed Message) or SKIP (Skip Failed Message), "
-                + "got: DROP");
+        assertRejected(e, "'Error Handling' (errorHandling) must be RETRY (Retry Failed Message) or SKIP "
+                + "(Skip Failed Message), got: DROP");
         e.setErrorHandling("RETRY");
+        e.setDlqEnabled(true);
         assertRejected(e, "DLQ is enabled but no DLQ topic is configured. Please set the 'dlqTopic' property.");
         e.setDlqTopic(" orders-dlq ");
         assertRejected(e, "'Consumer Group ID' (groupId) must not be empty — the consumer cannot join a "

@@ -55,9 +55,22 @@ public class ConsumerStartChecksTest {
         CpiKafkaPlusEndpoint endpoint = endpoint();
         endpoint.setErrorHandling("DROP");
 
-        String message = startFailure(endpoint);
+        assertRejected(endpoint, "errorHandling", "Error Handling");
+    }
 
-        Assert.assertTrue(message, message.contains("errorHandling"));
+    @Test
+    public void errorHandlingIsIgnoredWhileTheDlqIsOn() throws Exception {
+        // Hidden with a DLQ and never used then; an externalized stale value must not block (#264).
+        CpiKafkaPlusEndpoint unknown = endpoint();
+        unknown.setDlqEnabled(true);
+        unknown.setDlqTopic("orders-dlq");
+        unknown.setErrorHandling("DROP");
+        assertStarts(unknown);
+        CpiKafkaPlusEndpoint missing = endpoint();
+        missing.setDlqEnabled(true);
+        missing.setDlqTopic("orders-dlq");
+        missing.setErrorHandling(null);
+        assertStarts(missing);
     }
 
     @Test
@@ -119,8 +132,8 @@ public class ConsumerStartChecksTest {
         Assert.assertEquals("consumptionMode must be SCHEDULED or STREAMING, got: null", startFailure(mode));
         CpiKafkaPlusEndpoint handling = endpoint();
         handling.setErrorHandling(null);
-        Assert.assertEquals("errorHandling must be RETRY (Retry Failed Message) or SKIP (Skip Failed Message), "
-                + "got: null", startFailure(handling));
+        Assert.assertEquals("'Error Handling' (errorHandling) must be RETRY (Retry Failed Message) or SKIP "
+                + "(Skip Failed Message), got: null", startFailure(handling));
     }
 
     @Test
