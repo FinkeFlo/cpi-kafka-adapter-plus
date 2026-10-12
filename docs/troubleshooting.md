@@ -309,7 +309,8 @@ deployment error names the field.
 * **Receiver:** an unknown *Batch Send Mode*, *Delivery Timeout (Seconds)* below 1, or a
   *Subject Name Strategy* other than `TopicNameStrategy` with Avro serialization.
 * **Both:** empty *Bootstrap Servers*, or a *JSON Schema* that is not valid JSON while
-  *Enable JSON Schema Validation* is on.
+  *Enable JSON Schema Validation* is on (on the receiver from 1.4.2 on with *Batch Send Mode* `NONE`
+  only, the one mode that validates).
 
 The message gives the UI label and the parameter name, e.g. `'Batch Send Mode' (producerBatchMode)`.
 
@@ -409,6 +410,19 @@ built: the cause names the alias, e.g. `The password stored under 'Credential Al
 'my-kafka-user' contains a line break or another control character`, never the value. The sender
 reports the same in `consumer.init.failed`, the DLQ producer in `dlq.producer.init.failed`. See
 [Authentication](security/authentication.md#cpi-secure-store).
+
+### `producer.config.ineffective`
+
+A receiver setting that has no effect with the rest of the configuration. It is logged once at
+deployment, as ERROR so that it reaches the tenant trace, and the channel starts all the same.
+`parameter` names the setting and `reason` says why:
+
+* `enableTransactions` with *Batch Send Mode* `NONE`: transactions apply to batches only.
+* `jsonSchemaValidation` with *Batch Send Mode* `JSON_ARRAY` or `XML_LIST`: the JSON Schema applies to
+  single messages only. A batch is sent without validation, and the schema is neither checked at
+  deployment nor compiled.
+
+Switch the setting off, or change the *Batch Send Mode*, if the line should go away.
 
 ### `producer.metadata.prewarm outcome=FAILED`
 

@@ -33,7 +33,7 @@ import org.slf4j.LoggerFactory;
  * check wins. The phases are separate because start-up lines are logged between them, and a
  * rejected deployment still shows the lines logged before the rejection:
  * <ol>
- *   <li>{@link #validateBeforeStart} after {@code endpoint.validateConfiguration()}, before
+ *   <li>{@link #validateBeforeStart} after {@code endpoint.validateConfiguration(...)}, before
  *       {@code super.doStart()};</li>
  *   <li>{@link #validateTransactional} after {@code super.doStart()} and the start-up line
  *       "Starting CPI Kafka Producer". The length check of the {@code transactional.id} follows
@@ -72,7 +72,8 @@ final class ReceiverConfigValidator {
 
     /**
      * Phase 1, before {@code super.doStart()}: the batch send mode, the delivery timeout and the
-     * subject name strategy.
+     * subject name strategy. Logs {@code producer.config.ineffective} when JSON Schema validation is
+     * switched on with a batch send mode.
      */
     static void validateBeforeStart(CpiKafkaPlusEndpoint endpoint) {
         // Values that can never work (#183): each used to fail every single message instead.
@@ -80,6 +81,15 @@ final class ReceiverConfigValidator {
         if (!"NONE".equalsIgnoreCase(batchMode) && !"JSON_ARRAY".equalsIgnoreCase(batchMode)
                 && !"XML_LIST".equalsIgnoreCase(batchMode)) {
             throw unknownBatchMode(batchMode);
+        }
+        if (endpoint.isJsonSchemaValidation() && !"NONE".equalsIgnoreCase(batchMode)) {
+            // Once per deployment instead of a WARN per message (#263); ERROR because nothing
+            // below WARN reaches the tenant trace.
+            AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("producer.config.ineffective")
+                    .with("parameter", "jsonSchemaValidation")
+                    .with("producerBatchMode", batchMode)
+                    .with("reason", "the JSON Schema applies to single messages only; batches are "
+                            + "sent without validation"));
         }
         if (endpoint.getDeliveryTimeoutSeconds() < 1) {
             throw new IllegalArgumentException("'Delivery Timeout (Seconds)' (deliveryTimeoutSeconds) must be at least 1, got: "

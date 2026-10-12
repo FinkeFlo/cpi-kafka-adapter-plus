@@ -158,7 +158,7 @@ When `producerBatchMode=NONE` (the default), each iFlow exchange sends a single 
 
 ## Limitations (v1)
 
-- **JSON Schema Validation** (`jsonSchemaValidation`) is skipped in batch mode (logged as a warning)
+- **JSON Schema Validation** (`jsonSchemaValidation`) does not apply in batch mode: the schema is neither checked at deployment nor compiled, and the deployment logs `producer.config.ineffective` once
 - `kafka.PARTITION_KEY` and `kafka.OVERRIDE_TIMESTAMP` apply to all records in the batch
 - Exchange headers are copied to all Kafka records (unless overridden by per-record `headers` inside the payload)
 - With **Serialize Values as Avro**, every record value is serialized individually, as in single mode

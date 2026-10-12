@@ -410,6 +410,15 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
      * Called from doStart() of both sides for fail-fast behaviour.
      */
     public void validateConfiguration() {
+        validateConfiguration(true);
+    }
+
+    /**
+     * As {@link #validateConfiguration()}, checking the JSON Schema only if {@code jsonSchemaApplied}.
+     * The receiver applies it to single messages only, so with a batch send mode a stale schema must
+     * not block the start (#263).
+     */
+    void validateConfiguration(boolean jsonSchemaApplied) {
         String effectiveTopic = getEffectiveTopic();
         if (effectiveTopic == null || effectiveTopic.trim().isEmpty()) {
             throw new IllegalArgumentException(
@@ -429,7 +438,7 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
             throw new IllegalArgumentException(
                     "Schema Registry is enabled but schemaRegistryUrl is not configured.");
         }
-        if (jsonSchemaValidation) {
+        if (jsonSchemaValidation && jsonSchemaApplied) {
             if (jsonSchema == null || jsonSchema.trim().isEmpty()) {
                 throw new IllegalArgumentException(
                         "JSON Schema validation is enabled but no JSON Schema is configured. "

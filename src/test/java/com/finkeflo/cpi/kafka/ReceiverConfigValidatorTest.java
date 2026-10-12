@@ -113,6 +113,24 @@ public class ReceiverConfigValidatorTest {
     }
 
     @Test
+    public void ineffectiveJsonSchemaValidationIsLoggedOnceAtStart() throws Exception {
+        CpiKafkaPlusEndpoint batch = endpoint();
+        batch.setProducerBatchMode("JSON_ARRAY");
+        batch.setJsonSchemaValidation(true);
+
+        String logged = capture(() -> ReceiverConfigValidator.validateBeforeStart(batch));
+
+        assertLoggedOnce(logged, "ERROR " + PRODUCER + " - [CPI-KAFKA-PLUS-DIAG] producer.config.ineffective "
+                + "parameter=jsonSchemaValidation producerBatchMode=JSON_ARRAY reason='the JSON Schema applies "
+                + "to single messages only; batches are sent without validation'");
+
+        CpiKafkaPlusEndpoint single = endpoint();
+        single.setJsonSchemaValidation(true);
+        single.setJsonSchema("{\"type\": \"object\"}");
+        Assert.assertEquals("", capture(() -> ReceiverConfigValidator.validateBeforeStart(single)));
+    }
+
+    @Test
     public void theRetryWarningsAreLoggedUnderTheProducerCategory() throws Exception {
         CpiKafkaPlusEndpoint batch = endpoint();
         batch.setProducerBatchMode("XML_LIST");

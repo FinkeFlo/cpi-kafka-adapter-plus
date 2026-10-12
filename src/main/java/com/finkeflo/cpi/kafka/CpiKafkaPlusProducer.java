@@ -151,7 +151,7 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
 
     private void doStartInternal() throws Exception {
         // Fail-fast: validate shared configuration (Schema Registry, JSON Schema, SASL)
-        endpoint.validateConfiguration();
+        endpoint.validateConfiguration(appliesJsonSchema());
         ReceiverConfigValidator.validateBeforeStart(endpoint);
 
         super.doStart();
@@ -286,7 +286,7 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
                 avroHelper = BundleBackedClassLoader.withBundleClassLoader(getClass(),
                         () -> new AvroSerializerHelper(endpoint));
             }
-            if (endpoint.isJsonSchemaValidation()) {
+            if (appliesJsonSchema()) {
                 jsonSchemaValidator = new JsonSchemaValidator(endpoint.getJsonSchema());
                 LOG.info("[CPI-KAFKA-PLUS-DIAG] JSON Schema validation enabled for outbound messages");
             }
@@ -302,6 +302,15 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
             lastInitException = e;
             return false;
         }
+    }
+
+    /**
+     * The JSON Schema applies to single messages only. A batch is sent without validation, so with a
+     * batch send mode the schema is neither checked at start nor compiled (#263);
+     * {@link ReceiverConfigValidator#validateBeforeStart} logs once that it has no effect.
+     */
+    private boolean appliesJsonSchema() {
+        return endpoint.isJsonSchemaValidation() && "NONE".equalsIgnoreCase(endpoint.getProducerBatchMode());
     }
 
     private IllegalStateException initFailure(String component) {
@@ -406,10 +415,6 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
 
     private void processBatch(Exchange exchange, Message in, String topic,
                                String batchMode) throws Exception {
-        if (jsonSchemaValidator != null) {
-            LOG.warn("[CPI-KAFKA-PLUS-DIAG] JSON Schema validation is skipped in batch mode "
-                    + "(producerBatchMode={})", batchMode);
-        }
 
         // Read the body once: an unconverted InputStream body cannot be read a second time, and
         // the trace below must show the same content that was parsed.

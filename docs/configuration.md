@@ -196,7 +196,7 @@ For detailed security setup, see [Authentication](security/authentication.md).
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `jsonSchemaValidation` | `false` | Enable JSON Schema validation of outgoing messages. An invalid message fails the exchange and is not sent. Skipped, with a warning, when `producerBatchMode` is `JSON_ARRAY` or `XML_LIST`. |
+| `jsonSchemaValidation` | `false` | Enable JSON Schema validation of outgoing messages. An invalid message fails the exchange and is not sent. Applies to `producerBatchMode` `NONE` only: with `JSON_ARRAY` or `XML_LIST` a batch is sent without validation, the schema is neither checked at deployment nor compiled, and the deployment logs `producer.config.ineffective` once. |
 | `jsonSchema` | — | Inline JSON Schema for message validation. |
 | `jsonSchemaReportError` | `false` | An invalid message always fails the exchange, whatever this setting says. `true` also writes the rejected payload to the MPL trace, if trace is active for the integration flow. |
 

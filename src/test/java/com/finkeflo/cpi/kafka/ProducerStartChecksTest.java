@@ -70,6 +70,25 @@ public class ProducerStartChecksTest {
     }
 
     @Test
+    public void malformedJsonSchemaIsIgnoredInBatchMode() throws Exception {
+        // A batch is sent without validation, so its schema must not block the start (#263).
+        CpiKafkaPlusEndpoint e = endpoint();
+        e.setProducerBatchMode("JSON_ARRAY");
+        e.setJsonSchemaValidation(true);
+        e.setJsonSchema("{\"type\": \"object\",");
+        assertStarts(e);
+    }
+
+    @Test
+    public void missingJsonSchemaIsIgnoredInBatchMode() throws Exception {
+        CpiKafkaPlusEndpoint e = endpoint();
+        e.setProducerBatchMode("XML_LIST");
+        e.setJsonSchemaValidation(true);
+        e.setJsonSchema(null);
+        assertStarts(e);
+    }
+
+    @Test
     public void unknownProducerBatchModeIsRejected() throws Exception {
         CpiKafkaPlusEndpoint e = endpoint();
         e.setProducerBatchMode("CSV");
