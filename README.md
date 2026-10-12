@@ -32,7 +32,7 @@ mvn clean install
 ```
 
 This produces:
-1. An OSGi bundle JAR (fat bundle with embedded Kafka, Avro, Confluent, and Jackson dependencies)
+1. An OSGi bundle JAR (fat bundle with embedded Kafka clients, Avro, Jackson and compression codecs)
 2. An ESA archive (via ADK `build` goal) deployable to SAP CPI
 
 ### Build ESA in GitHub Actions (no release tag)
@@ -84,6 +84,11 @@ See [docs/configuration.md](docs/configuration.md) for detailed adapter configur
 
 Deploy the generated ESA archive to SAP CPI via the Integration Content API or the CPI Web UI.
 
+The adapter needs a Cloud Integration runtime with Java 11 or later (the bundle declares
+`osgi.ee` JavaSE 11, although SAP's adapter development documentation still names Java 8) and
+Apache Camel 3.14 (it is built against 3.14.7). The first Kafka endpoint of every adapter version
+logs the runtime's Java version, Java vendor and Camel version in its `class-warmup.start` line.
+
 ## License
 
 This project is licensed under the **GNU Affero General Public License v3.0 (AGPL-3.0)**. See [LICENSE](LICENSE) for details.
@@ -102,10 +107,12 @@ Libraries that are only used to build and test the project (for example the Conf
 Schema Registry client, Testcontainers and JUnit) are not part of the adapter. Apache Camel
 and the SAP Adapter Development Kit APIs are provided by the CPI runtime.
 
-See the [NOTICE](NOTICE) file for details. A complete, machine-readable list of all build
-dependencies and their licenses (`THIRD-PARTY.txt`, including the test-only ones) is generated
-by every build (`mvn generate-resources`) and packaged with the adapter project; it is not kept
-in the source repository.
+See the [NOTICE](NOTICE) file for details. The adapter bundle ships `LICENSE`, `NOTICE` and
+`THIRD-PARTY.txt` under `META-INF/`, and the `LICENSE` and `NOTICE` of the Apache Kafka clients
+under `META-INF/kafka-clients/`. `THIRD-PARTY.txt` is a complete, machine-readable list of all
+build dependencies and their licenses, including the test-only ones. Every build generates it
+(`mvn generate-resources`, into `target/generated-resources/license/`); it is not kept in the
+source repository.
 
 ## Trademarks
 

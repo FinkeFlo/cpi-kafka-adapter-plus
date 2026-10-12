@@ -10,6 +10,14 @@
     <name>Kafka Adapter Plus</name>
     <description>Custom Apache Kafka adapter for SAP Cloud Integration (CPI) with advanced batch processing, Avro/Schema Registry support, and SASL/SSL security.</description>
 
+    <licenses>
+        <license>
+            <name>GNU Affero General Public License v3.0</name>
+            <url>https://www.gnu.org/licenses/agpl-3.0.txt</url>
+            <distribution>repo</distribution>
+        </license>
+    </licenses>
+
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <!-- maven.compiler.release (not source/target): source/target still link against the
@@ -99,15 +107,6 @@
             <artifactId>kafka-clients</artifactId>
             <version>${kafka.version}</version>
             <exclusions>
-                <!-- Kafka 3.9.2+ swaps the lz4 codec to the at.yawk.lz4 fork, whose OSGi
-                     manifest is broken for CPI (Bundle-Version: 0, mandatory Import-Package:
-                     java.lang). That fork gets packaged as a standalone subsystem bundle and
-                     the CPI OSGi resolver cannot satisfy it, so the adapter fails to install.
-                     Exclude it and pin the well-behaved org.lz4:lz4-java below instead. -->
-                <exclusion>
-                    <groupId>at.yawk.lz4</groupId>
-                    <artifactId>lz4-java</artifactId>
-                </exclusion>
                 <!-- Exclude fat zstd-jni to replace it with a smaller linux_amd64 classifier -->
                 <exclusion>
                     <groupId>com.github.luben</groupId>
@@ -116,13 +115,20 @@
             </exclusions>
         </dependency>
 
-        <!-- Pin the CPI-compatible lz4 codec (proper OSGi bundle, embedded in the fat bundle
-             via Embed-Dependency; org.lz4 is in the copy-dependencies excludeGroupIds so it is
-             NOT emitted as a separate subsystem jar). Keeps CPI deployability across Kafka bumps. -->
+        <!-- The lz4 codec: the at.yawk.lz4 fork that kafka-clients depends on, declared so its
+             version is visible here. org.lz4:lz4-java 1.8.0, pinned until 1.4.1, is affected by
+             CVE-2025-12183 and CVE-2025-66566 and is not maintained any more (#240). The 1.10.2
+             that kafka-clients 4.3.1 asks for is affected by GHSA-mcr4-qmvw-px4g (CVE-2026-106451)
+             and five lesser advisories, which 1.11.4 fixes. The fork's
+             own OSGi manifest does not resolve on CPI (it imports java.* packages), so it must
+             never ship as a bundle of its own: Embed-Dependency puts it on the Bundle-ClassPath of
+             the adapter bundle, where its manifest is not read, at.yawk.lz4 is in the
+             copy-dependencies excludeGroupIds, and stage-adapter-project fails the build if it
+             still reaches target/libs. -->
         <dependency>
-            <groupId>org.lz4</groupId>
+            <groupId>at.yawk.lz4</groupId>
             <artifactId>lz4-java</artifactId>
-            <version>1.8.0</version>
+            <version>1.11.4</version>
             <scope>runtime</scope>
         </dependency>
 
@@ -284,43 +290,6 @@
     <build>
         <defaultGoal>install</defaultGoal>
         <plugins>
-            <!-- Guard against transitive dependencies that are known to break CPI's OSGi
-                 resolver. A plain `mvn package` cannot detect these - the failure only
-                 surfaces at CPI deploy time - so we fail the build up front instead.
-                 at.yawk.lz4:lz4-java is a fork with a broken OSGi manifest (Bundle-Version: 0,
-                 mandatory Import-Package: java.lang) that Kafka 3.9.2+ pulls in transitively;
-                 it must never end up in the .esa. Add further known-bad artifacts here as they
-                 are discovered. -->
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-enforcer-plugin</artifactId>
-                <version>3.6.3</version>
-                <executions>
-                    <execution>
-                        <id>ban-cpi-incompatible-dependencies</id>
-                        <phase>validate</phase>
-                        <goals><goal>enforce</goal></goals>
-                        <configuration>
-                            <rules>
-                                <bannedDependencies>
-                                    <excludes>
-                                        <!-- OSGi-broken lz4 fork; use org.lz4:lz4-java instead -->
-                                        <exclude>at.yawk.lz4:lz4-java</exclude>
-                                    </excludes>
-                                    <message>
-                                        A CPI-incompatible dependency was found on the classpath
-                                        (see banned list). This artifact breaks the CPI OSGi
-                                        resolver and would make the adapter fail to deploy. Add an
-                                        exclusion + a pinned, OSGi-clean replacement in pom.xml.
-                                    </message>
-                                    <searchTransitive>true</searchTransitive>
-                                </bannedDependencies>
-                            </rules>
-                            <fail>true</fail>
-                        </configuration>
-                    </execution>
-                </executions>
-            </plugin>
             <plugin>
                 <groupId>org.codehaus.mojo</groupId>
                 <artifactId>license-maven-plugin</artifactId>
@@ -343,12 +312,17 @@
                         <phase>validate</phase>
                         <goals><goal>check-file-header</goal></goals>
                     </execution>
+                    <!-- Generated into target/, never into the project root: the plugin used to register
+                         its output directory as a resource root for **/*.txt, and with the project
+                         root that put every *.txt of the working tree into the bundle (#249). The
+                         bundle takes the file explicitly instead (Include-Resource below). -->
                     <execution>
                         <id>add-third-party</id>
                         <phase>generate-resources</phase>
                         <goals><goal>add-third-party</goal></goals>
                         <configuration>
-                            <outputDirectory>${project.basedir}</outputDirectory>
+                            <outputDirectory>${project.build.directory}/generated-resources/license</outputDirectory>
+                            <addOutputDirectoryAsResourceDir>false</addOutputDirectoryAsResourceDir>
                         </configuration>
                     </execution>
                 </executions>
@@ -417,6 +391,21 @@
                             snappy-java;scope=runtime
                         </Embed-Dependency>
                         <Embed-Transitive>true</Embed-Transitive>
+                        <!-- {maven-resources} is src/main/resources. The licence files go under
+                             META-INF/, together with the LICENSE and NOTICE of kafka-clients, whose
+                             unpacked classes would otherwise ship without them. bnd only takes the
+                             packages named in Private-Package from target/classes, so Kafka's
+                             kafka-version.properties needs naming too: without it Kafka reports its
+                             client version as "unknown" (#249). -->
+                        <Include-Resource>
+                            {maven-resources},
+                            META-INF/LICENSE=${project.basedir}/LICENSE,
+                            META-INF/NOTICE=${project.basedir}/NOTICE,
+                            META-INF/THIRD-PARTY.txt=${project.build.directory}/generated-resources/license/THIRD-PARTY.txt,
+                            META-INF/kafka-clients/LICENSE=${project.build.directory}/kafka-clients-resources/LICENSE,
+                            META-INF/kafka-clients/NOTICE=${project.build.directory}/kafka-clients-resources/NOTICE,
+                            kafka/kafka-version.properties=${project.build.directory}/kafka-clients-resources/kafka/kafka-version.properties
+                        </Include-Resource>
                     </instructions>
                     <excludeDependencies>false</excludeDependencies>
                 </configuration>
@@ -553,6 +542,28 @@
                             <excludes>META-INF/*.SF,META-INF/*.DSA,META-INF/*.RSA,META-INF/versions/*/module-info.class</excludes>
                         </configuration>
                     </execution>
+                    <!-- The non-class files of kafka-clients that the bundle ships (Include-Resource),
+                         kept apart from target/classes so that they cannot be mistaken for the
+                         adapter's own LICENSE and NOTICE. -->
+                    <execution>
+                        <id>unpack-kafka-clients-resources</id>
+                        <phase>process-resources</phase>
+                        <goals>
+                            <goal>unpack</goal>
+                        </goals>
+                        <configuration>
+                            <artifactItems>
+                                <artifactItem>
+                                    <groupId>org.apache.kafka</groupId>
+                                    <artifactId>kafka-clients</artifactId>
+                                    <version>${kafka.version}</version>
+                                    <outputDirectory>${project.build.directory}/kafka-clients-resources</outputDirectory>
+                                    <includes>LICENSE,NOTICE,kafka/kafka-version.properties</includes>
+                                </artifactItem>
+                            </artifactItems>
+                            <markersDirectory>${project.build.directory}/dependency-maven-plugin-markers/kafka-clients-resources</markersDirectory>
+                        </configuration>
+                    </execution>
                     <execution>
                         <id>copy-dependencies</id>
                         <phase>package</phase>
@@ -563,7 +574,7 @@
                             <outputDirectory>${project.build.directory}/libs</outputDirectory>
                             <!-- Exclude everything - all deps embedded in bundle -->
                             <includeScope>runtime</includeScope>
-                            <excludeGroupIds>com.sap.cloud.adk,org.apache.camel,org.slf4j,log4j,org.apache.kafka,org.apache.avro,io.confluent,com.fasterxml.jackson.core,com.fasterxml.jackson.dataformat,com.fasterxml.jackson.datatype,com.google.guava,com.google.errorprone,org.checkerframework,com.google.j2objc,javax.xml.bind,jakarta,org.glassfish,com.sun.xml,commons-codec,commons-io,org.apache.commons,org.lz4,org.xerial,com.github.luben,io.swagger,org.yaml,net.minidev,org.ow2.asm,com.google.re2j,org.apache.aries,org.osgi,org.apache.maven,com.google.code.findbugs,com.networknt,com.ethlo.time,com.eclipsesource.minimal-json,com.sun.activation</excludeGroupIds>
+                            <excludeGroupIds>com.sap.cloud.adk,org.apache.camel,org.slf4j,log4j,org.apache.kafka,org.apache.avro,io.confluent,com.fasterxml.jackson.core,com.fasterxml.jackson.dataformat,com.fasterxml.jackson.datatype,com.google.guava,com.google.errorprone,org.checkerframework,com.google.j2objc,javax.xml.bind,jakarta,org.glassfish,com.sun.xml,commons-codec,commons-io,org.apache.commons,at.yawk.lz4,org.xerial,com.github.luben,io.swagger,org.yaml,net.minidev,org.ow2.asm,com.google.re2j,org.apache.aries,org.osgi,org.apache.maven,com.google.code.findbugs,com.networknt,com.ethlo.time,com.eclipsesource.minimal-json,com.sun.activation</excludeGroupIds>
                         </configuration>
                     </execution>
                 </executions>
@@ -583,12 +594,23 @@
                         <goals><goal>run</goal></goals>
                         <configuration>
                             <target>
-                                <!-- THIRD-PARTY.txt is generated, not committed. An Ant <include>
-                                     skips a missing file silently, so guard it explicitly: without
-                                     this the adapter would ship without its licence list. -->
-                                <fail message="THIRD-PARTY.txt is missing. It is generated by license-maven-plugin during generate-resources; run a full lifecycle build (e.g. 'mvn package'), not a bare 'mvn antrun:run'.">
+                                <!-- THIRD-PARTY.txt is generated, not committed. An Ant <copy> of a
+                                     fileset skips a missing file silently, so guard it explicitly:
+                                     without this the adapter project would be staged without its
+                                     licence list. -->
+                                <fail message="target/generated-resources/license/THIRD-PARTY.txt is missing. It is generated by license-maven-plugin during generate-resources; run a full lifecycle build (e.g. 'mvn package'), not a bare 'mvn antrun:run'.">
                                     <condition>
-                                        <not><available file="${project.basedir}/THIRD-PARTY.txt"/></not>
+                                        <not><available file="${project.build.directory}/generated-resources/license/THIRD-PARTY.txt"/></not>
+                                    </condition>
+                                </fail>
+                                <!-- The lz4 fork's OSGi manifest does not resolve on CPI: staged as a
+                                     bundle of its own, it would make the adapter fail to deploy. It
+                                     belongs on the Bundle-ClassPath only (#240). -->
+                                <fail message="target/libs contains the lz4 codec. It must only be embedded in the adapter bundle: keep at.yawk.lz4 in the copy-dependencies excludeGroupIds in pom.xml.">
+                                    <condition>
+                                        <resourcecount when="greater" count="0">
+                                            <fileset dir="${project.build.directory}/libs" includes="lz4-java*.jar" erroronmissingdir="false"/>
+                                        </resourcecount>
                                     </condition>
                                 </fail>
                                 <mkdir dir="${project.build.directory}/${project.build.finalName}/target"/>
@@ -601,7 +623,6 @@
                                         <!-- Licence and documentation shipped with the project -->
                                         <include name="LICENSE"/>
                                         <include name="NOTICE"/>
-                                        <include name="THIRD-PARTY.txt"/>
                                         <include name="README.md"/>
                                         <include name="CHANGELOG.md"/>
                                         <include name="docs/**"/>
@@ -613,6 +634,8 @@
                                         <exclude name="**/.DS_Store"/>
                                     </fileset>
                                 </copy>
+                                <copy file="${project.build.directory}/generated-resources/license/THIRD-PARTY.txt"
+                                      todir="${project.build.directory}/${project.build.finalName}" overwrite="true"/>
                                 <copy todir="${project.build.directory}/${project.build.finalName}/target" overwrite="true">
                                     <fileset dir="${project.build.directory}">
                                         <include name="*.jar"/>

@@ -351,13 +351,16 @@ the adapter is thrashing. The individual poll failures are logged separately wit
 ### `class-warmup.*` at start-up
 
 Four to five lines per adapter bundle revision, written once when the first Kafka endpoint of that
-revision starts. `class-warmup.stage1.completed` (the adapter's own classes, synchronous),
-`class-warmup.codecs.completed codecs=gzip:ok,snappy:ok,lz4:ok,zstd:ok` (one compress/decompress
-round trip per codec so that the native libraries are extracted while the bundle revision is still
-live) and `class-warmup.stage2.completed` (every class in the bundle, on a low-priority daemon
-thread, ~2 s on a tenant). `class-warmup.stage2.failures count=61` is expected: those classes need
-optional libraries (grpc, jose4j, joni, asm) that are deliberately not shipped. Review the list only
-if the count changes after a dependency upgrade.
+revision starts. `class-warmup.start` names the bundle revision and the runtime: `java`,
+`javaVendor` and `camel` are the Java and Camel versions of the tenant. Then
+`class-warmup.stage1.completed` (the adapter's own classes, synchronous),
+`class-warmup.codecs.completed codecs=gzip:ok,snappy:ok,lz4:ok,zstd:ok lz4Implementation=JavaSafe`
+(one compress/decompress round trip per codec so that the native libraries are extracted while the
+bundle revision is still live; `lz4Implementation` is the LZ4 implementation Kafka uses, the pure
+Java `JavaSafe` inside the bundle) and `class-warmup.stage2.completed` (every class in the bundle,
+on a low-priority daemon thread, ~2 s on a tenant). `class-warmup.stage2.failures count=61` is
+expected: those classes need optional libraries (grpc, jose4j, joni, asm) that are deliberately not
+shipped. Review the list only if the count changes after a dependency upgrade.
 
 Why this exists: deploying a new adapter version makes CPI purge the *old* bundle revision at once,
 while every running integration flow keeps using its class loader. Any class or resource that had
