@@ -39,10 +39,13 @@ import java.util.function.IntSupplier;
  *       dead-lettered. With {@code retryOnlyTransientErrors} a failure that is not transient skips
  *       the retries left. Without a DLQ it is not retried within the poll, {@code errorHandling}
  *       decides.</li>
- *   <li><b>Deserialization failure:</b> dead-lettered at once, or {@code errorHandling}.</li>
+ *   <li><b>Deserialization failure:</b> dead-lettered at once, or {@code errorHandling}. A failure
+ *       with a transient cause, such as a Schema Registry that does not answer, blocks the
+ *       partition instead, with or without a DLQ: the record is not at fault (#188).</li>
  *   <li><b>JSON Schema violation:</b> dead-lettered at once. Without a DLQ the record is dropped
  *       whatever {@code errorHandling} says: it does not become valid by retrying.</li>
- *   <li><b>A batch that cannot be formatted:</b> with a DLQ its records are processed one by one.
+ *   <li><b>A batch that cannot be formatted:</b> a transient cause blocks the batch, as for a
+ *       deserialization failure. Otherwise, with a DLQ its records are processed one by one.
  *       Without a DLQ an {@link Error} escapes the poll; any other failure takes
  *       {@code errorHandling} for the whole batch.</li>
  *   <li><b>Route failure of a batch:</b> with a DLQ its records are processed one by one, without
@@ -167,8 +170,15 @@ final class RecordFailurePolicy {
         return new Decision(deadLetterQueue ? Action.DEAD_LETTER : errorHandling(), errorType);
     }
 
-    /** A record that cannot be deserialized is not retried within the poll. */
-    Action forDeserializationFailure() {
+    /**
+     * A record that cannot be deserialized is not retried within the poll. If the cause is
+     * transient, such as a Schema Registry that does not answer, the record is not at fault: its
+     * partition is blocked, with or without a DLQ and whatever {@code errorHandling} says (#188).
+     */
+    Action forDeserializationFailure(Exception cause) {
+        if (KafkaErrorHelper.isTransientForRedelivery(cause)) {
+            return Action.BLOCK;
+        }
         return deadLetterQueue ? Action.DEAD_LETTER : errorHandling();
     }
 
@@ -181,11 +191,17 @@ final class RecordFailurePolicy {
     }
 
     /**
-     * A batch that cannot be formatted. With a DLQ, processing its records one by one dead-letters
-     * only the failing one; an {@link Error} then escapes from that record. Without a DLQ an
-     * {@code Error} escapes at once: it is not a data problem, and the poll retries the batch.
+     * A batch that cannot be formatted. A transient cause blocks the batch, like a record whose
+     * deserialization failed for a transient cause: none of its records is at fault, so processing
+     * them one by one would only split the batch. Otherwise, with a DLQ, processing its records one
+     * by one dead-letters only the failing one; an {@link Error} then escapes from that record.
+     * Without a DLQ an {@code Error} escapes at once: it is not a data problem, and the poll retries
+     * the batch.
      */
     Action forBatchFormatFailure(Throwable error) {
+        if (error instanceof Exception && KafkaErrorHelper.isTransientForRedelivery((Exception) error)) {
+            return Action.BLOCK;
+        }
         if (deadLetterQueue) {
             return Action.PROCESS_INDIVIDUALLY;
         }

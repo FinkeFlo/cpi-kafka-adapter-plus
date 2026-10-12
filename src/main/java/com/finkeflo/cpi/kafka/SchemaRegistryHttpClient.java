@@ -21,6 +21,7 @@
 package com.finkeflo.cpi.kafka;
 
 import java.io.BufferedReader;
+import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
@@ -164,6 +165,7 @@ final class SchemaRegistryHttpClient {
     // -----------------------------------------------------------------------
 
     private String get(String path) throws Exception {
+        String operation = "GET " + path;
         HttpURLConnection conn = openConnection(path, "GET");
         try {
             int status = conn.getResponseCode();
@@ -171,26 +173,31 @@ final class SchemaRegistryHttpClient {
                 return readStream(conn.getInputStream());
             }
             String body = readStream(conn.getErrorStream());
-            throw new SchemaRegistryException("GET " + path, status, body);
+            throw new SchemaRegistryException(operation, status, body);
+        } catch (IOException e) {
+            throw new SchemaRegistryException(operation, e);
         } finally {
             conn.disconnect();
         }
     }
 
     private String post(String path, String body) throws Exception {
+        String operation = "POST " + path;
         HttpURLConnection conn = openConnection(path, "POST");
         conn.setDoOutput(true);
         conn.setRequestProperty("Content-Type", "application/vnd.schemaregistry.v1+json");
-        try (OutputStream out = conn.getOutputStream()) {
-            out.write(body.getBytes(StandardCharsets.UTF_8));
-        }
         try {
+            try (OutputStream out = conn.getOutputStream()) {
+                out.write(body.getBytes(StandardCharsets.UTF_8));
+            }
             int status = conn.getResponseCode();
             if (status == HttpURLConnection.HTTP_OK || status == HttpURLConnection.HTTP_CREATED) {
                 return readStream(conn.getInputStream());
             }
             String responseBody = readStream(conn.getErrorStream());
-            throw new SchemaRegistryException("POST " + path, status, responseBody);
+            throw new SchemaRegistryException(operation, status, responseBody);
+        } catch (IOException e) {
+            throw new SchemaRegistryException(operation, e);
         } finally {
             conn.disconnect();
         }
@@ -421,8 +428,17 @@ final class SchemaRegistryHttpClient {
     // Exception
     // -----------------------------------------------------------------------
 
-    /** Wraps a non-2xx HTTP response from the Schema Registry. */
+    /**
+     * A failed Schema Registry request: a non-2xx HTTP response, or no response at all because the
+     * connection, TLS or a timeout failed.
+     */
     static final class SchemaRegistryException extends RuntimeException {
+        /**
+         * The {@link #getHttpStatus()} of a request the registry did not answer. An answer that is
+         * not valid HTTP has this status as well: {@code HttpURLConnection} reports it as -1.
+         */
+        static final int NO_RESPONSE = -1;
+
         private final int httpStatus;
 
         SchemaRegistryException(String operation, int httpStatus, String body) {
@@ -430,8 +446,26 @@ final class SchemaRegistryHttpClient {
             this.httpStatus = httpStatus;
         }
 
+        /** The registry did not answer {@code operation}. */
+        SchemaRegistryException(String operation, IOException cause) {
+            super("Schema Registry " + operation + " failed: " + cause, cause);
+            this.httpStatus = NO_RESPONSE;
+        }
+
+        /** @return the HTTP status of the response, or {@link #NO_RESPONSE} */
         int getHttpStatus() {
             return httpStatus;
+        }
+
+        /**
+         * Whether the failure lies with the registry or the way to it, not with the record, so the
+         * same record can be read later (#188): the registry did not answer, or answered 401 (the
+         * login was rejected), 408, 429 or 5xx. Any other status, such as 404 for a schema ID the
+         * registry does not know, is taken to concern the record.
+         */
+        boolean isTransient() {
+            return httpStatus == NO_RESPONSE || httpStatus == 401 || httpStatus == 408 || httpStatus == 429
+                    || (httpStatus >= 500 && httpStatus <= 599);
         }
     }
 }

@@ -473,6 +473,110 @@ public class RecordProcessorProgressTest {
         Assert.assertEquals(0L, consumer.position(P0));
     }
 
+    // --- #188: a Schema Registry that does not answer blocks instead of dead-lettering ---
+
+    @Test
+    public void aRecordTheRegistryCannotServeBlocksItsPartitionInsteadOfReachingTheDlq() throws Exception {
+        MockConsumer<byte[], byte[]> consumer = consumerWith(P0, "DOWN", "b");
+        CpiKafkaPlusEndpoint endpoint = avroEndpoint(true);
+        endpoint.setDlqMaxRetries(2);
+        MockProducer<byte[], byte[]> dlq = okDlqProducer();
+        RecordProcessor processor = processor(endpoint, dlqHelper(dlq),
+                unavailableRegistryAvro(endpoint, registryAnswered(503)));
+
+        PollProgress progress = processSingle(processor, consumer);
+
+        Assert.assertTrue(dlq.history().isEmpty());
+        Assert.assertTrue(invoked.isEmpty());
+        Assert.assertEquals(Long.valueOf(0L), progress.blockedOffset(P0));
+        Assert.assertEquals(-1L, committed(consumer, P0));
+        Assert.assertEquals(0L, consumer.position(P0));
+    }
+
+    @Test
+    public void aRefusedRegistryConnectionBlocksEvenWhenSkipping() throws Exception {
+        MockConsumer<byte[], byte[]> consumer = consumerWith(P0, "DOWN", "b");
+        CpiKafkaPlusEndpoint endpoint = skip(avroEndpoint(false));
+        RecordProcessor processor = processor(endpoint, null, unavailableRegistryAvro(endpoint,
+                new RuntimeException("Avro deserialization failed: Connection refused",
+                        new java.net.ConnectException("Connection refused"))));
+
+        PollProgress progress = processSingle(processor, consumer);
+
+        Assert.assertTrue(invoked.isEmpty());
+        Assert.assertEquals(Long.valueOf(0L), progress.blockedOffset(P0));
+        Assert.assertEquals(-1L, committed(consumer, P0));
+        Assert.assertEquals(0L, consumer.position(P0));
+    }
+
+    @Test
+    public void aSchemaIdTheRegistryDoesNotKnowStillReachesTheDlq() throws Exception {
+        MockConsumer<byte[], byte[]> consumer = consumerWith(P0, "DOWN", "b");
+        CpiKafkaPlusEndpoint endpoint = avroEndpoint(true);
+        MockProducer<byte[], byte[]> dlq = okDlqProducer();
+        RecordProcessor processor = processor(endpoint, dlqHelper(dlq),
+                unavailableRegistryAvro(endpoint, registryAnswered(404)));
+
+        processSingle(processor, consumer);
+
+        Assert.assertEquals(1, dlq.history().size());
+        Assert.assertEquals("DESERIALIZATION", header(dlq.history().get(0), "CpiKafkaPlusDlqErrorType"));
+        Assert.assertEquals(Collections.singletonList("0:1"), invoked);
+        Assert.assertEquals(2L, committed(consumer, P0));
+    }
+
+    @Test
+    public void aBatchTheRegistryCannotServeIsBlockedWithoutRunningItsRecordsOneByOne() throws Exception {
+        CpiKafkaPlusEndpoint endpoint = avroBatchEndpoint(true);
+        MockConsumer<byte[], byte[]> consumer = consumerWith(P0, "a", "DOWN");
+        MockProducer<byte[], byte[]> dlq = okDlqProducer();
+        RecordProcessor processor = processor(endpoint, dlqHelper(dlq),
+                unavailableRegistryAvro(endpoint, registryAnswered(503)));
+
+        PollProgress progress = processBatch(processor, consumer);
+
+        Assert.assertTrue(dlq.history().isEmpty());
+        Assert.assertTrue("the batch stays whole", invoked.isEmpty());
+        Assert.assertEquals(Long.valueOf(0L), progress.blockedOffset(P0));
+        Assert.assertEquals(-1L, committed(consumer, P0));
+        Assert.assertEquals(0L, consumer.position(P0));
+    }
+
+    @Test
+    public void aBatchTheRegistryCannotServeIsBlockedEvenWhenSkipping() throws Exception {
+        CpiKafkaPlusEndpoint endpoint = skip(avroBatchEndpoint(false));
+        MockConsumer<byte[], byte[]> consumer = consumerWith(P0, "a", "DOWN");
+        RecordProcessor processor = processor(endpoint, null,
+                unavailableRegistryAvro(endpoint, registryAnswered(429)));
+
+        PollProgress progress = processBatch(processor, consumer);
+
+        Assert.assertTrue(invoked.isEmpty());
+        Assert.assertEquals(Long.valueOf(0L), progress.blockedOffset(P0));
+        Assert.assertEquals(-1L, committed(consumer, P0));
+        Assert.assertEquals(0L, consumer.position(P0));
+    }
+
+    @Test
+    public void aRecordTheRegistryCannotServeBlocksTheSchemaFilterInsteadOfReachingTheDlq() throws Exception {
+        CpiKafkaPlusEndpoint endpoint = batchEndpoint(true, SCHEMA);
+        endpoint.setSchemaRegistryEnabled(true);
+        endpoint.setSchemaRegistryUrl("http://localhost:1");
+        endpoint.setAvroValueDeserialization(true);
+        MockConsumer<byte[], byte[]> consumer = consumerWith(P0, "{\"id\":\"a\"}", "DOWN", "{\"id\":\"c\"}");
+        MockProducer<byte[], byte[]> dlq = okDlqProducer();
+        RecordProcessor processor = processor(endpoint, dlqHelper(dlq),
+                unavailableRegistryAvro(endpoint, registryAnswered(503)));
+
+        PollProgress progress = processBatch(processor, consumer);
+
+        Assert.assertTrue(dlq.history().isEmpty());
+        Assert.assertEquals("the record before it still runs", Collections.singletonList("0:0-0"), invoked);
+        Assert.assertEquals(Long.valueOf(1L), progress.blockedOffset(P0));
+        Assert.assertEquals(1L, committed(consumer, P0));
+        Assert.assertEquals(1L, consumer.position(P0));
+    }
+
     // --- V17(a): JSON Schema failures and the DLQ ---
 
     @Test
@@ -1305,6 +1409,25 @@ public class RecordProcessorProgressTest {
                 return value;
             }
         };
+    }
+
+    /** Throws {@code failure} for the value "DOWN", like a Schema Registry that cannot serve its schema. */
+    private static AvroDeserializerHelper unavailableRegistryAvro(CpiKafkaPlusEndpoint endpoint,
+                                                                  RuntimeException failure) {
+        return new AvroDeserializerHelper(endpoint) {
+            @Override
+            public String deserialize(String topic, byte[] data) {
+                String value = new String(data, StandardCharsets.UTF_8);
+                if ("DOWN".equals(value)) {
+                    throw failure;
+                }
+                return value;
+            }
+        };
+    }
+
+    private static RuntimeException registryAnswered(int httpStatus) {
+        return new SchemaRegistryHttpClient.SchemaRegistryException("GET /schemas/ids/7", httpStatus, "");
     }
 
     /** Throws {@code error} for the value "ERR", like a class that an adapter update took away. */
