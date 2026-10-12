@@ -77,6 +77,7 @@ These errors indicate temporary conditions that may resolve on their own:
 - `UnknownHostException` — DNS resolution failure
 - `TimeoutException` — processing timeout
 - Kafka `RetriableException` — broker-side transient errors
+- A failed Schema Registry request of the adapter — no answer (connection, TLS or timeout), or the status `401`, `408`, `429` or `5xx`
 
 ### Permanent Errors (sent directly to DLQ)
 
@@ -92,7 +93,7 @@ The adapter walks the full exception cause chain. If a `RuntimeException` wraps 
 
 ### DLQ Error Type Header
 
-With **Retry Transient Errors Only** (`retryOnlyTransientErrors`) switched on, a record that failed in the IFlow reaches the DLQ with the header `CpiKafkaPlusDlqErrorType`: `PERMANENT` if the error was permanent and the remaining retries were skipped, `TRANSIENT` if all retries failed. With the switch off, the header is absent, because the adapter does not classify the error then. Records that cannot be deserialized (poison pills) always carry `DESERIALIZATION`; records that failed JSON Schema validation carry no error type.
+With **Retry Transient Errors Only** (`retryOnlyTransientErrors`) switched on, a record that failed in the IFlow reaches the DLQ with the header `CpiKafkaPlusDlqErrorType`: `PERMANENT` if the error was permanent and the remaining retries were skipped, `TRANSIENT` if all retries failed. With the switch off, the header is absent, because the adapter does not classify the error then. Records that cannot be deserialized (poison pills) always carry `DESERIALIZATION`; records that failed JSON Schema validation carry no error type. A record that the Schema Registry cannot serve a schema for, because it does not answer or answers `401`, `408`, `429` or `5xx`, is no poison pill and never reaches the DLQ: its partition waits until the registry answers again (see [Avro / Schema Registry](avro-schema-registry.md#when-the-schema-registry-cannot-serve-a-schema)). Up to 1.4.1 such records were dead-lettered as `DESERIALIZATION`.
 
 ## Retry Delay with Exponential Backoff
 
@@ -193,6 +194,7 @@ and to records that cannot be deserialized (Avro). It does not apply to:
 |------------|----------|
 | JSON Schema validation failure | Record is **discarded**, offset committed — a record that violates the schema never becomes valid by retrying. A WARN log is written, which does not reach the tenant trace in production, and the record is lost; `jsonSchemaReportError` adds a failed MPL entry for it. |
 | A failure inside the adapter itself (not in the IFlow) | The record is always retried, whatever the setting. |
+| A Schema Registry that cannot serve the record's schema (no answer, `401`, `408`, `429`, `5xx`) | The record is always retried, whatever the setting and also with a DLQ: the record is not at fault. See [Avro / Schema Registry](avro-schema-registry.md#when-the-schema-registry-cannot-serve-a-schema). |
 
 > **Retry Failed Message and poison pills:** a record that can never be processed blocks its
 > partition until you fix the IFlow, the backend or the data. Use a Dead Letter Queue for any flow

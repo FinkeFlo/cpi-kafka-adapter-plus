@@ -47,6 +47,9 @@ public class RecordFailurePolicyTest {
     private static final Exception TRANSIENT_FAILURE =
             new IllegalStateException("backend unreachable", new ConnectException("Connection refused"));
     private static final Exception PERMANENT_FAILURE = new IllegalStateException("backend rejected the record");
+    private static final Exception UNDESERIALIZABLE = new IllegalArgumentException("Unknown magic byte!");
+    private static final Exception REGISTRY_UNAVAILABLE =
+            new SchemaRegistryHttpClient.SchemaRegistryException("GET /schemas/ids/7", 503, "");
 
     // --- route failure of a record: retried within the poll only with a DLQ ---
 
@@ -92,10 +95,36 @@ public class RecordFailurePolicyTest {
 
     @Test
     public void anUndeserializableRecordIsDeadLetteredOrLeftToErrorHandling() {
-        Assert.assertEquals(Action.DEAD_LETTER, policy(DLQ, 3, ONLY_TRANSIENT, RETRY).forDeserializationFailure());
-        Assert.assertEquals(Action.DEAD_LETTER, policy(DLQ, 3, ONLY_TRANSIENT, SKIP).forDeserializationFailure());
-        Assert.assertEquals(Action.BLOCK, policy(NO_DLQ, 3, ONLY_TRANSIENT, RETRY).forDeserializationFailure());
-        Assert.assertEquals(Action.SKIP, policy(NO_DLQ, 3, ONLY_TRANSIENT, SKIP).forDeserializationFailure());
+        Assert.assertEquals(Action.DEAD_LETTER,
+                policy(DLQ, 3, ONLY_TRANSIENT, RETRY).forDeserializationFailure(UNDESERIALIZABLE));
+        Assert.assertEquals(Action.DEAD_LETTER,
+                policy(DLQ, 3, ONLY_TRANSIENT, SKIP).forDeserializationFailure(UNDESERIALIZABLE));
+        Assert.assertEquals(Action.BLOCK,
+                policy(NO_DLQ, 3, ONLY_TRANSIENT, RETRY).forDeserializationFailure(UNDESERIALIZABLE));
+        Assert.assertEquals(Action.SKIP,
+                policy(NO_DLQ, 3, ONLY_TRANSIENT, SKIP).forDeserializationFailure(UNDESERIALIZABLE));
+        Assert.assertEquals("a schema ID the registry does not know can be the record's",
+                Action.DEAD_LETTER, policy(DLQ, 3, ONLY_TRANSIENT, RETRY).forDeserializationFailure(
+                        new SchemaRegistryHttpClient.SchemaRegistryException("GET /schemas/ids/7", 404, "")));
+    }
+
+    @Test
+    public void aRecordOrBatchThatCannotBeDeserializedForATransientCauseBlocksWhateverTheSettings() {
+        // #188: a Schema Registry that does not answer says nothing about the record.
+        Exception unreachable = new RuntimeException("Avro deserialization failed",
+                new ConnectException("Connection refused"));
+        for (boolean dlq : new boolean[] {DLQ, NO_DLQ}) {
+            for (boolean skip : new boolean[] {SKIP, RETRY}) {
+                for (boolean onlyTransient : new boolean[] {ONLY_TRANSIENT, ALL_ERRORS}) {
+                    RecordFailurePolicy policy = policy(dlq, 3, onlyTransient, skip);
+                    String row = "dlq=" + dlq + " skip=" + skip + " retryOnlyTransientErrors=" + onlyTransient;
+                    Assert.assertEquals(row, Action.BLOCK, policy.forDeserializationFailure(REGISTRY_UNAVAILABLE));
+                    Assert.assertEquals(row, Action.BLOCK, policy.forDeserializationFailure(unreachable));
+                    Assert.assertEquals(row, Action.BLOCK, policy.forBatchFormatFailure(REGISTRY_UNAVAILABLE));
+                    Assert.assertEquals(row, Action.BLOCK, policy.forBatchFormatFailure(unreachable));
+                }
+            }
+        }
     }
 
     @Test
@@ -158,7 +187,7 @@ public class RecordFailurePolicyTest {
 
         Assert.assertEquals(5, withDlq.maxRetries());
         Assert.assertFalse(withDlq.skipsRetries(PERMANENT_FAILURE));
-        Assert.assertEquals(Action.SKIP, policy.forDeserializationFailure());
+        Assert.assertEquals(Action.SKIP, policy.forDeserializationFailure(UNDESERIALIZABLE));
         Assert.assertNull(policy.afterRetries(false).errorType());
     }
 

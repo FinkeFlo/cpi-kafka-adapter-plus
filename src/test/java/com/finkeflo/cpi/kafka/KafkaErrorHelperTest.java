@@ -318,8 +318,32 @@ public class KafkaErrorHelperTest {
     }
 
     @Test
+    public void testSchemaRegistryFailuresOutsideTheRecordAreTransientForRedelivery() {
+        // #188: a registry that does not answer, rejects the login or is overloaded says nothing
+        // about the record.
+        for (int status : new int[] {401, 408, 429, 500, 502, 503, 504, 599}) {
+            Assert.assertTrue("HTTP " + status, KafkaErrorHelper.isTransientForRedelivery(
+                    new SchemaRegistryHttpClient.SchemaRegistryException("GET /schemas/ids/7", status, "")));
+        }
+        Assert.assertTrue("no answer", KafkaErrorHelper.isTransientForRedelivery(
+                new SchemaRegistryHttpClient.SchemaRegistryException("GET /schemas/ids/7",
+                        new javax.net.ssl.SSLHandshakeException("PKIX path building failed"))));
+        Assert.assertTrue("wrapped", KafkaErrorHelper.isTransientForRedelivery(
+                new RuntimeException("route failed",
+                        new SchemaRegistryHttpClient.SchemaRegistryException("GET /schemas/ids/7", 503, ""))));
+    }
+
+    @Test
+    public void testSchemaRegistryAnswersThatCanConcernTheRecordAreNotTransientForRedelivery() {
+        for (int status : new int[] {301, 400, 403, 404, 409, 422}) {
+            Assert.assertFalse("HTTP " + status, KafkaErrorHelper.isTransientForRedelivery(
+                    new SchemaRegistryHttpClient.SchemaRegistryException("GET /schemas/ids/7", status, "")));
+        }
+    }
+
+    @Test
     public void testIsTransientForRedeliveryFindsATransientCauseBeyondTenLevels() {
-        // No depth limit, unlike KafkaErrorHelper.classify, which stops after ten causes.
+        // CauseChain walks up to 64 causes, unlike KafkaErrorHelper.classify, which stops after ten.
         Exception e = new java.net.SocketTimeoutException("Read timed out");
         for (int i = 0; i < 12; i++) {
             e = new RuntimeException("wrapper " + i, e);

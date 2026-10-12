@@ -39,6 +39,27 @@ To consume Avro-encoded messages:
 
 The adapter deserializes the Avro binary payload using the schema from the registry and converts it to the specified output format before passing it to the IFlow.
 
+### When the Schema Registry Cannot Serve a Schema
+
+The sender keeps every schema it has fetched, by its ID, until the integration flow stops. A record
+with a schema ID it has not fetched yet needs the registry. If the registry does not answer (refused
+connection, TLS failure, timeout) or answers `401`, `408`, `429` or a `5xx` status, the record is not
+at fault: its partition waits at the record and retries it with the backoff described under
+[Error Handling Without DLQ](dead-letter-queue.md#error-handling-without-dlq) (**Retry Delay**, at least
+1 second, doubling up to 5 minutes). This holds with or without a DLQ and whatever *Error Handling*
+says. Nothing at or after the record is committed meanwhile, every retry counts for **Auto-Pause on
+Errors**, and other partitions keep flowing as long as their schemas are known. Once the registry
+answers again, the partition continues on its own.
+
+The trace shows `adapter.failure.reported … retryable=true` with the registry's answer, followed by
+`consumer.partition.retry`. A rejected login (`401`) waits as well: correct the User Credentials
+artifact, then restart the integration flow, because the sender reads the credential when it starts.
+
+A record that is not in the Confluent wire format, or whose schema ID the registry does not know
+(`404`), is still a poison pill: it goes to the DLQ as `DESERIALIZATION`, or *Error Handling* decides.
+Up to 1.4.1 a registry outage was treated the same way, so every record with an unknown schema ID
+went to the DLQ, or was skipped with *Skip Failed Message*.
+
 ## Producer (Receiver) Setup
 
 To produce Avro-encoded messages:
