@@ -10,6 +10,7 @@ iFlow compatibility.
 ## [Unreleased]
 ### Added
 - The start line `class-warmup.start`, written once per adapter version when its first Kafka endpoint starts, now names the runtime: `java` (Java version), `javaVendor` and `camel` (Camel version). SAP's adapter development documentation still names Java 8, while the adapter needs Java 11 or later; the README now says so. See issue #251.
+- CI scans what the adapter ships for known vulnerabilities. The new `Dependency Scan` workflow builds the adapter bundle and checks it with Grype, including every library on its `Bundle-ClassPath` and kafka-clients, whose classes the bundle holds unpacked, so libraries that only arrive transitively are covered too. It fails on a finding of severity high or critical and runs on pull requests that change `pom.xml`, on `main` and weekly. The bundle of 1.4.1 would have failed it with the LZ4 codec of issue #240 (GHSA-vqf4-7m7x-wgfc, high). Static analysis was already running: CodeQL checks every pull request as GitHub code scanning, which `CONTRIBUTING.md` now describes. See issue #250.
 
 ### Changed
 - Internal refactoring, no change in behaviour, configuration or log output: the receiver's node-fault escalation (`producer.node.fault.escalation`, with JVM state and the thread dump at diagnostics level FULL) moved from `CpiKafkaPlusProducer` into its own class `NodeFaultEscalation`. The event still logs under the `CpiKafkaPlusProducer` logger category.
