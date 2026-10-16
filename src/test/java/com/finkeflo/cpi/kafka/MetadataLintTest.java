@@ -146,6 +146,7 @@ public class MetadataLintTest {
     private static final Map<String, Map<String, String>> PREREQUISITES = new LinkedHashMap<>();
     static {
         PREREQUISITES.put("dlqEnabled=true", params("dlqTopic", "orders-dlq"));
+        PREREQUISITES.put("schemaRegistryEnabled=true", params("schemaRegistryUrl", "http://localhost:1"));
     }
 
     private static Map<Direction, Metadata> currentLine;

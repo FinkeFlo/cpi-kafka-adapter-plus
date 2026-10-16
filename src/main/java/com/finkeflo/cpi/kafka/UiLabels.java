@@ -69,6 +69,7 @@ final class UiLabels {
         put("batchMode", "Batch Mode");
         put("batchSize", "Max Records per IFlow Run (MPL)");
         put("batchOutputFormat", "Batch Output Format");
+        put("removeConfluentHeader", "Remove Confluent Header");
         put("avroOutputFormat", "Avro Output Format");
         put("avroValueDeserialization", "Deserialize Values as Avro");
         put("errorHandling", "Error Handling");

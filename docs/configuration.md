@@ -71,6 +71,14 @@ For detailed security setup, see [Authentication](security/authentication.md).
 
 ### Message Handling
 
+**Message Value**
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `removeConfluentHeader` | `false` | Remove the 5-byte Confluent header (magic byte `0x00` and the 4-byte schema ID) that Confluent's JSON Schema serializer writes in front of every value, before the value is read as UTF-8 text (UI: "Remove Confluent Header"). A value with fewer than 5 bytes or another first byte is passed on unchanged. With `batchMode=false` the header `CpiKafkaPlusSchemaId` carries the schema ID. No Schema Registry is called. Editable only while `schemaRegistryEnabled` is `false`, and ignored while it is `true`, because the Avro deserialization reads the header itself. Available from metadata version 1.5; iFlows on an older version (1.0 to 1.4) have no such field — move them to 1.5 with *Update Version*. |
+
+For more details, see [Avro / Schema Registry](features/avro-schema-registry.md#json-values-with-the-confluent-header).
+
 **JSON Schema Validation**
 
 | Parameter | Default | Description |

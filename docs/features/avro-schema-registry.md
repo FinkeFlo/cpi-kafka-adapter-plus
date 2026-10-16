@@ -62,6 +62,38 @@ A record that is not in the Confluent wire format, or whose schema ID the regist
 Up to 1.4.1 a registry outage was treated the same way, so every record with an unknown schema ID
 went to the DLQ, or was skipped with *Skip Failed Message*.
 
+## JSON Values with the Confluent Header
+
+Confluent's JSON Schema serializer writes the same 5-byte header in front of every value as its Avro
+serializer: the magic byte `0x00`, then the schema ID as a 4-byte big-endian number, then the JSON
+text. The sender reads that header only on its Avro path. Behind the header a JSON value is no longer
+JSON. Without the option below it reaches the integration flow with the header as its first
+characters, a *JSON Array* batch embeds it as a string, an *XML List* batch writes it as Base64 (see
+[Batch Processing](batch-processing.md#xml-list-xml_list)), and **JSON Schema Validation** rejects it.
+
+From metadata version 1.5, the sender option **Remove Confluent Header** (`removeConfluentHeader`,
+tab *Message Handling*) removes the header before the value is read as UTF-8 text:
+
+| Value | What the integration flow gets |
+|---|---|
+| At least 5 bytes, the first one `0x00` | The bytes after the header as UTF-8 text. For `{"id":"a"}` behind the header of schema ID 42, the bytes `00 00 00 00 2A 7B 22 …`, the body is `{"id":"a"}`. |
+| Anything else, such as plain JSON from another producer | The value unchanged. JSON text never starts with `0x00`, so the two cannot be confused. |
+
+- With **Batch Mode** off, the header `CpiKafkaPlusSchemaId` (`Integer`) carries the schema ID of the
+  removed header. It is not set for a value without the header, nor on a batch.
+- A *JSON Array* batch embeds the JSON as JSON, not as a string, and an *XML List* batch writes it as
+  text, not as Base64. **JSON Schema Validation** checks the JSON after the header against the schema
+  in the channel.
+- The Schema Registry is not called and the schema ID is not checked, so no registry connection is
+  needed.
+- A record that goes to the Dead Letter Queue keeps its header: the DLQ gets the value as it was
+  consumed.
+- Keys are not changed. The receiver writes no Confluent header.
+
+The option can only be edited while **Enable Schema Registry** is off, and is ignored while it is on:
+the Avro deserialization reads the header itself. iFlows on metadata version 1.0 to 1.4 have no such
+field; move them to 1.5 with *Update Version*.
+
 ## Producer (Receiver) Setup
 
 To produce Avro-encoded messages:

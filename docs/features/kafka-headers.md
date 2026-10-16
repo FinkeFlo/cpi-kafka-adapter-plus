@@ -21,6 +21,7 @@ When the adapter delivers a Kafka record to an iFlow, it sets the following Came
 | `CpiKafkaPlusConsumerGroup` | `String` | Consumer group ID |
 | `CpiKafkaPlusCommitStrategy` | `String` | Commit strategy configured on the endpoint |
 | `CpiKafkaPlusPayloadSize` | `Integer` | Serialized payload size in bytes |
+| `CpiKafkaPlusSchemaId` | `Integer` | Schema ID from the Confluent header that **Remove Confluent Header** removed from the value; only set when it removed one (see [Avro / Schema Registry](avro-schema-registry.md#json-values-with-the-confluent-header)) |
 | `kafka.header.<name>` | `String` | Every Kafka record header is forwarded as a Camel header with this prefix, e.g. `kafka.header.traceparent` |
 
 ### Batch Mode
