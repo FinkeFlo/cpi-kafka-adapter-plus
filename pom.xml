@@ -27,7 +27,7 @@
         <maven.compiler.release>11</maven.compiler.release>
         <camel.version>3.14.7</camel.version>
         <adk.version>2.3.0</adk.version>
-        <kafka.version>4.3.1</kafka.version>
+        <kafka.version>4.4.0</kafka.version>
         <avro.version>1.12.2</avro.version>
         <jackson.version>2.22.3</jackson.version>
         <!-- Shared by the runtime linux_amd64 zstd-jni dependency and the test-only darwin_aarch64
@@ -128,7 +128,7 @@
         <dependency>
             <groupId>at.yawk.lz4</groupId>
             <artifactId>lz4-java</artifactId>
-            <version>1.11.4</version>
+            <version>1.12.0</version>
             <scope>runtime</scope>
         </dependency>
 
@@ -667,7 +667,7 @@
                     <dependency>
                         <groupId>org.ow2.asm</groupId>
                         <artifactId>asm</artifactId>
-                        <version>9.10.1</version>
+                        <version>9.11</version>
                     </dependency>
                 </dependencies>
             </plugin>
