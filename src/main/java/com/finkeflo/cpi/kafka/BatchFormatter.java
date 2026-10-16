@@ -20,6 +20,8 @@
  */
 package com.finkeflo.cpi.kafka;
 
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 import java.util.List;
 import java.util.function.BiFunction;
 
@@ -136,7 +138,9 @@ public final class BatchFormatter {
             String value = valueDeserializer.apply(record.topic(), record.value());
 
             sb.append("  <record>\n");
-            sb.append("    <key>").append(key != null ? escapeXml(key) : "").append("</key>\n");
+            sb.append("    ");
+            appendKeyElement(sb, key);
+            sb.append("\n");
             sb.append("    ");
             appendValueElement(sb, value, embedXml);
             sb.append("\n");
@@ -152,6 +156,19 @@ public final class BatchFormatter {
     }
 
     /**
+     * Appends the {@code <key>} element: the escaped key, or, for a key with a character XML 1.0 does
+     * not allow, its UTF-8 bytes in Base64 marked {@code format="base64"}. A null key is an empty
+     * element.
+     */
+    private static void appendKeyElement(StringBuilder sb, String key) {
+        if (key != null && !isAllowedInXml(key)) {
+            sb.append("<key format=\"base64\">").append(toBase64(key)).append("</key>");
+            return;
+        }
+        sb.append("<key>").append(key != null ? escapeXml(key) : "").append("</key>");
+    }
+
+    /**
      * Appends a complete {@code <value format="...">...</value>} element to the
      * StringBuilder. The attribute is always set:
      * <ul>
@@ -159,12 +176,19 @@ public final class BatchFormatter {
      *       downstream can use XPath like {@code value/Bestellung/...}</li>
      *   <li>{@code format="text"} — value is CDATA-wrapped text (or empty);
      *       downstream must extract via {@code string(value)}</li>
+     *   <li>{@code format="base64"} — value has a character XML 1.0 does not allow, so the
+     *       element holds its UTF-8 bytes in Base64; downstream decodes {@code string(value)}</li>
      * </ul>
      * Null/empty values emit {@code <value format="text"></value>}.
      */
     private static void appendValueElement(StringBuilder sb, String value, boolean embedXml) {
         if (value == null || value.isEmpty()) {
             sb.append("<value format=\"text\"></value>");
+            return;
+        }
+
+        if (!isAllowedInXml(value)) {
+            sb.append("<value format=\"base64\">").append(toBase64(value)).append("</value>");
             return;
         }
 
@@ -187,6 +211,37 @@ public final class BatchFormatter {
         sb.append("<value format=\"text\">");
         appendCdata(sb, value);
         sb.append("</value>");
+    }
+
+    /**
+     * Whether XML 1.0 allows every character of {@code text}. It allows none of the control
+     * characters below U+0020 except tab, line feed and carriage return, nor U+FFFE, U+FFFF or an
+     * unpaired surrogate, anywhere in a document: not escaped, not as a character reference and not in
+     * CDATA (#284). A value whose producer wrote the Confluent header starts with U+0000, for example.
+     */
+    static boolean isAllowedInXml(String text) {
+        int length = text.length();
+        for (int i = 0; i < length; i++) {
+            char c = text.charAt(i);
+            if (c < 0x20) {
+                if (c != '\t' && c != '\n' && c != '\r') {
+                    return false;
+                }
+            } else if (Character.isSurrogate(c)) {
+                if (!Character.isHighSurrogate(c) || i + 1 == length || !Character.isLowSurrogate(text.charAt(i + 1))) {
+                    return false;
+                }
+                i++; // a pair stands for a character above U+FFFF, which XML allows
+            } else if (c == '\uFFFE' || c == '\uFFFF') {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** The UTF-8 bytes of {@code text} in Base64, for an element marked {@code format="base64"}. */
+    static String toBase64(String text) {
+        return Base64.getEncoder().encodeToString(text.getBytes(StandardCharsets.UTF_8));
     }
 
     static String escapeXml(String text) {

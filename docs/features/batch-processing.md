@@ -397,9 +397,11 @@ JSON followed by more text, and empty values — is embedded as a string.
 
 Values that look like XML are automatically detected and embedded as parsed child elements, marked with `format="xml"`. Non-XML, null, or empty values use text/CDATA content with `format="text"`. This detection is always on and is not configurable.
 
+A key or value with a character that XML 1.0 does not allow anywhere in a document, not even in CDATA, is written as Base64 of its UTF-8 bytes and marked with `format="base64"`. These are the control characters below U+0020 except tab, line feed and carriage return, and U+FFFE and U+FFFF. A value behind the Confluent header (magic byte and schema ID) starts with such characters, for example. Up to 1.4.1 one such key or value made the whole batch unreadable as XML. In a Groovy script, `new String(value.decodeBase64(), 'UTF-8')` gives the text back. The receiver's *XML List* decodes `format="base64"` itself, so such a batch can be sent to Kafka unchanged.
+
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
-<kafkaRecords count="3">
+<kafkaRecords count="4">
   <record>
     <key>k1</key>
     <value format="xml"><root><field>v1</field></root></value>
@@ -424,8 +426,18 @@ Values that look like XML are automatically detected and embedded as parsed chil
     <offset>102</offset>
     <timestamp>1700000000002</timestamp>
   </record>
+  <record>
+    <key>k4</key>
+    <value format="base64">AAAAACp7ImlkIjoiYSJ9</value>
+    <topic>my-topic</topic>
+    <partition>0</partition>
+    <offset>103</offset>
+    <timestamp>1700000000003</timestamp>
+  </record>
 </kafkaRecords>
 ```
+
+The fourth value is `{"id":"a"}` behind the Confluent header of schema ID 42.
 
 **CPI iFlow pattern:**
 
@@ -435,6 +447,7 @@ flowchart TD
     B --> C{"Router / branch on\nvalue/@format"}
     C -- "format=\"xml\"" --> D["mapping can access value/root/..."]
     C -- "format=\"text\"" --> E["extract string(value),\nthen parse if needed"]
+    C -- "format=\"base64\"" --> F["decode string(value) from Base64,\nthen read it as UTF-8"]
 ```
 
 Alternative filter: `/kafkaRecords/record[value/@format='xml']` to process only XML records.
