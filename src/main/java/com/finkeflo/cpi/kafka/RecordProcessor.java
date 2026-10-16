@@ -20,6 +20,7 @@
  */
 package com.finkeflo.cpi.kafka;
 
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -869,7 +870,8 @@ final class RecordProcessor {
         tracingHelper.traceError(traceExchange, cause, context, true);
 
         // f1/f4/f5: Report failure with structured fields and attachment
-        // Deserialization failures map to KP_PROD_004 (serialization_failed) via the central taxonomy
+        // Deserialization has no code of its own in the central taxonomy: what the Avro path throws,
+        // such as the RuntimeException for a wrong magic byte, maps to KP-GEN-001 (#284).
         String errorCode = CpiKafkaPlusErrorCode.fromThrowable(cause).code();
         tracingHelper.reportFailure(traceExchange, cause, errorCode, context, true);
         progress.failed();
@@ -942,6 +944,9 @@ final class RecordProcessor {
         String result;
         if (endpoint.isSchemaRegistryEnabled() && endpoint.isAvroValueDeserialization() && avroHelper != null) {
             result = avroHelper.deserialize(topic, data);
+        } else if (removesConfluentHeader(data)) {
+            int header = AvroDeserializerHelper.HEADER_LENGTH;
+            result = new String(data, header, data.length - header, StandardCharsets.UTF_8);
         } else {
             result = new String(data, StandardCharsets.UTF_8);
         }
@@ -954,6 +959,18 @@ final class RecordProcessor {
     String deserializeKey(String topic, byte[] data) {
         if (data == null) return null;
         return new String(data, StandardCharsets.UTF_8);
+    }
+
+    /**
+     * Whether {@link #deserializeValue} removes the Confluent header from {@code data}: with
+     * {@code removeConfluentHeader} on, a value of at least 5 bytes whose first byte is the magic byte
+     * (#284). JSON text never starts with it, so a value without the header is passed on unchanged.
+     * Never while the Schema Registry is on, whose Avro path reads the header itself.
+     */
+    private boolean removesConfluentHeader(byte[] data) {
+        return endpoint.isRemoveConfluentHeader() && !endpoint.isSchemaRegistryEnabled()
+                && data != null && data.length >= AvroDeserializerHelper.HEADER_LENGTH
+                && data[0] == AvroDeserializerHelper.MAGIC_BYTE;
     }
 
     // --- Header mapping ---
@@ -999,6 +1016,10 @@ final class RecordProcessor {
         message.setHeader("CpiKafkaPlusTimestamp", record.timestamp());
         message.setHeader("CpiKafkaPlusConsumerGroup", endpoint.getGroupId());
         message.setHeader("CpiKafkaPlusCommitStrategy", endpoint.getCommitStrategy());
+        if (removesConfluentHeader(record.value())) {
+            // The ID from the removed header, bytes 1 to 4 (big-endian), as Confluent writes it.
+            message.setHeader("CpiKafkaPlusSchemaId", ByteBuffer.wrap(record.value(), 1, 4).getInt());
+        }
         if (record.headers() != null) {
             record.headers().forEach(header -> {
                 String headerName = "kafka.header." + header.key();

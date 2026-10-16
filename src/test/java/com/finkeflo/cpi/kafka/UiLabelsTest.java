@@ -87,11 +87,11 @@ public class UiLabelsTest {
     }
 
     /**
-     * The label of every field the 1.4.0 channel of {@code direction} ("sender" or "receiver") offers,
+     * The label of every field the 1.5.0 channel of {@code direction} ("sender" or "receiver") offers,
      * by parameter. A field defined in a metadata file but not referenced from a tab is not offered.
      */
     static Map<String, String> offeredLabels(String direction) throws Exception {
-        File file = new File(METADATA_DIR, "metadata-" + direction + "-1.4.0.xml");
+        File file = new File(METADATA_DIR, "metadata-" + direction + "-1.5.0.xml");
         Document doc = DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(file);
         Map<String, String> labels = new LinkedHashMap<>();
         NodeList definitions = doc.getElementsByTagName("AttributeMetadata");
