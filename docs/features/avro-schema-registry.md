@@ -39,6 +39,8 @@ To consume Avro-encoded messages:
 
 The adapter deserializes the Avro binary payload using the schema from the registry and converts it to the specified output format before passing it to the IFlow.
 
+With `avroOutputFormat` `XML`, a field whose text has a character that XML 1.0 does not allow (a control character other than tab, line feed and carriage return, U+FFFE or U+FFFF) is written as Base64 of its UTF-8 bytes and marked with `format="base64"`, for example `<note format="base64">eAF5</note>` for `x`, U+0001, `y`. Up to 1.4.1 such a field made the whole output unreadable as XML.
+
 ### When the Schema Registry Cannot Serve a Schema
 
 The sender keeps every schema it has fetched, by its ID, until the integration flow stops. A record

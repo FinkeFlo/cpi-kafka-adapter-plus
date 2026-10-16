@@ -22,7 +22,9 @@ package com.finkeflo.cpi.kafka;
 
 import java.io.StringReader;
 import java.io.StringWriter;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -234,7 +236,8 @@ public final class BatchParser {
             String key = null;
             List<Element> keyEls = childElements(recordEl, "key");
             if (!keyEls.isEmpty()) {
-                key = keyEls.get(0).getTextContent();
+                Element keyEl = keyEls.get(0);
+                key = isBase64(keyEl) ? decodeBase64(keyEl, i) : keyEl.getTextContent();
             }
 
             // Value: required
@@ -245,7 +248,13 @@ public final class BatchParser {
             }
 
             Element valueEl = valueEls.get(0);
-            String value = extractValueContent(valueEl);
+            String value;
+            if (isBase64(valueEl)) {
+                String decoded = decodeBase64(valueEl, i);
+                value = decoded.isEmpty() ? null : decoded; // an empty value is a tombstone, as below
+            } else {
+                value = extractValueContent(valueEl);
+            }
 
             // Headers: optional
             java.util.Map<String, String> headers = null;
@@ -268,6 +277,50 @@ public final class BatchParser {
             records.add(new BatchRecord(key, value, headers));
         }
         return records;
+    }
+
+    /**
+     * Whether a {@code <key>} or {@code <value>} is marked {@code format="base64"}. The sender's XML
+     * List writes a key or value that has a character XML 1.0 does not allow that way (#284), so a
+     * batch it delivered can be sent on unchanged.
+     */
+    private static boolean isBase64(Element element) {
+        return "base64".equals(element.getAttribute("format"));
+    }
+
+    /**
+     * The text a {@code format="base64"} element stands for: its content decoded from Base64 as
+     * UTF-8. Whitespace in the content, as an XML formatter may add it, is ignored.
+     */
+    private static String decodeBase64(Element element, int index) {
+        String name = element.getTagName();
+        if (hasChildElements(element)) {
+            throw new IllegalArgumentException("Record at index " + index + " has a <" + name
+                    + " format=\"base64\"> with child elements; it must contain Base64 text only");
+        }
+        String content = element.getTextContent();
+        StringBuilder base64 = new StringBuilder(content.length());
+        for (int i = 0; i < content.length(); i++) {
+            char c = content.charAt(i);
+            if (c != ' ' && c != '\t' && c != '\n' && c != '\r') {
+                base64.append(c);
+            }
+        }
+        try {
+            return new String(Base64.getDecoder().decode(base64.toString()), StandardCharsets.UTF_8);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("Record at index " + index + " has a <" + name
+                    + " format=\"base64\"> whose content is not Base64: " + e.getMessage(), e);
+        }
+    }
+
+    private static boolean hasChildElements(Element element) {
+        for (Node child = element.getFirstChild(); child != null; child = child.getNextSibling()) {
+            if (child.getNodeType() == Node.ELEMENT_NODE) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

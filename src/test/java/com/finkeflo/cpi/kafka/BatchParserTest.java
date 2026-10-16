@@ -22,7 +22,10 @@ package com.finkeflo.cpi.kafka;
 
 import java.io.StringReader;
 import java.io.StringWriter;
+import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 import java.util.List;
+import java.util.function.BiFunction;
 
 import javax.xml.parsers.DocumentBuilderFactory;
 import javax.xml.transform.OutputKeys;
@@ -31,6 +34,7 @@ import javax.xml.transform.TransformerFactory;
 import javax.xml.transform.dom.DOMSource;
 import javax.xml.transform.stream.StreamResult;
 
+import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.junit.Assert;
 import org.junit.Test;
 import org.w3c.dom.Document;
@@ -494,6 +498,87 @@ public class BatchParserTest {
             Assert.assertEquals(value, "k", record.getKey());
             Assert.assertEquals(value, "v", record.getHeaders().get("h"));
         }
+    }
+
+    // -----------------------------------------------------------------------
+    //  XML: keys and values in Base64 (#284)
+    // -----------------------------------------------------------------------
+
+    @Test
+    public void aBase64ValueIsDecoded() {
+        Assert.assertEquals("\u0000\u0000\u0000\u0000*{\"id\":\"a\"}",
+                xmlValue("<value format=\"base64\">AAAAACp7ImlkIjoiYSJ9</value>"));
+    }
+
+    @Test
+    public void aBase64KeyIsDecoded() {
+        BatchRecord record = BatchParser.parseXml("<kafkaRecords><record><key format=\"base64\">awE=</key>"
+                + "<value>v</value></record></kafkaRecords>").get(0);
+        Assert.assertEquals("k\u0001", record.getKey());
+        Assert.assertEquals("v", record.getValue());
+    }
+
+    @Test
+    public void whitespaceInBase64IsIgnored() {
+        Assert.assertEquals("k\u0001", xmlValue("<value format=\"base64\">\n  aw\r\n E=\t</value>"));
+    }
+
+    @Test
+    public void anEmptyBase64ValueIsATombstone() {
+        Assert.assertNull(xmlValue("<value format=\"base64\"></value>"));
+        Assert.assertNull(xmlValue("<value format=\"base64\"/>"));
+    }
+
+    @Test
+    public void onlyFormatBase64IsDecoded() {
+        Assert.assertEquals("awE=", xmlValue("<value format=\"text\">awE=</value>"));
+        Assert.assertEquals("awE=", xmlValue("<value>awE=</value>"));
+    }
+
+    @Test
+    public void aBase64ValueThatIsNotBase64FailsTheBatch() {
+        try {
+            BatchParser.parseXml("<kafkaRecords><record><value>v</value></record>"
+                    + "<record><value format=\"base64\">a*b=</value></record></kafkaRecords>");
+            Assert.fail("expected IllegalArgumentException");
+        } catch (IllegalArgumentException e) {
+            Assert.assertTrue(e.getMessage(), e.getMessage().startsWith(
+                    "Record at index 1 has a <value format=\"base64\"> whose content is not Base64: "));
+        }
+    }
+
+    @Test
+    public void aBase64ValueWithChildElementsFailsTheBatch() {
+        try {
+            xmlValue("<value format=\"base64\"><a>awE=</a></value>");
+            Assert.fail("expected IllegalArgumentException");
+        } catch (IllegalArgumentException e) {
+            Assert.assertEquals("Record at index 0 has a <value format=\"base64\"> with child elements; "
+                    + "it must contain Base64 text only", e.getMessage());
+        }
+    }
+
+    @Test
+    public void aBatchFromTheSendersXmlListIsReadBackAsItWasConsumed() {
+        List<ConsumerRecord<byte[], byte[]>> consumed = Arrays.asList(
+                consumed(0, "k\u0001", "\u0000\u0000\u0000\u0000*{\"id\":\"a\"}"),
+                consumed(1, "k2", "<a>1</a>"),
+                consumed(2, "k3", "plain\u001ftext"));
+        BiFunction<String, byte[], String> utf8 = (topic, data) -> new String(data, StandardCharsets.UTF_8);
+
+        List<BatchRecord> records = BatchParser.parseXml(BatchFormatter.toXml(consumed, utf8, utf8, true));
+
+        Assert.assertEquals("k\u0001", records.get(0).getKey());
+        Assert.assertEquals("\u0000\u0000\u0000\u0000*{\"id\":\"a\"}", records.get(0).getValue());
+        Assert.assertEquals("k2", records.get(1).getKey());
+        Assert.assertEquals("<a>1</a>", records.get(1).getValue());
+        Assert.assertEquals("k3", records.get(2).getKey());
+        Assert.assertEquals("plain\u001ftext", records.get(2).getValue());
+    }
+
+    private static ConsumerRecord<byte[], byte[]> consumed(long offset, String key, String value) {
+        return new ConsumerRecord<>("t", 0, offset, key.getBytes(StandardCharsets.UTF_8),
+                value.getBytes(StandardCharsets.UTF_8));
     }
 
     private static String xmlValue(String valueElement) {

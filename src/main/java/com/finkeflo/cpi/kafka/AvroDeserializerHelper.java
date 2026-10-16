@@ -141,11 +141,18 @@ public class AvroDeserializerHelper implements Closeable {
         sb.append("<record>");
         for (Schema.Field field : record.getSchema().getFields()) {
             Object value = record.get(field.name());
-            sb.append('<').append(field.name()).append('>');
-            if (value instanceof GenericRecord) {
-                sb.append(genericRecordToXml((GenericRecord) value));
-            } else if (value != null) {
-                sb.append(BatchFormatter.escapeXml(value.toString()));
+            String text = value != null && !(value instanceof GenericRecord) ? value.toString() : null;
+            if (text != null && !BatchFormatter.isAllowedInXml(text)) {
+                // XML cannot hold such a character at all, so the field carries its UTF-8 bytes (#284).
+                sb.append('<').append(field.name()).append(" format=\"base64\">");
+                sb.append(BatchFormatter.toBase64(text));
+            } else {
+                sb.append('<').append(field.name()).append('>');
+                if (value instanceof GenericRecord) {
+                    sb.append(genericRecordToXml((GenericRecord) value));
+                } else if (text != null) {
+                    sb.append(BatchFormatter.escapeXml(text));
+                }
             }
             sb.append("</").append(field.name()).append('>');
         }

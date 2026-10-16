@@ -20,16 +20,22 @@
  */
 package com.finkeflo.cpi.kafka;
 
+import java.io.StringReader;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Base64;
 import java.util.Collections;
 import java.util.List;
 import java.util.function.BiFunction;
 
+import javax.xml.parsers.DocumentBuilderFactory;
+
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.junit.Assert;
 import org.junit.Test;
+import org.w3c.dom.Document;
+import org.xml.sax.InputSource;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -420,7 +426,70 @@ public class BatchFormatterTest {
                 xml.contains("<value format=\"text\"><![CDATA[value1]]></value>"));
     }
 
+    // --- Characters that XML 1.0 does not allow (#284) ---
+
+    /** A value behind the Confluent header of schema ID 42, as Confluent's JSON Schema serializer writes it. */
+    private static final String CONFLUENT_FRAMED_JSON = "\u0000\u0000\u0000\u0000*{\"id\":\"a\"}";
+
+    @Test
+    public void aValueWithACharacterXmlDoesNotAllowIsWrittenAsBase64() throws Exception {
+        String xml = BatchFormatter.toXml(Collections.singletonList(rec("t", 0, 0, "k", CONFLUENT_FRAMED_JSON)),
+                STRING_DESER, STRING_DESER, true);
+
+        Assert.assertTrue(xml, xml.contains("<value format=\"base64\">AAAAACp7ImlkIjoiYSJ9</value>"));
+        String content = parse(xml).getElementsByTagName("value").item(0).getTextContent();
+        Assert.assertEquals(CONFLUENT_FRAMED_JSON, new String(Base64.getDecoder().decode(content), StandardCharsets.UTF_8));
+    }
+
+    @Test
+    public void aKeyWithACharacterXmlDoesNotAllowIsWrittenAsBase64() throws Exception {
+        String xml = BatchFormatter.toXml(Collections.singletonList(rec("t", 0, 0, "k\u0001", "v")),
+                STRING_DESER, STRING_DESER, true);
+
+        Assert.assertTrue(xml, xml.contains("<key format=\"base64\">awE=</key>"));
+        Assert.assertTrue(xml, xml.contains("<value format=\"text\"><![CDATA[v]]></value>"));
+        parse(xml);
+    }
+
+    @Test
+    public void anXmlValueWithACharacterXmlDoesNotAllowIsNotEmbedded() throws Exception {
+        String xml = BatchFormatter.toXml(Collections.singletonList(rec("t", 0, 0, "k", "<a>\u0007</a>")),
+                STRING_DESER, STRING_DESER, true);
+
+        Assert.assertTrue(xml, xml.contains("<value format=\"base64\">PGE+BzwvYT4=</value>"));
+        parse(xml);
+    }
+
+    @Test
+    public void tabLineFeedAndCarriageReturnStayText() {
+        String xml = BatchFormatter.toXml(Collections.singletonList(rec("t", 0, 0, "k\tx", "a\tb\nc\rd")),
+                STRING_DESER, STRING_DESER, true);
+
+        Assert.assertTrue(xml, xml.contains("<key>k\tx</key>"));
+        Assert.assertTrue(xml, xml.contains("<value format=\"text\"><![CDATA[a\tb\nc\rd]]></value>"));
+    }
+
+    @Test
+    public void onlyTheCharactersXmlForbidsAreNotAllowed() {
+        for (char c = 0; c < 0x20; c++) {
+            boolean allowed = c == '\t' || c == '\n' || c == '\r';
+            Assert.assertEquals("U+" + Integer.toHexString(c), allowed, BatchFormatter.isAllowedInXml("a" + c + "b"));
+        }
+        Assert.assertTrue(BatchFormatter.isAllowedInXml(""));
+        Assert.assertTrue(BatchFormatter.isAllowedInXml(" \u007f\u0085\u00e4\ud7ff\ue000\ufffd"));
+        Assert.assertTrue("a surrogate pair", BatchFormatter.isAllowedInXml("a\ud83d\ude00b"));
+        Assert.assertFalse(BatchFormatter.isAllowedInXml("a\ufffe"));
+        Assert.assertFalse(BatchFormatter.isAllowedInXml("a\uffff"));
+        Assert.assertFalse("a high surrogate at the end", BatchFormatter.isAllowedInXml("a\ud83d"));
+        Assert.assertFalse("a high surrogate before another character", BatchFormatter.isAllowedInXml("\ud83dx"));
+        Assert.assertFalse("a low surrogate on its own", BatchFormatter.isAllowedInXml("x\ude00"));
+    }
+
     // --- Helpers ---
+
+    private static Document parse(String xml) throws Exception {
+        return DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(new InputSource(new StringReader(xml)));
+    }
 
     private static String jsonArrayOf(String key, String value) throws Exception {
         return BatchFormatter.toJsonArray(
