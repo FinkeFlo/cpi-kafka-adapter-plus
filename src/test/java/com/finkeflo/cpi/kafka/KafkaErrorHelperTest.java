@@ -374,4 +374,35 @@ public class KafkaErrorHelperTest {
         Assert.assertEquals(KafkaErrorHelper.Classification.FATAL_DATA_ERROR,
                 KafkaErrorHelper.classify(dataErrorWithTransientCause));
     }
+
+    // --- #289: a record the broker rejects, and hints for a failed DLQ write ---
+
+    @Test
+    public void aRecordTheBrokerRejectsIsADataError() {
+        Assert.assertEquals(KafkaErrorHelper.Classification.FATAL_DATA_ERROR, KafkaErrorHelper.classify(
+                new java.util.concurrent.ExecutionException(new org.apache.kafka.common.InvalidRecordException(
+                        "Compacted topic cannot accept message without key in topic partition d-0"))));
+    }
+
+    @Test
+    public void aFailedDlqWriteGetsAHintForWellKnownCauses() {
+        String compacted = KafkaErrorHelper.dlqFailureHint(new RuntimeException("Failed to send record to DLQ",
+                new java.util.concurrent.ExecutionException(new org.apache.kafka.common.InvalidRecordException(
+                        "Compacted topic cannot accept message without key in topic partition d-0"))));
+        Assert.assertTrue(compacted, compacted.contains("cleanup.policy=delete"));
+        String acl = KafkaErrorHelper.dlqFailureHint(new RuntimeException(new TopicAuthorizationException("d")));
+        Assert.assertTrue(acl, acl.contains("WRITE"));
+        String missing = KafkaErrorHelper.dlqFailureHint(
+                new TimeoutException("Topic d not present in metadata after 60000 ms."));
+        Assert.assertTrue(missing, missing.contains("does not exist"));
+        Assert.assertTrue(KafkaErrorHelper.dlqFailureHint(
+                new org.apache.kafka.common.errors.RecordTooLargeException("r")).contains("max.message.bytes"));
+    }
+
+    @Test
+    public void aFailedDlqWriteForAnUnknownCauseGetsNoHint() {
+        Assert.assertNull(KafkaErrorHelper.dlqFailureHint(new IllegalStateException("broker said no")));
+        Assert.assertNull(KafkaErrorHelper.dlqFailureHint(new TimeoutException("send timed out")));
+        Assert.assertNull(KafkaErrorHelper.dlqFailureHint(null));
+    }
 }

@@ -22,6 +22,7 @@ package com.finkeflo.cpi.kafka;
 
 import javax.net.ssl.SSLException;
 
+import org.apache.kafka.common.InvalidRecordException;
 import org.apache.kafka.common.errors.ApplicationRecoverableException;
 import org.apache.kafka.common.errors.AuthenticationException;
 import org.apache.kafka.common.errors.AuthorizationException;
@@ -31,6 +32,7 @@ import org.apache.kafka.common.errors.OutOfOrderSequenceException;
 import org.apache.kafka.common.errors.RecordTooLargeException;
 import org.apache.kafka.common.errors.RetriableException;
 import org.apache.kafka.common.errors.SerializationException;
+import org.apache.kafka.common.errors.UnknownTopicOrPartitionException;
 import org.apache.kafka.common.errors.UnsupportedVersionException;
 
 /**
@@ -108,6 +110,9 @@ final class KafkaErrorHelper {
         if (t instanceof RecordTooLargeException) return Classification.FATAL_DATA_ERROR;
         if (t instanceof InvalidTopicException) return Classification.FATAL_DATA_ERROR;
         if (t instanceof SerializationException) return Classification.FATAL_DATA_ERROR;
+        // The broker rejected the record itself, e.g. a record without key on a compacted topic
+        // (#289). The same record is rejected again by any client.
+        if (t instanceof InvalidRecordException) return Classification.FATAL_DATA_ERROR;
 
         // 2. Retriable (Kafka's own marker; includes TimeoutException, NetworkException, etc.)
         if (t instanceof RetriableException) return Classification.RETRIABLE;
@@ -318,6 +323,42 @@ final class KafkaErrorHelper {
      */
     static boolean isTransientMetadataMonitorFaultRetryable(Throwable synchronousSendFailure) {
         return isMetadataMonitorFault(synchronousSendFailure);
+    }
+
+    /**
+     * A hint for a dead-letter write that failed for a well-known cause, or {@code null}. Never a
+     * replacement for the root cause: callers show it in addition (#289).
+     */
+    static String dlqFailureHint(Throwable t) {
+        for (Throwable c : CauseChain.of(t)) {
+            if (c instanceof InvalidRecordException) {
+                String m = c.getMessage();
+                if (m != null && m.toLowerCase(java.util.Locale.ROOT).contains("compacted")) {
+                    return "the DLQ topic is compacted (cleanup.policy=compact) and the record has no key; "
+                            + "use cleanup.policy=delete for the DLQ topic";
+                }
+                return "the broker rejected the dead-letter record; check the DLQ topic configuration";
+            }
+            if (c instanceof AuthorizationException) {
+                return "the credentials lack WRITE (and DESCRIBE) on the DLQ topic";
+            }
+            if (c instanceof AuthenticationException) {
+                return "authentication against the broker failed for the DLQ producer";
+            }
+            if (c instanceof RecordTooLargeException) {
+                return "the dead-letter record exceeds max.message.bytes of the DLQ topic or broker";
+            }
+            if (c instanceof UnknownTopicOrPartitionException) {
+                return "the DLQ topic does not exist or is not visible to these credentials";
+            }
+            if (c instanceof org.apache.kafka.common.errors.TimeoutException) {
+                String m = c.getMessage();
+                if (m != null && m.contains("not present in metadata")) {
+                    return "the DLQ topic does not exist or is not visible to these credentials";
+                }
+            }
+        }
+        return null;
     }
 
     /**

@@ -522,6 +522,54 @@ public class AdapterTracingHelperTest {
                 helper.buildStatusMessage("KP-GEN-001", error, stopped));
     }
 
+    /**
+     * A record whose DLQ write failed (#289): the status text leads with the failed write and its
+     * root cause, so truncation never cuts it off, and keeps the original failure after it.
+     */
+    @Test
+    public void theMplStatusTextOfAFailedDlqWriteLeadsWithItsRootCause() {
+        java.util.Map<String, String> context = retries("0");
+        context.put("originalErrorCode", "KP-FLOW-001");
+        context.put("dlqOutcome", "SEND_FAILED");
+        context.put("dlqTopic", "orders-dlq");
+        context.put("dlqRootCauseClass", "org.apache.kafka.common.InvalidRecordException");
+        context.put("dlqRootCauseMessage", "Compacted topic cannot accept message without key");
+
+        Assert.assertEquals("KP-DLQ-001: dead-letter write to orders-dlq failed: InvalidRecordException: "
+                        + "Compacted topic cannot accept message without key "
+                        + "(original: KP-FLOW-001: route failed)",
+                helper.buildStatusMessage("KP-DLQ-001", new IllegalStateException("route failed"), context));
+
+        StringBuilder longMessage = new StringBuilder();
+        for (int i = 0; i < 100; i++) {
+            longMessage.append("long backend text ");
+        }
+        String truncated = helper.buildStatusMessage("KP-DLQ-001",
+                new IllegalStateException(longMessage.toString()), context);
+        Assert.assertEquals(500, truncated.length());
+        Assert.assertTrue(truncated, truncated.contains("Compacted topic cannot accept message without key"));
+    }
+
+    @Test
+    public void theMplAttachmentHoldsTheFailedDlqWriteNextToTheOriginalFailure() throws Exception {
+        java.lang.reflect.Method build = AdapterTracingHelper.class.getDeclaredMethod("buildFullDiagnostic",
+                Exception.class, String.class, java.util.Map.class, Throwable.class);
+        build.setAccessible(true);
+        Exception dlqError = new RuntimeException("Failed to send record to DLQ topic 'orders-dlq'",
+                new IllegalArgumentException("rejected by the broker"));
+
+        String diagnostic = (String) build.invoke(helper, new IllegalStateException("route failed"),
+                "KP-DLQ-001", retries("0"), dlqError);
+
+        int original = diagnostic.indexOf("route failed");
+        int dlqSection = diagnostic.indexOf("--- DLQ Error ---");
+        Assert.assertTrue(diagnostic, original > 0 && dlqSection > original);
+        Assert.assertTrue(diagnostic, diagnostic.indexOf("Caused by: java.lang.IllegalArgumentException: "
+                + "rejected by the broker") > dlqSection);
+        Assert.assertEquals(-1, ((String) build.invoke(helper, new IllegalStateException("route failed"),
+                "KP-FLOW-001", retries("0"), null)).indexOf("--- DLQ Error ---"));
+    }
+
     private static java.util.Map<String, String> retries(String retryAttempts) {
         java.util.Map<String, String> context = new java.util.LinkedHashMap<>();
         context.put("retryAttempts", retryAttempts);

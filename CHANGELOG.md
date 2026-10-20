@@ -7,6 +7,17 @@ and the project follows [Semantic Versioning](https://semver.org/). See
 [VERSIONING.md](https://github.com/finkeflo/cpi-kafka-adapter-plus/blob/main/VERSIONING.md) for how the adapter version maps to SAP CPI
 iFlow compatibility.
 
+## [Unreleased]
+### Fixed
+- Sender with DLQ: a failed dead-letter write is now visible in the CPI monitor. Up to 1.4.2 the MPL entry showed only the integration flow's error, and the reason why the DLQ write failed was in the tenant trace alone. The entry now carries `KP-DLQ-001`, a status text that leads with the failed write and its root cause (`dead-letter write to <topic> failed: <class>: <message> (original: …)`), a `--- DLQ Error ---` section with its full stack trace in the `KafkaAdapterError` attachment, and a `hint` for well-known causes (record without key on a compacted DLQ topic, missing `WRITE`, missing topic, record too large). This applies to failed flow processing, deserialization and JSON Schema validation (#289).
+- Sender: every failure is reported once by the adapter. A failed record after its retries, a failed batch without DLQ and a failed deserialization each wrote a second adapter MPL entry with the same error (#289).
+- Sender in batch mode with DLQ: a failed batch of one record no longer runs through the integration flow a second time. Its batch run counts as the record's first attempt, so a permanent error sends it straight to the DLQ and a transient one continues with its retries (#289).
+- A record the broker rejects (`InvalidRecordException`, e.g. a record without key on a compacted topic) is classified as a data error. The DLQ producer and the receiver's producer are no longer rebuilt for it, since a fresh producer is rejected the same way (#289).
+
+### Changed
+- Sender: a failure of the integration flow is reported with the new error code `KP-FLOW-001` (`iflow.processing_failed`) instead of `KP-GEN-001`, in the MPL (`KafkaAdapterErrorCode`, status text) and in the tenant trace. Monitoring or alerting that matches `KP-GEN-001` for flow errors needs to match `KP-FLOW-001` (#289).
+- Sender: MPL entries with a DLQ outcome set `SAP_Sender` to the source topic and `SAP_Receiver` to the DLQ topic, and carry the new custom header properties `KafkaAdapterOriginalErrorCode`, `KafkaAdapterDlqOutcome` (`MOVED`/`SEND_FAILED`) and `KafkaAdapterDlqTopic` (#289).
+
 ## [1.4.2] - 2026-10-16
 ### Added
 - The start line `class-warmup.start`, written once per adapter version when its first Kafka endpoint starts, now names the runtime: `java` (Java version), `javaVendor` and `camel` (Camel version). SAP's adapter development documentation still names Java 8, while the adapter needs Java 11 or later; the README now says so. See issue #251.
