@@ -252,6 +252,16 @@ public class AdapterTracingHelper {
      */
     public void traceError(Exchange exchange, Exception e, Map<String, String> context,
                            boolean senderDirection) {
+        traceError(exchange, e, context, senderDirection, null);
+    }
+
+    /**
+     * The same, with the exception of a dead-letter write that failed after {@code e} (#289). It is
+     * written as its own section, so the trace shows both the original failure and why the record
+     * could not be dead-lettered.
+     */
+    public void traceError(Exchange exchange, Exception e, Map<String, String> context,
+                           boolean senderDirection, Throwable dlqError) {
         // ADR 0004: diagnostic code must never throw — guard entire body
         try {
             Map<String, String> safeContext = context != null ? context : java.util.Collections.emptyMap();
@@ -263,6 +273,9 @@ public class AdapterTracingHelper {
                 for (Map.Entry<String, String> entry : safeContext.entrySet()) {
                     sb.append('\n').append(entry.getKey()).append(": ").append(entry.getValue());
                 }
+            }
+            if (dlqError != null) {
+                sb.append("\n\n--- DLQ Error ---\n").append(describeThrowableForMpl(dlqError));
             }
 
             String traceType = senderDirection ? "SENDER_OUTBOUND_FAULT" : "RECEIVER_INBOUND_FAULT";
@@ -301,6 +314,16 @@ public class AdapterTracingHelper {
      */
     public void reportFailure(Exchange exchange, Exception e, String errorCode,
                                Map<String, String> context, boolean fireStatusEvent) {
+        reportFailure(exchange, e, errorCode, context, fireStatusEvent, null);
+    }
+
+    /**
+     * The same, with the exception of a dead-letter write that failed after {@code e} (#289). The
+     * attachment then holds it in a {@code --- DLQ Error ---} section next to {@code e}.
+     */
+    public void reportFailure(Exchange exchange, Exception e, String errorCode,
+                               Map<String, String> context, boolean fireStatusEvent,
+                               Throwable dlqError) {
         // Always emit ERROR log with errorCode — this is the primary diagnostic channel because
         // only ERROR reaches the CPI tenant trace file, and MPL tracing is often inactive.
         // The errorCode enables grep-based triage on the trace file.
@@ -337,7 +360,7 @@ public class AdapterTracingHelper {
 
         try {
             // Build the full diagnostic block for the attachment (null-safe)
-            String fullDiagnostic = buildFullDiagnosticSafe(e, errorCode, safeContext);
+            String fullDiagnostic = buildFullDiagnosticSafe(e, errorCode, safeContext, dlqError);
 
             // Determine retryability (null-safe)
             String retryable = isRetryableSafe(e) ? "true" : "false";
@@ -382,6 +405,12 @@ public class AdapterTracingHelper {
                     addCustomHeaderProperty.invoke(mplLog, "KafkaAdapterProducerPath", producerPath);
                 }
                 addCustomHeaderProperty.invoke(mplLog, "KafkaAdapterRetryable", retryable);
+                addContextHeader(addCustomHeaderProperty, mplLog, safeContext,
+                        "originalErrorCode", "KafkaAdapterOriginalErrorCode");
+                addContextHeader(addCustomHeaderProperty, mplLog, safeContext,
+                        "dlqOutcome", "KafkaAdapterDlqOutcome");
+                addContextHeader(addCustomHeaderProperty, mplLog, safeContext,
+                        "dlqTopic", "KafkaAdapterDlqTopic");
 
                 // f1: Secondary channel — putAdapterAttribute (also trace-independent)
                 Method putAdapterAttribute = messageLogInterface.getMethod(
@@ -439,12 +468,25 @@ public class AdapterTracingHelper {
         }
     }
 
+    private static void addContextHeader(Method addCustomHeaderProperty, Object mplLog,
+                                         Map<String, String> context, String key, String header)
+            throws ReflectiveOperationException {
+        String value = context.get(key);
+        if (value != null && !value.trim().isEmpty()) {
+            addCustomHeaderProperty.invoke(mplLog, header, value);
+        }
+    }
+
     /**
      * Builds a status message from errorCode and exception, null-safe, with length limit.
      * Package-private for tests.
      */
     String buildStatusMessage(String errorCode, Exception e, Map<String, String> context) {
         StringBuilder sb = new StringBuilder();
+        if (context != null && "SEND_FAILED".equalsIgnoreCase(context.get("dlqOutcome"))) {
+            appendDlqSendFailed(sb, errorCode, e, context);
+            return truncateStatus(sb.toString());
+        }
         if (errorCode != null) {
             sb.append(errorCode).append(": ");
         }
@@ -471,12 +513,61 @@ public class AdapterTracingHelper {
             // no further attempt was made would only exist in the tenant trace.
             appendRetryOutcome(sb, context);
         }
-        String statusMessage = sb.toString();
-        // Truncate status message to avoid exceeding any platform limits
+        return truncateStatus(sb.toString());
+    }
+
+    /** Truncates a status message to avoid exceeding any platform limits. */
+    private static String truncateStatus(String statusMessage) {
         if (statusMessage.length() > 500) {
-            statusMessage = statusMessage.substring(0, 497) + "...";
+            return statusMessage.substring(0, 497) + "...";
         }
         return statusMessage;
+    }
+
+    /**
+     * A record that could not be dead-lettered (#289): the dead-letter write is what blocks the
+     * partition, so its cause comes first, where truncation cannot cut it off, followed by the
+     * original failure.
+     */
+    private static void appendDlqSendFailed(StringBuilder sb, String errorCode, Exception e,
+                                            Map<String, String> context) {
+        if (errorCode != null) {
+            sb.append(errorCode).append(": ");
+        }
+        sb.append("dead-letter write");
+        String dlqTopic = context.get("dlqTopic");
+        if (dlqTopic != null && !dlqTopic.trim().isEmpty()) {
+            sb.append(" to ").append(dlqTopic);
+        }
+        sb.append(" failed");
+        String rootClass = context.get("dlqRootCauseClass");
+        String rootMessage = context.get("dlqRootCauseMessage");
+        if (rootClass != null || rootMessage != null) {
+            sb.append(": ");
+            if (rootClass != null) {
+                sb.append(rootClass.substring(rootClass.lastIndexOf('.') + 1));
+                if (rootMessage != null) {
+                    sb.append(": ");
+                }
+            }
+            if (rootMessage != null) {
+                sb.append(rootMessage);
+            }
+        }
+        sb.append(" (original: ");
+        String originalCode = context.get("originalErrorCode");
+        if (originalCode != null) {
+            sb.append(originalCode).append(": ");
+        }
+        if (e != null && e.getMessage() != null) {
+            sb.append(e.getMessage());
+        } else if (e != null) {
+            sb.append(e.getClass().getSimpleName());
+        } else {
+            sb.append("Unknown error");
+        }
+        sb.append(')');
+        appendRetryOutcome(sb, context);
     }
 
     /**
@@ -528,9 +619,10 @@ public class AdapterTracingHelper {
     }
 
     /** Null-safe wrapper for building the full diagnostic. */
-    private String buildFullDiagnosticSafe(Exception e, String errorCode, Map<String, String> context) {
+    private String buildFullDiagnosticSafe(Exception e, String errorCode, Map<String, String> context,
+                                           Throwable dlqError) {
         try {
-            return buildFullDiagnostic(e, errorCode, context);
+            return buildFullDiagnostic(e, errorCode, context, dlqError);
         } catch (Exception ignored) {
             return "Failed to build diagnostic for: " + (errorCode != null ? errorCode : "unknown error");
         }
@@ -539,7 +631,8 @@ public class AdapterTracingHelper {
     /**
      * Builds the full diagnostic block for attachment (null-safe for context).
      */
-    private String buildFullDiagnostic(Exception e, String errorCode, Map<String, String> context) {
+    private String buildFullDiagnostic(Exception e, String errorCode, Map<String, String> context,
+                                       Throwable dlqError) {
         Map<String, String> safeContext = context != null ? context : java.util.Collections.emptyMap();
         StringBuilder sb = new StringBuilder();
         sb.append("=== Kafka Adapter Plus Diagnostic ===\n\n");
@@ -547,6 +640,9 @@ public class AdapterTracingHelper {
             sb.append("Error Code: ").append(errorCode).append('\n');
         }
         sb.append("Exception:\n").append(describeThrowableForMpl(e)).append('\n');
+        if (dlqError != null) {
+            sb.append("--- DLQ Error ---\n").append(describeThrowableForMpl(dlqError)).append('\n');
+        }
 
         if (!safeContext.isEmpty()) {
             sb.append("--- Context ---\n");

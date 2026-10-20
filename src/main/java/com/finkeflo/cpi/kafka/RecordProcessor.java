@@ -81,6 +81,15 @@ final class RecordProcessor {
          */
         void processExchange(Exchange exchange) throws Exception;
         void handleException(String message, Exchange exchange, Exception e);
+
+        /**
+         * Hands a failure to the exception handler that {@link RecordProcessor} has already
+         * reported to the MPL, so it is not reported a second time (#289).
+         */
+        default void handleReportedException(String message, Exchange exchange, Exception e) {
+            handleException(message, exchange, e);
+        }
+
         Exchange createExchange();
 
         /** @return true once the consumer is stopping; no further record is started then */
@@ -269,6 +278,7 @@ final class RecordProcessor {
                         }
                         RecordFailurePolicy.Action action = failurePolicy.forSchemaViolation();
                         boolean dlqFailed = false;
+                        Exception dlqFailure = null;
                         if (action == RecordFailurePolicy.Action.DEAD_LETTER) {
                             try {
                                 dlqHelper.sendToDlq(record, new RuntimeException(validationError), 0);
@@ -283,12 +293,33 @@ final class RecordProcessor {
                                         .with("dlqTopic", endpoint.getDlqTopic())
                                         .with("consequence", "offset not committed, record will be retried"), dlqEx);
                                 dlqFailed = true;
+                                dlqFailure = dlqEx;
                             }
                         }
-                        Exchange errorExchange = callback.createExchange();
-                        callback.handleException(
-                                "JSON Schema validation failed at offset " + record.offset(),
-                                errorExchange, new RuntimeException(validationError));
+                        String message = "JSON Schema validation failed at offset " + record.offset();
+                        if (dlqFailed) {
+                            reportDlqSendFailed(record, new RuntimeException(validationError),
+                                    CpiKafkaPlusErrorCode.KP_CFG_002.code(), dlqFailure, schemaContext(record));
+                            callback.handleReportedException(message, callback.createExchange(),
+                                    new RuntimeException(validationError));
+                        } else {
+                            RuntimeException validationFailure = new RuntimeException(validationError);
+                            java.util.Map<String, String> context = schemaContext(record);
+                            context.put("validationError", validationError);
+                            Exchange errorExchange;
+                            if (action == RecordFailurePolicy.Action.DEAD_LETTER) {
+                                context.put("dlqOutcome", "MOVED");
+                                context.put("dlqTopic", endpoint.getDlqTopic());
+                                errorExchange = newDlqMplExchange(record);
+                            } else {
+                                errorExchange = callback.createExchange();
+                                errorExchange.getIn().setHeader("SAP_Sender", record.topic());
+                            }
+                            tracingHelper.traceError(errorExchange, validationFailure, context, true);
+                            tracingHelper.reportFailure(errorExchange, validationFailure,
+                                    CpiKafkaPlusErrorCode.KP_CFG_002.code(), context, true);
+                            callback.handleReportedException(message, errorExchange, validationFailure);
+                        }
                         if (dlqFailed || action == RecordFailurePolicy.Action.BLOCK) {
                             progress.blocked(tp, record.offset());
                             break;
@@ -463,18 +494,38 @@ final class RecordProcessor {
             }
             int partition = !batch.isEmpty() ? batch.get(0).partition() : -1;
             AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("batch.processing.failed")
-                    .with("errorCode", CpiKafkaPlusErrorCode.fromThrowable(e).code())
+                    .with("errorCode", CpiKafkaPlusErrorCode.fromRouteFailure(e).code())
                     .with("partition", partition)
                     .with("batchSize", batch.size()), e);
             RecordFailurePolicy.Action action = failurePolicy.forBatchRouteFailure();
             if (action == RecordFailurePolicy.Action.PROCESS_INDIVIDUALLY) {
+                if (batch.size() == 1) {
+                    // Running the one record again would only repeat this call (#289): the batch
+                    // run is its first attempt.
+                    LOG.info("[CPI-KAFKA-PLUS-DIAG] processOneBatch: DLQ enabled, batch of one record failed, "
+                            + "continuing with its retries");
+                    return processRecordWithRetry(kafkaConsumer, batch.get(0), commitAfterSuccess, true,
+                            progress, e);
+                }
                 LOG.info("[CPI-KAFKA-PLUS-DIAG] processOneBatch: DLQ enabled, retrying batch records individually");
                 return processRecordsIndividually(kafkaConsumer, batch, commitAfterSuccess, progress);
             }
             progress.failed();
-            callback.handleException(
-                    "Error processing batch of " + batch.size() + " Kafka records from partition "
-                            + batch.get(0).partition(), exchange, e);
+            java.util.Map<String, String> context = new java.util.LinkedHashMap<>();
+            context.put("topic", batch.get(0).topic());
+            context.put("partition", String.valueOf(batch.get(0).partition()));
+            context.put("firstOffset", String.valueOf(batch.get(0).offset()));
+            context.put("lastOffset", String.valueOf(batch.get(batch.size() - 1).offset()));
+            context.put("batchSize", String.valueOf(batch.size()));
+            String message = "iFlow processing failed for batch of " + batch.size()
+                    + " Kafka records from partition " + batch.get(0).partition();
+            context.put("message", message);
+            Exchange traceExchange = callback.createExchange();
+            traceExchange.getIn().setHeader("SAP_Sender", batch.get(0).topic());
+            tracingHelper.traceError(traceExchange, e, context, true);
+            tracingHelper.reportFailure(traceExchange, e, CpiKafkaPlusErrorCode.fromRouteFailure(e).code(),
+                    context, true);
+            callback.handleReportedException(message, exchange, e);
             blockOrSkip(kafkaConsumer, batch, action, commitAfterSuccess, progress);
             return 0;
         }
@@ -497,6 +548,19 @@ final class RecordProcessor {
                                        boolean commitAfterSuccess,
                                        boolean batchFallback,
                                        PollProgress progress) {
+        return processRecordWithRetry(kafkaConsumer, record, commitAfterSuccess, batchFallback, progress, null);
+    }
+
+    /**
+     * @param failedAttempt the failure of a batch of just this record, which counts as the record's
+     *                      next attempt (#289), or {@code null}
+     */
+    private int processRecordWithRetry(Consumer<byte[], byte[]> kafkaConsumer,
+                                       ConsumerRecord<byte[], byte[]> record,
+                                       boolean commitAfterSuccess,
+                                       boolean batchFallback,
+                                       PollProgress progress,
+                                       Exception failedAttempt) {
         TopicPartition tp = partitionOf(record);
         progress.processing(tp, record.offset());
         // A record whose retries an earlier poll ran out of time for continues where it stopped
@@ -536,6 +600,21 @@ final class RecordProcessor {
         }
         final String resolvedBody = batchFallback ? body : value;
 
+        if (failedAttempt != null) {
+            lastError = failedAttempt;
+            actualRetries = firstAttempt;
+            AttemptOutcome outcome = afterFailedAttempt(record, firstAttempt, maxRetries, failedAttempt, progress);
+            if (outcome == AttemptOutcome.STOP) {
+                return 0;
+            }
+            if (outcome == AttemptOutcome.PERMANENT) {
+                permanentError = true;
+                firstAttempt = maxRetries + 1;
+            } else {
+                firstAttempt++;
+            }
+        }
+
         for (int attempt = firstAttempt; attempt <= maxRetries; attempt++) {
             Exchange exchange = callback.createExchange();
 
@@ -566,28 +645,13 @@ final class RecordProcessor {
                     return 0;
                 }
 
-                if (failurePolicy.skipsRetries(e)) {
-                    LOG.info("[CPI-KAFKA-PLUS-DIAG] Permanent error detected, "
-                            + "skipping {} remaining retries -> DLQ: offset={} partition={} error='{}'",
-                            maxRetries - attempt, record.offset(), record.partition(), e.getMessage());
+                AttemptOutcome outcome = afterFailedAttempt(record, attempt, maxRetries, e, progress);
+                if (outcome == AttemptOutcome.STOP) {
+                    return 0;
+                }
+                if (outcome == AttemptOutcome.PERMANENT) {
                     permanentError = true;
                     break;
-                }
-
-                if (attempt < maxRetries) {
-                    long delayMs = retryDelayMs(attempt);
-                    long now = clock.getAsLong();
-                    if (now + delayMs >= progress.deadlineMs()) {
-                        deferRetry(record, attempt + 1, maxRetries, now, delayMs, progress);
-                        return 0;
-                    }
-                    if (!sleepWithBackoff(attempt, record, delayMs)) {
-                        // Interrupted between two attempts: a shutdown, not a poison record. Leave
-                        // it unresolved for the next run instead of dead-lettering a record that may
-                        // well succeed.
-                        progress.stop();
-                        return 0;
-                    }
                 }
                 continue;
             }
@@ -605,6 +669,40 @@ final class RecordProcessor {
         progress.failed();
         return handleRetryExhausted(kafkaConsumer, record, lastError,
                 actualRetries, permanentError, commitAfterSuccess, progress);
+    }
+
+    private enum AttemptOutcome { RETRY, PERMANENT, STOP }
+
+    /**
+     * Decides what follows the failed {@code attempt}: a permanent failure skips the retries left,
+     * otherwise the wait before the next attempt, if there is one. {@link AttemptOutcome#STOP}
+     * leaves the record unresolved: its retry was deferred to a later poll or the wait was
+     * interrupted.
+     */
+    private AttemptOutcome afterFailedAttempt(ConsumerRecord<byte[], byte[]> record, int attempt,
+                                              int maxRetries, Exception e, PollProgress progress) {
+        if (failurePolicy.skipsRetries(e)) {
+            LOG.info("[CPI-KAFKA-PLUS-DIAG] Permanent error detected, "
+                    + "skipping {} remaining retries -> DLQ: offset={} partition={} error='{}'",
+                    maxRetries - attempt, record.offset(), record.partition(), e.getMessage());
+            return AttemptOutcome.PERMANENT;
+        }
+        if (attempt < maxRetries) {
+            long delayMs = retryDelayMs(attempt);
+            long now = clock.getAsLong();
+            if (now + delayMs >= progress.deadlineMs()) {
+                deferRetry(record, attempt + 1, maxRetries, now, delayMs, progress);
+                return AttemptOutcome.STOP;
+            }
+            if (!sleepWithBackoff(attempt, record, delayMs)) {
+                // Interrupted between two attempts: a shutdown, not a poison record. Leave
+                // it unresolved for the next run instead of dead-lettering a record that may
+                // well succeed.
+                progress.stop();
+                return AttemptOutcome.STOP;
+            }
+        }
+        return AttemptOutcome.RETRY;
     }
 
     /**
@@ -645,6 +743,8 @@ final class RecordProcessor {
                         .with("dlqTopic", endpoint.getDlqTopic())
                         .with("consequence", "offset not committed, record will be retried"), dlqEx);
                 progress.blocked(tp, record.offset());
+                reportDlqSendFailed(record, new RuntimeException(validationError),
+                        CpiKafkaPlusErrorCode.KP_CFG_002.code(), dlqEx, schemaContext(record));
                 return true;
             }
             progress.resolved(tp, record.offset());
@@ -747,7 +847,9 @@ final class RecordProcessor {
         context.put("offset", String.valueOf(record.offset()));
         context.put("retryAttempts", String.valueOf(actualRetries));
         context.put("errorType", errorType != null ? errorType : "UNKNOWN");
-        String errorCode = CpiKafkaPlusErrorCode.fromThrowable(lastError).code();
+        String errorCode = CpiKafkaPlusErrorCode.fromRouteFailure(lastError).code();
+        String message = "iFlow processing failed at offset " + record.offset()
+                + " (partition " + record.partition() + ")";
 
         if (decision.action() == RecordFailurePolicy.Action.DEAD_LETTER) {
             try {
@@ -755,7 +857,7 @@ final class RecordProcessor {
                 java.util.Map<String, String> dlqContext = new java.util.LinkedHashMap<>(context);
                 dlqContext.put("dlqOutcome", "MOVED");
                 dlqContext.put("dlqTopic", endpoint.getDlqTopic());
-                Exchange traceExchange = callback.createExchange();
+                Exchange traceExchange = newDlqMplExchange(record);
                 tracingHelper.traceError(traceExchange, lastError, dlqContext, true);
                 tracingHelper.reportFailure(traceExchange, lastError, errorCode, dlqContext, true);
                 progress.resolved(tp, record.offset());
@@ -776,27 +878,65 @@ final class RecordProcessor {
                         .with("dlqTopic", endpoint.getDlqTopic())
                         .with("retryAttempts", actualRetries)
                         .with("errorType", errorType != null ? errorType : "UNKNOWN")
-                        .with("originalError", CpiKafkaPlusErrorCode.fromThrowable(lastError).code())
+                        .with("originalError", errorCode)
                         .with("consequence", "offset not committed, record will be retried"), dlqEx);
-
-                java.util.Map<String, String> dlqContext = new java.util.LinkedHashMap<>(context);
-                dlqContext.put("dlqOutcome", "SEND_FAILED");
-                dlqContext.put("dlqTopic", endpoint.getDlqTopic());
-                Exchange traceExchange = callback.createExchange();
-                tracingHelper.traceError(traceExchange, lastError, dlqContext, true);
-                tracingHelper.reportFailure(traceExchange, lastError, errorCode, dlqContext, true);
+                reportDlqSendFailed(record, lastError, errorCode, dlqEx, context);
             }
         } else {
             Exchange traceExchange = callback.createExchange();
+            traceExchange.getIn().setHeader("SAP_Sender", record.topic());
             tracingHelper.traceError(traceExchange, lastError, context, true);
             tracingHelper.reportFailure(traceExchange, lastError, errorCode, context, true);
             blockOrSkip(kafkaConsumer, record, decision.action(), commitAfterSuccess, progress);
         }
 
-        Exchange errorExchange = callback.createExchange();
-        callback.handleException(
-                "Error processing Kafka record at offset " + record.offset(), errorExchange, lastError);
+        callback.handleReportedException(message, callback.createExchange(), lastError);
         return 0;
+    }
+
+    /**
+     * A fresh exchange for the MPL entry of a record on its way to the DLQ: the monitor shows the
+     * source topic as sender and the DLQ topic as receiver, whether the write succeeded or not.
+     */
+    private Exchange newDlqMplExchange(ConsumerRecord<byte[], byte[]> record) {
+        Exchange exchange = callback.createExchange();
+        exchange.getIn().setHeader("SAP_Sender", record.topic());
+        String dlqTopic = endpoint.getDlqTopic();
+        if (dlqTopic != null && !dlqTopic.trim().isEmpty()) {
+            exchange.getIn().setHeader("SAP_Receiver", dlqTopic);
+        }
+        return exchange;
+    }
+
+    /**
+     * Reports a record whose DLQ write failed (#289). The failed write is what blocks the
+     * partition, so it is the primary error, with its root cause, whatever it is; the failure that
+     * sent the record to the DLQ stays in the report as the original error.
+     */
+    private void reportDlqSendFailed(ConsumerRecord<byte[], byte[]> record, Exception originalError,
+                                     String originalErrorCode, Exception dlqEx,
+                                     java.util.Map<String, String> context) {
+        java.util.Map<String, String> dlqContext = new java.util.LinkedHashMap<>(context);
+        dlqContext.put("originalErrorCode", originalErrorCode);
+        dlqContext.put("dlqOutcome", "SEND_FAILED");
+        dlqContext.put("dlqTopic", endpoint.getDlqTopic());
+        Throwable root = CauseChain.root(dlqEx);
+        if (root != null) {
+            dlqContext.put("dlqRootCauseClass", root.getClass().getName());
+            if (root.getMessage() != null) {
+                dlqContext.put("dlqRootCauseMessage", root.getMessage());
+            }
+        }
+        String hint = KafkaErrorHelper.dlqFailureHint(dlqEx);
+        if (hint != null) {
+            dlqContext.put("hint", hint);
+        }
+        dlqContext.put("consequence",
+                "offset not committed, partition blocked at this record, retried after a backoff");
+        Exchange traceExchange = newDlqMplExchange(record);
+        tracingHelper.traceError(traceExchange, originalError, dlqContext, true, dlqEx);
+        tracingHelper.reportFailure(traceExchange, originalError, CpiKafkaPlusErrorCode.KP_DLQ_001.code(),
+                dlqContext, true, dlqEx);
     }
 
     /**
@@ -859,27 +999,26 @@ final class RecordProcessor {
                                               Exception cause,
                                               boolean commitAfterSuccess,
                                               PollProgress progress) {
-        // f2: Trace the deserialization failure for consumer/sender direction
-        Exchange traceExchange = callback.createExchange();
         java.util.Map<String, String> context = new java.util.LinkedHashMap<>();
         context.put("topic", record.topic());
         context.put("partition", String.valueOf(record.partition()));
         context.put("offset", String.valueOf(record.offset()));
         context.put("failureType", "DESERIALIZATION");
-        tracingHelper.traceError(traceExchange, cause, context, true);
-
-        // f1/f4/f5: Report failure with structured fields and attachment
         // Deserialization failures map to KP_PROD_004 (serialization_failed) via the central taxonomy
         String errorCode = CpiKafkaPlusErrorCode.fromThrowable(cause).code();
-        tracingHelper.reportFailure(traceExchange, cause, errorCode, context, true);
+        String message = "Could not deserialize Kafka record at offset " + record.offset();
         progress.failed();
 
         TopicPartition tp = partitionOf(record);
         RecordFailurePolicy.Action action = failurePolicy.forDeserializationFailure(cause);
         if (action != RecordFailurePolicy.Action.DEAD_LETTER) {
+            // f1/f2/f4/f5: one MPL entry with structured fields and attachment
+            Exchange traceExchange = callback.createExchange();
+            traceExchange.getIn().setHeader("SAP_Sender", record.topic());
+            tracingHelper.traceError(traceExchange, cause, context, true);
+            tracingHelper.reportFailure(traceExchange, cause, errorCode, context, true);
             blockOrSkip(kafkaConsumer, record, action, commitAfterSuccess, progress);
-            callback.handleException("Could not deserialize Kafka record at offset " + record.offset(),
-                    callback.createExchange(), cause);
+            callback.handleReportedException(message, callback.createExchange(), cause);
             return 0;
         }
         LOG.warn("[CPI-KAFKA-PLUS-DIAG] poison-pill: deserialization failed at topic='{}' partition={} offset={}: {}",
@@ -888,6 +1027,12 @@ final class RecordProcessor {
             dlqHelper.sendDeserializationFailure(tp, record.offset(),
                     record.key(), record.value(),
                     record.headers(), record.timestamp(), cause);
+            java.util.Map<String, String> dlqContext = new java.util.LinkedHashMap<>(context);
+            dlqContext.put("dlqOutcome", "MOVED");
+            dlqContext.put("dlqTopic", endpoint.getDlqTopic());
+            Exchange traceExchange = newDlqMplExchange(record);
+            tracingHelper.traceError(traceExchange, cause, dlqContext, true);
+            tracingHelper.reportFailure(traceExchange, cause, errorCode, dlqContext, true);
             progress.resolved(tp, record.offset());
             if (commitAfterSuccess) {
                 commitProgress(kafkaConsumer, tp, progress);
@@ -902,8 +1047,8 @@ final class RecordProcessor {
                     .with("dlqTopic", endpoint.getDlqTopic())
                     .with("consequence", "offset not committed, record will be retried"), dlqEx);
             progress.blocked(tp, record.offset());
-            callback.handleException("Could not deserialize Kafka record at offset " + record.offset(),
-                    callback.createExchange(), cause);
+            reportDlqSendFailed(record, cause, errorCode, dlqEx, context);
+            callback.handleReportedException(message, callback.createExchange(), cause);
             return 0;
         }
     }
@@ -1227,6 +1372,15 @@ final class RecordProcessor {
 
     // --- MPL error reporting ---
 
+    private static java.util.Map<String, String> schemaContext(ConsumerRecord<byte[], byte[]> record) {
+        java.util.Map<String, String> context = new java.util.LinkedHashMap<>();
+        context.put("topic", record.topic());
+        context.put("partition", String.valueOf(record.partition()));
+        context.put("offset", String.valueOf(record.offset()));
+        context.put("failureType", "JSON_SCHEMA_VALIDATION");
+        return context;
+    }
+
     private void reportValidationErrorToMpl(String value, String validationError,
                                             ConsumerRecord<byte[], byte[]> record) {
         String errorMsg = "JSON Schema validation failed for record at topic=" + record.topic()
@@ -1240,6 +1394,11 @@ final class RecordProcessor {
             mplExchange.getIn().setHeader("CpiKafkaPlusPartition", record.partition());
             mplExchange.getIn().setHeader("CpiKafkaPlusOffset", record.offset());
             mplExchange.getIn().setHeader("SAP_Sender", record.topic());
+            String dlqTopic = endpoint.getDlqTopic();
+            if (failurePolicy.forSchemaViolation() == RecordFailurePolicy.Action.DEAD_LETTER
+                    && dlqTopic != null && !dlqTopic.trim().isEmpty()) {
+                mplExchange.getIn().setHeader("SAP_Receiver", dlqTopic);
+            }
             tracingHelper.traceInbound(mplExchange, value);
             mplExchange.setProperty(Exchange.ROUTE_STOP, Boolean.TRUE);
             mplExchange.setException(validationException);

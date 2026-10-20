@@ -37,6 +37,7 @@ public enum CpiKafkaPlusErrorCode {
     KP_META_002("KP-META-002", "metadata.monitor_state_fault", "KAFKA-10902 monitor fault."),
     KP_DLQ_001("KP-DLQ-001", "dlq.delivery_failed", "DLQ delivery failed."),
     KP_SR_001("KP-SR-001", "schema_registry.failed", "Schema Registry failed."),
+    KP_FLOW_001("KP-FLOW-001", "iflow.processing_failed", "iFlow processing failed."),
     KP_GEN_001("KP-GEN-001", "unclassified", "Unclassified error.");
 
     private final String code, operation, description;
@@ -66,5 +67,7 @@ public enum CpiKafkaPlusErrorCode {
     }
     public static CpiKafkaPlusErrorCode fromSendFailure(Throwable t, boolean dlq) { return dlq ? KP_DLQ_001 : fromThrowable(t); }
     public static CpiKafkaPlusErrorCode fromProducerInitFailure(Throwable t) { CpiKafkaPlusErrorCode c = fromThrowable(t); return c != KP_GEN_001 ? c : KP_PROD_001; }
+    /** An exception thrown by the iFlow the sender handed a record or batch to: not an adapter fault. */
+    public static CpiKafkaPlusErrorCode fromRouteFailure(Throwable t) { return KP_FLOW_001; }
     public static CpiKafkaPlusErrorCode fromJsonSchemaValidationFailure(Throwable t) { return KP_CFG_002; }
 }

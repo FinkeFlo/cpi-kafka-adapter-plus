@@ -81,6 +81,10 @@ public class RecordProcessorProgressTest {
     /** The headers of each route call, in the order of {@link #invoked}. */
     private final List<Map<String, Object>> headers = new ArrayList<>();
     private final AtomicBoolean stopAfterFirstRecord = new AtomicBoolean();
+    /** Every failure handed to the exception handler that the callback still reports to the MPL. */
+    private final List<String> handledUnreported = new ArrayList<>();
+    /** Every failure handed to the exception handler that was already reported to the MPL. */
+    private final List<String> handledReported = new ArrayList<>();
     private final OffsetCommitTracker tracker = new OffsetCommitTracker();
 
     @After
@@ -994,6 +998,214 @@ public class RecordProcessorProgressTest {
         Assert.assertEquals(1L, consumer.position(P0));
     }
 
+    // --- the MPL entry of a dead-lettered record (#289) ---
+
+    @Test
+    public void failedDlqWriteIsReportedOnceWithItsRootCause() throws Exception {
+        failing.add("0:0");
+        MockConsumer<byte[], byte[]> consumer = consumerWith(P0, "a", "b");
+        CpiKafkaPlusEndpoint endpoint = endpoint(true, null);
+        RecordingTracingHelper tracing = new RecordingTracingHelper(endpoint);
+        RecordProcessor processor = processor(endpoint, failingDlq(), null, tracing);
+
+        processSingle(processor, consumer);
+
+        Assert.assertEquals(Collections.singletonList("KP-DLQ-001"), tracing.codes);
+        String status = tracing.statuses.get(0);
+        Assert.assertTrue(status, status.startsWith("KP-DLQ-001: dead-letter write to orders-dlq failed: "
+                + "TopicAuthorizationException: no WRITE on orders-dlq"));
+        Assert.assertTrue(status, status.endsWith("(original: KP-FLOW-001: backend rejected 0:0)"));
+        Map<String, String> context = tracing.traced.get(0);
+        Assert.assertEquals("KP-FLOW-001", context.get("originalErrorCode"));
+        Assert.assertEquals(TopicAuthorizationException.class.getName(), context.get("dlqRootCauseClass"));
+        Assert.assertEquals("no WRITE on orders-dlq", context.get("dlqRootCauseMessage"));
+        Assert.assertTrue(context.get("hint"), context.get("hint").contains("WRITE"));
+        Assert.assertNotNull("the DLQ error goes into the attachment", tracing.dlqErrors.get(0));
+        Assert.assertEquals("orders", tracing.reportedHeaders.get(0).get("SAP_Sender"));
+        Assert.assertEquals("orders-dlq", tracing.reportedHeaders.get(0).get("SAP_Receiver"));
+        Assert.assertEquals("no second MPL entry", Collections.emptyList(), handledUnreported);
+        Assert.assertEquals(Collections.singletonList("iFlow processing failed at offset 0 (partition 0)"),
+                handledReported);
+    }
+
+    @Test
+    public void deadLetteredRecordIsReportedAsIflowFailureFromSourceToDlqTopic() throws Exception {
+        failing.add("0:1");
+        MockConsumer<byte[], byte[]> consumer = consumerWith(P0, "a", "b", "c");
+        CpiKafkaPlusEndpoint endpoint = endpoint(true, null);
+        RecordingTracingHelper tracing = new RecordingTracingHelper(endpoint);
+        RecordProcessor processor = processor(endpoint, dlqHelper(okDlqProducer()), null, tracing);
+
+        processSingle(processor, consumer);
+
+        Assert.assertEquals(Collections.singletonList("KP-FLOW-001"), tracing.codes);
+        Assert.assertEquals("KP-FLOW-001: backend rejected 0:1 (moved to dead-letter topic orders-dlq)",
+                tracing.statuses.get(0));
+        Assert.assertNull(tracing.dlqErrors.get(0));
+        Assert.assertEquals("orders", tracing.reportedHeaders.get(0).get("SAP_Sender"));
+        Assert.assertEquals("orders-dlq", tracing.reportedHeaders.get(0).get("SAP_Receiver"));
+        Assert.assertEquals(Collections.emptyList(), handledUnreported);
+        Assert.assertEquals(Collections.emptyList(), handledReported);
+    }
+
+    @Test
+    public void recordFailureWithoutDlqIsReportedOnceAsIflowFailure() throws Exception {
+        failing.add("0:0");
+        MockConsumer<byte[], byte[]> consumer = consumerWith(P0, "a");
+        CpiKafkaPlusEndpoint endpoint = endpoint(false, null);
+        RecordingTracingHelper tracing = new RecordingTracingHelper(endpoint);
+        RecordProcessor processor = processor(endpoint, null, null, tracing);
+
+        processSingle(processor, consumer);
+
+        Assert.assertEquals(Collections.singletonList("KP-FLOW-001"), tracing.codes);
+        Assert.assertEquals("orders", tracing.reportedHeaders.get(0).get("SAP_Sender"));
+        Assert.assertNull(tracing.reportedHeaders.get(0).get("SAP_Receiver"));
+        Assert.assertEquals(Collections.emptyList(), handledUnreported);
+        Assert.assertEquals(1, handledReported.size());
+    }
+
+    @Test
+    public void batchFailureWithoutDlqIsReportedOnceAsIflowFailure() throws Exception {
+        failing.add("0:0-1");
+        MockConsumer<byte[], byte[]> consumer = consumerWith(P0, "a", "b");
+        CpiKafkaPlusEndpoint endpoint = batchEndpoint(false, null);
+        RecordingTracingHelper tracing = new RecordingTracingHelper(endpoint);
+        RecordProcessor processor = processor(endpoint, null, null, tracing);
+
+        processBatch(processor, consumer);
+
+        Assert.assertEquals(Collections.singletonList("KP-FLOW-001"), tracing.codes);
+        Assert.assertEquals("0", tracing.traced.get(0).get("firstOffset"));
+        Assert.assertEquals("1", tracing.traced.get(0).get("lastOffset"));
+        Assert.assertEquals(Collections.emptyList(), handledUnreported);
+        Assert.assertEquals(Collections.singletonList(
+                "iFlow processing failed for batch of 2 Kafka records from partition 0"), handledReported);
+    }
+
+    @Test
+    public void failedDeserializationDlqWriteIsReportedOnceWithItsRootCause() throws Exception {
+        MockConsumer<byte[], byte[]> consumer = consumerWith(P0, "BAD");
+        CpiKafkaPlusEndpoint endpoint = avroEndpoint(true);
+        RecordingTracingHelper tracing = new RecordingTracingHelper(endpoint);
+        RecordProcessor processor = processor(endpoint, failingDlq(), failingAvro(endpoint), tracing);
+
+        processSingle(processor, consumer);
+
+        Assert.assertEquals(Collections.singletonList("KP-DLQ-001"), tracing.codes);
+        Assert.assertEquals("SEND_FAILED", tracing.traced.get(0).get("dlqOutcome"));
+        Assert.assertNotNull(tracing.dlqErrors.get(0));
+        Assert.assertEquals("orders-dlq", tracing.reportedHeaders.get(0).get("SAP_Receiver"));
+        Assert.assertEquals(Collections.emptyList(), handledUnreported);
+        Assert.assertEquals(1, handledReported.size());
+    }
+
+    @Test
+    public void failedSchemaDlqWriteIsReportedWithItsRootCause() throws Exception {
+        MockConsumer<byte[], byte[]> consumer = consumerWith(P0, "{}");
+        CpiKafkaPlusEndpoint endpoint = endpoint(true, SCHEMA);
+        RecordingTracingHelper tracing = new RecordingTracingHelper(endpoint);
+        RecordProcessor processor = processor(endpoint, failingDlq(), null, tracing);
+
+        processSingle(processor, consumer);
+
+        Assert.assertEquals(Collections.singletonList("KP-DLQ-001"), tracing.codes);
+        Assert.assertEquals("KP-CFG-002", tracing.traced.get(0).get("originalErrorCode"));
+        Assert.assertNotNull(tracing.dlqErrors.get(0));
+    }
+
+    @Test
+    public void failedSchemaDlqWriteInABatchIsReportedOnceWithItsRootCause() throws Exception {
+        MockConsumer<byte[], byte[]> consumer = consumerWith(P0, "{}");
+        CpiKafkaPlusEndpoint endpoint = batchEndpoint(true, SCHEMA);
+        RecordingTracingHelper tracing = new RecordingTracingHelper(endpoint);
+        RecordProcessor processor = processor(endpoint, failingDlq(), null, tracing);
+
+        processBatch(processor, consumer);
+
+        Assert.assertEquals(Collections.singletonList("KP-DLQ-001"), tracing.codes);
+        Assert.assertEquals("KP-CFG-002", tracing.traced.get(0).get("originalErrorCode"));
+        Assert.assertEquals(Collections.emptyList(), handledUnreported);
+        Assert.assertEquals(1, handledReported.size());
+    }
+
+    @Test
+    public void deadLetteredSchemaFailureInABatchIsReportedOnceAsSchemaFailure() throws Exception {
+        MockConsumer<byte[], byte[]> consumer = consumerWith(P0, "{}");
+        MockProducer<byte[], byte[]> dlq = okDlqProducer();
+        CpiKafkaPlusEndpoint endpoint = batchEndpoint(true, SCHEMA);
+        RecordingTracingHelper tracing = new RecordingTracingHelper(endpoint);
+        RecordProcessor processor = processor(endpoint, dlqHelper(dlq), null, tracing);
+
+        processBatch(processor, consumer);
+
+        Assert.assertEquals(1, dlq.history().size());
+        Assert.assertEquals(Collections.singletonList("KP-CFG-002"), tracing.codes);
+        Assert.assertEquals("MOVED", tracing.traced.get(0).get("dlqOutcome"));
+        Assert.assertEquals("orders", tracing.reportedHeaders.get(0).get("SAP_Sender"));
+        Assert.assertEquals("orders-dlq", tracing.reportedHeaders.get(0).get("SAP_Receiver"));
+        Assert.assertEquals(Collections.emptyList(), handledUnreported);
+        Assert.assertEquals(1, handledReported.size());
+        Assert.assertEquals(1L, committed(consumer, P0));
+    }
+
+    // --- a failed batch of one record (#289): the batch run is the record's first attempt ---
+
+    @Test
+    public void permanentlyFailedBatchOfOneRecordIsDeadLetteredWithoutRunningItAgain() throws Exception {
+        failing.add("0:0-0");
+        MockConsumer<byte[], byte[]> consumer = consumerWith(P0, "a");
+        MockProducer<byte[], byte[]> dlq = okDlqProducer();
+        CpiKafkaPlusEndpoint endpoint = batchEndpoint(true, null);
+        endpoint.setDlqMaxRetries(3);
+        RecordProcessor processor = processor(endpoint, dlqHelper(dlq), null);
+
+        processBatch(processor, consumer);
+
+        Assert.assertEquals(Collections.singletonList("0:0-0"), invoked);
+        Assert.assertEquals(1, dlq.history().size());
+        Assert.assertEquals("0", header(dlq.history().get(0), "CpiKafkaPlusDlqRetryCount"));
+        Assert.assertEquals("PERMANENT", header(dlq.history().get(0), "CpiKafkaPlusDlqErrorType"));
+        Assert.assertEquals(1L, committed(consumer, P0));
+    }
+
+    @Test
+    public void transientlyFailedBatchOfOneRecordContinuesWithItsRetries() throws Exception {
+        failingTransiently.add("0:0-0");
+        MockConsumer<byte[], byte[]> consumer = consumerWith(P0, "a");
+        MockProducer<byte[], byte[]> dlq = okDlqProducer();
+        CpiKafkaPlusEndpoint endpoint = batchEndpoint(true, null);
+        endpoint.setDlqMaxRetries(2);
+        RecordProcessor processor = processor(endpoint, dlqHelper(dlq), null);
+
+        processBatch(processor, consumer);
+
+        Assert.assertEquals("the batch run and two retries", Arrays.asList("0:0-0", "0:0-0", "0:0-0"), invoked);
+        Assert.assertNull("the batch run", headers.get(0).get("CpiKafkaPlusFallbackMode"));
+        Assert.assertEquals(Boolean.TRUE, headers.get(1).get("CpiKafkaPlusFallbackMode"));
+        Assert.assertEquals(Boolean.TRUE, headers.get(2).get("CpiKafkaPlusFallbackMode"));
+        Assert.assertEquals(1, dlq.history().size());
+        Assert.assertEquals("2", header(dlq.history().get(0), "CpiKafkaPlusDlqRetryCount"));
+        Assert.assertEquals(1L, committed(consumer, P0));
+    }
+
+    @Test
+    public void transientlyFailedBatchOfOneRecordWithoutRetriesIsDeadLetteredWithoutRunningItAgain()
+            throws Exception {
+        failingTransiently.add("0:0-0");
+        MockConsumer<byte[], byte[]> consumer = consumerWith(P0, "a");
+        MockProducer<byte[], byte[]> dlq = okDlqProducer();
+        CpiKafkaPlusEndpoint endpoint = batchEndpoint(true, null);
+        endpoint.setDlqMaxRetries(0);
+        RecordProcessor processor = processor(endpoint, dlqHelper(dlq), null);
+
+        processBatch(processor, consumer);
+
+        Assert.assertEquals("no retries left after the batch run", Collections.singletonList("0:0-0"), invoked);
+        Assert.assertEquals(1, dlq.history().size());
+        Assert.assertEquals("TRANSIENT", header(dlq.history().get(0), "CpiKafkaPlusDlqErrorType"));
+    }
+
     // --- a cyclic cause chain (#241): dead-lettered, not an endless walk on the poll thread ---
 
     @Test(timeout = 10_000L)
@@ -1283,7 +1495,12 @@ public class RecordProcessorProgressTest {
 
                     @Override
                     public void handleException(String message, Exchange exchange, Exception e) {
-                        // reported through the tracing helper; nothing to do off-platform
+                        handledUnreported.add(message);
+                    }
+
+                    @Override
+                    public void handleReportedException(String message, Exchange exchange, Exception e) {
+                        handledReported.add(message);
                     }
 
                     @Override
@@ -1466,6 +1683,9 @@ public class RecordProcessorProgressTest {
     private static final class RecordingTracingHelper extends AdapterTracingHelper {
         final List<Map<String, String>> traced = new ArrayList<>();
         final List<String> statuses = new ArrayList<>();
+        final List<String> codes = new ArrayList<>();
+        final List<Throwable> dlqErrors = new ArrayList<>();
+        final List<Map<String, Object>> reportedHeaders = new ArrayList<>();
 
         RecordingTracingHelper(CpiKafkaPlusEndpoint endpoint) {
             super(endpoint);
@@ -1473,16 +1693,19 @@ public class RecordProcessorProgressTest {
 
         @Override
         public void traceError(Exchange exchange, Exception e, Map<String, String> context,
-                               boolean senderDirection) {
+                               boolean senderDirection, Throwable dlqError) {
             traced.add(new HashMap<>(context));
-            super.traceError(exchange, e, context, senderDirection);
+            super.traceError(exchange, e, context, senderDirection, dlqError);
         }
 
         @Override
         public void reportFailure(Exchange exchange, Exception e, String errorCode,
-                                  Map<String, String> context, boolean fireStatusEvent) {
+                                  Map<String, String> context, boolean fireStatusEvent, Throwable dlqError) {
             statuses.add(buildStatusMessage(errorCode, e, context));
-            super.reportFailure(exchange, e, errorCode, context, fireStatusEvent);
+            codes.add(errorCode);
+            dlqErrors.add(dlqError);
+            reportedHeaders.add(new HashMap<>(exchange.getIn().getHeaders()));
+            super.reportFailure(exchange, e, errorCode, context, fireStatusEvent, dlqError);
         }
     }
 }

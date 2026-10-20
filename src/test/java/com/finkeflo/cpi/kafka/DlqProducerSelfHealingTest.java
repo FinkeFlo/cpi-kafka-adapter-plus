@@ -154,6 +154,29 @@ public class DlqProducerSelfHealingTest {
     }
 
     /**
+     * A record the broker rejects, such as a record without key on a compacted DLQ topic, is
+     * rejected again by a fresh producer (#289).
+     */
+    @Test
+    public void aRecordTheBrokerRejectsDoesNotRebuild() {
+        ScriptedProducer producer = new ScriptedProducer();
+        producer.failWith(new org.apache.kafka.common.InvalidRecordException(
+                "Compacted topic cannot accept message without key in topic partition orders-dlq-0"));
+        RecordingFactory factory = new RecordingFactory();
+
+        DlqProducerHelper helper = new DlqProducerHelper("orders-dlq", producer,
+                ProducerSendGuard.of(SHORT_BUDGET_MS, "PLAINTEXT"), factory);
+
+        try {
+            helper.sendToDlq(failedRecord(), new RuntimeException("boom"), 0);
+            Assert.fail("Expected the rejection to be reported, not retried");
+        } catch (RuntimeException expected) {
+            Assert.assertTrue(expected.getMessage(), expected.getMessage().contains("orders-dlq"));
+        }
+        Assert.assertEquals("a rejected record must not trigger a rebuild", 0, factory.creations.get());
+    }
+
+    /**
      * Kafka's own retriable failures are handled by the client and by the next poll of the
      * uncommitted record, so they must not consume a rebuild either.
      */
