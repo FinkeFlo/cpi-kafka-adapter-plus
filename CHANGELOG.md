@@ -7,7 +7,7 @@ and the project follows [Semantic Versioning](https://semver.org/). See
 [VERSIONING.md](https://github.com/finkeflo/cpi-kafka-adapter-plus/blob/main/VERSIONING.md) for how the adapter version maps to SAP CPI
 iFlow compatibility.
 
-## [Unreleased]
+## [1.4.3] - 2026-10-20
 ### Fixed
 - Sender with DLQ: a failed dead-letter write is now visible in the CPI monitor. Up to 1.4.2 the MPL entry showed only the integration flow's error, and the reason why the DLQ write failed was in the tenant trace alone. The entry now carries `KP-DLQ-001`, a status text that leads with the failed write and its root cause (`dead-letter write to <topic> failed: <class>: <message> (original: …)`), a `--- DLQ Error ---` section with its full stack trace in the `KafkaAdapterError` attachment, and a `hint` for well-known causes (record without key on a compacted DLQ topic, missing `WRITE`, missing topic, record too large). This applies to failed flow processing, deserialization and JSON Schema validation (#289).
 - Sender: every failure is reported once by the adapter. A failed record after its retries, a failed batch without DLQ and a failed deserialization each wrote a second adapter MPL entry with the same error (#289).
