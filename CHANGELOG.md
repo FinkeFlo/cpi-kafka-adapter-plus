@@ -19,6 +19,9 @@ iFlow compatibility.
 - Sender in batch mode: a record that fails JSON Schema validation is reported with `KP-CFG-002`, as in single mode, instead of `KP-GEN-001`. With DLQ, its MPL entry carries the DLQ outcome (`MOVED`), `SAP_Sender` and `SAP_Receiver` (#289).
 - Sender: MPL entries with a DLQ outcome set `SAP_Sender` to the source topic and `SAP_Receiver` to the DLQ topic, and carry the new custom header properties `KafkaAdapterOriginalErrorCode`, `KafkaAdapterDlqOutcome` (`MOVED`/`SEND_FAILED`) and `KafkaAdapterDlqTopic` (#289).
 
+### Dependencies
+- `snappy-java` 1.1.10.8 → 1.1.10.12 (shipped in the adapter bundle) and `zstd-jni` 1.5.7-21 → 1.5.7-23 (tests only); replaces Dependabot #270 and #269.
+
 ## [1.4.2] - 2026-10-16
 ### Added
 - The start line `class-warmup.start`, written once per adapter version when its first Kafka endpoint starts, now names the runtime: `java` (Java version), `javaVendor` and `camel` (Camel version). SAP's adapter development documentation still names Java 8, while the adapter needs Java 11 or later; the README now says so. See issue #251.
