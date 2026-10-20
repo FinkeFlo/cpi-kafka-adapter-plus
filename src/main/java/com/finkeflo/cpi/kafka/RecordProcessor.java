@@ -303,9 +303,22 @@ final class RecordProcessor {
                             callback.handleReportedException(message, callback.createExchange(),
                                     new RuntimeException(validationError));
                         } else {
-                            Exchange errorExchange = action == RecordFailurePolicy.Action.DEAD_LETTER
-                                    ? newDlqMplExchange(record) : callback.createExchange();
-                            callback.handleException(message, errorExchange, new RuntimeException(validationError));
+                            RuntimeException validationFailure = new RuntimeException(validationError);
+                            java.util.Map<String, String> context = schemaContext(record);
+                            context.put("validationError", validationError);
+                            Exchange errorExchange;
+                            if (action == RecordFailurePolicy.Action.DEAD_LETTER) {
+                                context.put("dlqOutcome", "MOVED");
+                                context.put("dlqTopic", endpoint.getDlqTopic());
+                                errorExchange = newDlqMplExchange(record);
+                            } else {
+                                errorExchange = callback.createExchange();
+                                errorExchange.getIn().setHeader("SAP_Sender", record.topic());
+                            }
+                            tracingHelper.traceError(errorExchange, validationFailure, context, true);
+                            tracingHelper.reportFailure(errorExchange, validationFailure,
+                                    CpiKafkaPlusErrorCode.KP_CFG_002.code(), context, true);
+                            callback.handleReportedException(message, errorExchange, validationFailure);
                         }
                         if (dlqFailed || action == RecordFailurePolicy.Action.BLOCK) {
                             progress.blocked(tp, record.offset());

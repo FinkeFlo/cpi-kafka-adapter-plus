@@ -16,6 +16,7 @@ iFlow compatibility.
 
 ### Changed
 - Sender: a failure of the integration flow is reported with the new error code `KP-FLOW-001` (`iflow.processing_failed`) instead of `KP-GEN-001`, in the MPL (`KafkaAdapterErrorCode`, status text) and in the tenant trace. Monitoring or alerting that matches `KP-GEN-001` for flow errors needs to match `KP-FLOW-001` (#289).
+- Sender in batch mode: a record that fails JSON Schema validation is reported with `KP-CFG-002`, as in single mode, instead of `KP-GEN-001`. With DLQ, its MPL entry carries the DLQ outcome (`MOVED`), `SAP_Sender` and `SAP_Receiver` (#289).
 - Sender: MPL entries with a DLQ outcome set `SAP_Sender` to the source topic and `SAP_Receiver` to the DLQ topic, and carry the new custom header properties `KafkaAdapterOriginalErrorCode`, `KafkaAdapterDlqOutcome` (`MOVED`/`SEND_FAILED`) and `KafkaAdapterDlqTopic` (#289).
 
 ## [1.4.2] - 2026-10-16

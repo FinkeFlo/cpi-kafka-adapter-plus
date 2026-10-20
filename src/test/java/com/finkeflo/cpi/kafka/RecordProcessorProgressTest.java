@@ -1129,6 +1129,26 @@ public class RecordProcessorProgressTest {
         Assert.assertEquals(1, handledReported.size());
     }
 
+    @Test
+    public void deadLetteredSchemaFailureInABatchIsReportedOnceAsSchemaFailure() throws Exception {
+        MockConsumer<byte[], byte[]> consumer = consumerWith(P0, "{}");
+        MockProducer<byte[], byte[]> dlq = okDlqProducer();
+        CpiKafkaPlusEndpoint endpoint = batchEndpoint(true, SCHEMA);
+        RecordingTracingHelper tracing = new RecordingTracingHelper(endpoint);
+        RecordProcessor processor = processor(endpoint, dlqHelper(dlq), null, tracing);
+
+        processBatch(processor, consumer);
+
+        Assert.assertEquals(1, dlq.history().size());
+        Assert.assertEquals(Collections.singletonList("KP-CFG-002"), tracing.codes);
+        Assert.assertEquals("MOVED", tracing.traced.get(0).get("dlqOutcome"));
+        Assert.assertEquals("orders", tracing.reportedHeaders.get(0).get("SAP_Sender"));
+        Assert.assertEquals("orders-dlq", tracing.reportedHeaders.get(0).get("SAP_Receiver"));
+        Assert.assertEquals(Collections.emptyList(), handledUnreported);
+        Assert.assertEquals(1, handledReported.size());
+        Assert.assertEquals(1L, committed(consumer, P0));
+    }
+
     // --- a failed batch of one record (#289): the batch run is the record's first attempt ---
 
     @Test
