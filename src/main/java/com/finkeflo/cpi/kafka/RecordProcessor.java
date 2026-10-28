@@ -151,7 +151,7 @@ final class RecordProcessor {
     private final OffsetCommitTracker offsetTracker;
     private final RecordFailurePolicy failurePolicy;
     private final LongSupplier clock;
-    private final AtomicBoolean warnedNoJsonBehindConfluentHeader = new AtomicBoolean();
+    private final AtomicBoolean reportedNoJsonBehindConfluentHeader = new AtomicBoolean();
     /** Concurrent because the rebalance callbacks can also run on the thread that closes the consumer. */
     private final Map<TopicPartition, CarriedRetry> carriedRetries = new ConcurrentHashMap<>();
 
@@ -1145,12 +1145,15 @@ final class RecordProcessor {
         if (isOneJsonValue(text)) {
             return text;
         }
-        if (warnedNoJsonBehindConfluentHeader.compareAndSet(false, true)) {
-            LOG.warn("[CPI-KAFKA-PLUS-DIAG] Remove Confluent Header: a value on topic={} starts with the "
-                    + "Confluent header of schema ID {}, but no JSON follows it, so the value is passed on "
-                    + "unchanged. Avro needs 'Enable Schema Registry' and 'Deserialize Values as Avro'; "
-                    + "Protobuf is not supported. Logged once per consumer.",
-                    topic, ByteBuffer.wrap(data, 1, 4).getInt());
+        if (reportedNoJsonBehindConfluentHeader.compareAndSet(false, true)) {
+            // ERROR, not WARN: only ERROR reaches the tenant trace (ADR 0004). Once per consumer.
+            AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("consumer.config.ineffective")
+                    .with("parameter", "removeConfluentHeader")
+                    .with("topic", topic)
+                    .with("schemaId", ByteBuffer.wrap(data, 1, 4).getInt())
+                    .with("reason", "no JSON after the Confluent header, so the value is passed on unchanged; "
+                            + "Avro needs Enable Schema Registry and Deserialize Values as Avro, Protobuf is "
+                            + "not supported"));
         }
         return null;
     }

@@ -513,8 +513,8 @@ if the line should go away.
 
 ### `consumer.config.ineffective` and `consumer.config.clamped`
 
-A sender setting the adapter replaces with a working value. It is logged once at deployment, as ERROR,
-and the channel starts all the same:
+A sender setting the adapter replaces with a working value, or one that does not take effect. It is
+logged once, as ERROR, at deployment unless stated otherwise, and the channel starts all the same:
 
 * `consumer.config.ineffective parameter=batchOutputFormat`: an unknown *Batch Output Format*; batches
   are formatted as `JSON_ARRAY`.
@@ -523,6 +523,12 @@ and the channel starts all the same:
 * `consumer.config.ineffective parameter=securityProtocol value=''`: an empty *Security Protocol*, as an
   externalized value can be; the Kafka client connects with `PLAINTEXT`, without TLS and without
   authentication, which works against a `PLAINTEXT` listener only. Up to 1.4.1 this was not logged.
+* `consumer.config.ineffective parameter=removeConfluentHeader topic=… schemaId=…`: **Remove Confluent
+  Header** is on, but a value on that topic starts with the Confluent header and no JSON follows it,
+  such as Avro or Protobuf from Confluent's serializers. The value is passed on unchanged, header
+  included, and without `CpiKafkaPlusSchemaId`. Logged once per consumer, when the first such value
+  arrives rather than at deployment. For Avro, use **Enable Schema Registry** with **Deserialize Values
+  as Avro**; Protobuf is not supported.
 * `consumer.config.clamped`: with **Auto-Pause on Errors**, a *Consecutive Error Threshold* or an
   *Initial Pause Duration (sec)* below 1 is used as 1, and an *Initial Pause Duration (sec)* above 900
   as 900, the longest pause there is. Up to 1.4.1 a value above 900 was cut without a line.

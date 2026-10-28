@@ -20,7 +20,9 @@
  */
 package com.finkeflo.cpi.kafka;
 
+import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.PrintStream;
 import java.io.StringReader;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
@@ -169,6 +171,25 @@ public class RemoveConfluentHeaderTest {
             Assert.assertEquals(text, new String(value, StandardCharsets.UTF_8), message.getBody(String.class));
             Assert.assertNull(text, message.getHeader("CpiKafkaPlusSchemaId"));
         }
+    }
+
+    @Test
+    public void noJsonBehindTheHeaderIsLoggedOnceAsAnError() throws Exception {
+        // ERROR, because WARN never reaches the tenant trace (ADR 0004); two such values, one line.
+        byte[] avro = framed(42, new byte[] {0x02, 'a', 0x10});
+        ConsumerRecords<byte[], byte[]> records = records(record(0, null, avro), record(1, null, avro));
+        RecordProcessor processor = processor(endpoint(REMOVE), null, null);
+
+        String logged = capture(() -> processor.processSingleRecords(null, records, false,
+                new PollProgress(records)));
+
+        Assert.assertEquals(2, delivered.size());
+        String line = "ERROR " + RecordProcessor.class.getName() + " - [CPI-KAFKA-PLUS-DIAG] "
+                + "consumer.config.ineffective parameter=removeConfluentHeader topic=orders schemaId=42 "
+                + "reason='no JSON after the Confluent header, so the value is passed on unchanged; Avro "
+                + "needs Enable Schema Registry and Deserialize Values as Avro, Protobuf is not supported'";
+        Assert.assertEquals(logged, 1, logged.split("consumer\\.config\\.ineffective", -1).length - 1);
+        Assert.assertTrue(logged, logged.contains("] " + line + "\n"));
     }
 
     @Test
@@ -376,5 +397,32 @@ public class RemoveConfluentHeaderTest {
     private static String text(Element parent, String tag) {
         NodeList nodes = parent.getElementsByTagName(tag);
         return nodes.getLength() > 0 ? nodes.item(0).getTextContent().trim() : null;
+    }
+
+    private interface ThrowingRunnable {
+        void run() throws Exception;
+    }
+
+    /**
+     * The lines this thread logs while {@code action} runs. Clients left by earlier tests keep
+     * logging from their own threads meanwhile.
+     */
+    private static String capture(ThrowingRunnable action) throws Exception {
+        PrintStream original = System.err;
+        ByteArrayOutputStream captured = new ByteArrayOutputStream();
+        System.setErr(new PrintStream(captured, true, "UTF-8"));
+        try {
+            action.run();
+        } finally {
+            System.setErr(original);
+        }
+        String thisThread = "[" + Thread.currentThread().getName() + "] ";
+        StringBuilder lines = new StringBuilder();
+        for (String line : new String(captured.toByteArray(), StandardCharsets.UTF_8).split("\\R")) {
+            if (line.startsWith(thisThread)) {
+                lines.append(line).append('\n');
+            }
+        }
+        return lines.toString();
     }
 }

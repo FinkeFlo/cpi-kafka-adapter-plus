@@ -77,7 +77,7 @@ tab *Message Handling*) removes the header before the value is read as UTF-8 tex
 | Value | What the integration flow gets |
 |---|---|
 | At least 5 bytes, the first one `0x00`, and exactly one JSON value after the header | The bytes after the header as UTF-8 text. For `{"id":"a"}` behind the header of schema ID 42, the bytes `00 00 00 00 2A 7B 22 …`, the body is `{"id":"a"}`. |
-| The header, but no JSON after it, such as Avro or Protobuf from Confluent's serializers | The value unchanged, header included, and no `CpiKafkaPlusSchemaId`. The sender logs a warning once per consumer. For Avro, use **Enable Schema Registry** with **Deserialize Values as Avro** instead; Protobuf is not supported. |
+| The header, but no JSON after it, such as Avro or Protobuf from Confluent's serializers | The value unchanged, header included, and no `CpiKafkaPlusSchemaId`. The sender logs this once per consumer as ERROR (`consumer.config.ineffective parameter=removeConfluentHeader`, see [Troubleshooting](../troubleshooting.md#consumerconfigineffective-and-consumerconfigclamped)). For Avro, use **Enable Schema Registry** with **Deserialize Values as Avro** instead; Protobuf is not supported. |
 | Anything else, such as plain JSON from another producer | The value unchanged. JSON text never starts with `0x00`, so the two cannot be confused. |
 
 - With **Batch Mode** off, the header `CpiKafkaPlusSchemaId` (`Integer`) carries the schema ID of the

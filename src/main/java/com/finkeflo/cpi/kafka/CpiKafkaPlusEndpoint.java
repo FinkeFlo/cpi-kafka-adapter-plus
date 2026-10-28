@@ -253,8 +253,9 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
             description = "Sender only. Remove the 5-byte Confluent header (magic byte 0x00 and the 4-byte "
                     + "schema ID) that Confluent's JSON Schema serializer writes in front of every value, "
                     + "before the value is read as UTF-8 text. A value with fewer than 5 bytes, another "
-                    + "first byte, or no JSON after the header (such as Avro or Protobuf) is passed on unchanged. Ignored while schemaRegistryEnabled is on: its "
-                    + "Avro deserialization reads the header itself.")
+                    + "first byte, or no JSON after the header (such as Avro or Protobuf) is passed on "
+                    + "unchanged. Ignored while schemaRegistryEnabled is on: its Avro deserialization reads "
+                    + "the header itself.")
     private boolean removeConfluentHeader = false;
 
     // --- JSON Schema Validation ---
