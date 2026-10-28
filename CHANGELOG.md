@@ -7,7 +7,7 @@ and the project follows [Semantic Versioning](https://semver.org/). See
 [VERSIONING.md](https://github.com/finkeflo/cpi-kafka-adapter-plus/blob/main/VERSIONING.md) for how the adapter version maps to SAP CPI
 iFlow compatibility.
 
-## [Unreleased]
+## [1.5.0] - 2026-10-28
 ### Added
 - Sender option **Remove Confluent Header** (`removeConfluentHeader`, tab *Message Handling*, metadata version 1.5) for topics written by Confluent's JSON Schema serializer. It removes the 5-byte header in front of every value, the magic byte `0x00` and the 4-byte schema ID, before the value is read as UTF-8 text. The JSON after it then reaches the integration flow as it was produced: as the body, embedded as JSON in a *JSON Array* batch, as text instead of Base64 in an *XML List* batch, and for **JSON Schema Validation**. Up to now the header reached the flow as text, so no JSON parser accepted the value. A value with fewer than 5 bytes, another first byte, or no JSON behind the header (such as Avro or Protobuf, logged once per consumer as `consumer.config.ineffective`) is passed on unchanged, and with **Batch Mode** off the header `CpiKafkaPlusSchemaId` carries the schema ID. The Schema Registry is not called. The option is off by default, can only be edited while **Enable Schema Registry** is off and is ignored while it is on, because the Avro deserialization reads the header itself. Integration flows on 1.0 to 1.4 get the field with *Update Version*. See issue #284.
 
