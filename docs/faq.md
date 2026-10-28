@@ -111,7 +111,7 @@ Only a single integration flow call that takes longer than that half can still e
 ### After an undeploy, why do the partitions stay with the old consumer for 30 seconds?
 
 Because of static membership, the consumer sends no `LeaveGroup` when the integration flow stops:
-kafka-clients 4.3.1 sends it only for a member without `group.instance.id`. The broker keeps the
+kafka-clients 4.4.0 sends it only for a member without `group.instance.id`. The broker keeps the
 member's partitions until `session.timeout.ms` (30 s) has passed. A consumer that rejoins with the
 same `group.instance.id` within that time, for example after a quick redeploy, gets them back
 without a rebalance; otherwise the group rebalances after 30 s and the other members take over.
