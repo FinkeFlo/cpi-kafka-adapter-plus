@@ -389,7 +389,9 @@ numbers.
 A key or value that is exactly one JSON document is embedded as JSON; numbers keep their trailing zeros and precision
 (`100.00` stays `100.00`). Exponent input and decimals below `0.000001` are written in E-notation
 (`1e3` → `1E+3`, `0.0000001` → `1E-7`). Anything else — including
-JSON followed by more text, and empty values — is embedded as a string.
+JSON followed by more text, and empty values — is embedded as a string. So is a JSON value behind the
+Confluent header (magic byte and schema ID), unless **Remove Confluent Header** removes the header
+first (see [Avro / Schema Registry](avro-schema-registry.md#json-values-with-the-confluent-header)).
 
 ### XML List (`XML_LIST`)
 
@@ -397,7 +399,7 @@ JSON followed by more text, and empty values — is embedded as a string.
 
 Values that look like XML are automatically detected and embedded as parsed child elements, marked with `format="xml"`. Non-XML, null, or empty values use text/CDATA content with `format="text"`. This detection is always on and is not configurable.
 
-A key or value with a character that XML 1.0 does not allow anywhere in a document, not even in CDATA, is written as Base64 of its UTF-8 bytes and marked with `format="base64"`. These are the control characters below U+0020 except tab, line feed and carriage return, and U+FFFE and U+FFFF. A value behind the Confluent header (magic byte and schema ID) starts with such characters, for example. Up to 1.4.1 one such key or value made the whole batch unreadable as XML. In a Groovy script, `new String(value.decodeBase64(), 'UTF-8')` gives the text back. The receiver's *XML List* decodes `format="base64"` itself, so such a batch can be sent to Kafka unchanged.
+A key or value with a character that XML 1.0 does not allow anywhere in a document, not even in CDATA, is written as Base64 of its UTF-8 bytes and marked with `format="base64"`. These are the control characters below U+0020 except tab, line feed and carriage return, and U+FFFE and U+FFFF. A value behind the Confluent header (magic byte and schema ID) starts with such characters, for example. From metadata version 1.5, **Remove Confluent Header** removes that header before the batch is built, so the JSON behind it is written as text, marked `format="text"` (see [Avro / Schema Registry](avro-schema-registry.md#json-values-with-the-confluent-header)). Up to 1.4.1 one such key or value made the whole batch unreadable as XML. In a Groovy script, `new String(value.decodeBase64(), 'UTF-8')` gives the text back. The receiver's *XML List* decodes `format="base64"` itself, so such a batch can be sent to Kafka unchanged.
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>

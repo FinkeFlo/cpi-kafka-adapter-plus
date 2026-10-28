@@ -20,6 +20,8 @@
  */
 package com.finkeflo.cpi.kafka;
 
+import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -29,6 +31,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.LongSupplier;
 
 import org.apache.camel.Exchange;
@@ -43,6 +46,9 @@ import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.errors.InterruptException;
 import org.apache.kafka.common.errors.RebalanceInProgressException;
 import org.apache.kafka.common.errors.WakeupException;
+import com.fasterxml.jackson.core.JsonFactory;
+import com.fasterxml.jackson.core.JsonParser;
+import com.fasterxml.jackson.core.StreamReadConstraints;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -61,6 +67,19 @@ import org.slf4j.LoggerFactory;
 final class RecordProcessor {
 
     private static final Logger LOG = LoggerFactory.getLogger(RecordProcessor.class);
+
+    /**
+     * Checks that JSON follows a Confluent header (#284). Without Jackson's default limits, so that a
+     * value is not kept with its header only because it is large: the IFlow gets it either way.
+     */
+    private static final JsonFactory CONFLUENT_JSON_CHECK = JsonFactory.builder()
+            .streamReadConstraints(StreamReadConstraints.builder()
+                    .maxStringLength(Integer.MAX_VALUE)
+                    .maxNumberLength(Integer.MAX_VALUE)
+                    .maxNameLength(Integer.MAX_VALUE)
+                    .maxNestingDepth(Integer.MAX_VALUE)
+                    .build())
+            .build();
     private static final long MAX_RETRY_DELAY_SECONDS = 300; // 5 minutes
 
     /**
@@ -132,6 +151,7 @@ final class RecordProcessor {
     private final OffsetCommitTracker offsetTracker;
     private final RecordFailurePolicy failurePolicy;
     private final LongSupplier clock;
+    private final AtomicBoolean reportedNoJsonBehindConfluentHeader = new AtomicBoolean();
     /** Concurrent because the rebalance callbacks can also run on the thread that closes the consumer. */
     private final Map<TopicPartition, CarriedRetry> carriedRetries = new ConcurrentHashMap<>();
 
@@ -1004,7 +1024,8 @@ final class RecordProcessor {
         context.put("partition", String.valueOf(record.partition()));
         context.put("offset", String.valueOf(record.offset()));
         context.put("failureType", "DESERIALIZATION");
-        // Deserialization failures map to KP_PROD_004 (serialization_failed) via the central taxonomy
+        // Deserialization has no code of its own in the central taxonomy: what the Avro path throws,
+        // such as the RuntimeException for a wrong magic byte, maps to KP-GEN-001 (#284).
         String errorCode = CpiKafkaPlusErrorCode.fromThrowable(cause).code();
         String message = "Could not deserialize Kafka record at offset " + record.offset();
         progress.failed();
@@ -1085,8 +1106,11 @@ final class RecordProcessor {
             return cache.get(data);
         }
         String result;
+        String json;
         if (endpoint.isSchemaRegistryEnabled() && endpoint.isAvroValueDeserialization() && avroHelper != null) {
             result = avroHelper.deserialize(topic, data);
+        } else if ((json = jsonBehindConfluentHeader(topic, data)) != null) {
+            result = json;
         } else {
             result = new String(data, StandardCharsets.UTF_8);
         }
@@ -1099,6 +1123,51 @@ final class RecordProcessor {
     String deserializeKey(String topic, byte[] data) {
         if (data == null) return null;
         return new String(data, StandardCharsets.UTF_8);
+    }
+
+    /**
+     * The JSON behind the Confluent header of {@code data}, or {@code null} if {@link #deserializeValue}
+     * keeps the value as it is (#284). The header is removed with {@code removeConfluentHeader} on, from
+     * a value of at least 5 bytes whose first byte is the magic byte and whose bytes after the header
+     * are exactly one JSON value. JSON text never starts with the magic byte, so a value without the
+     * header is passed on unchanged; so is Avro or Protobuf behind the header, which is not JSON and
+     * would otherwise lose 5 bytes and gain a schema ID that suggests it was read. Never while the
+     * Schema Registry is on, whose Avro path reads the header itself.
+     */
+    private String jsonBehindConfluentHeader(String topic, byte[] data) {
+        if (!endpoint.isRemoveConfluentHeader() || endpoint.isSchemaRegistryEnabled()
+                || data == null || data.length < AvroDeserializerHelper.HEADER_LENGTH
+                || data[0] != AvroDeserializerHelper.MAGIC_BYTE) {
+            return null;
+        }
+        int header = AvroDeserializerHelper.HEADER_LENGTH;
+        String text = new String(data, header, data.length - header, StandardCharsets.UTF_8);
+        if (isOneJsonValue(text)) {
+            return text;
+        }
+        if (reportedNoJsonBehindConfluentHeader.compareAndSet(false, true)) {
+            // ERROR, not WARN: only ERROR reaches the tenant trace (ADR 0004). Once per consumer.
+            AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("consumer.config.ineffective")
+                    .with("parameter", "removeConfluentHeader")
+                    .with("topic", topic)
+                    .with("schemaId", ByteBuffer.wrap(data, 1, 4).getInt())
+                    .with("reason", "no JSON after the Confluent header, so the value is passed on unchanged; "
+                            + "Avro needs Enable Schema Registry and Deserialize Values as Avro, Protobuf is "
+                            + "not supported"));
+        }
+        return null;
+    }
+
+    private static boolean isOneJsonValue(String text) {
+        try (JsonParser parser = CONFLUENT_JSON_CHECK.createParser(text)) {
+            if (parser.nextToken() == null) {
+                return false;
+            }
+            parser.skipChildren();
+            return parser.nextToken() == null;
+        } catch (IOException e) {
+            return false;
+        }
     }
 
     // --- Header mapping ---
@@ -1144,6 +1213,10 @@ final class RecordProcessor {
         message.setHeader("CpiKafkaPlusTimestamp", record.timestamp());
         message.setHeader("CpiKafkaPlusConsumerGroup", endpoint.getGroupId());
         message.setHeader("CpiKafkaPlusCommitStrategy", endpoint.getCommitStrategy());
+        if (jsonBehindConfluentHeader(record.topic(), record.value()) != null) {
+            // The ID from the removed header, bytes 1 to 4 (big-endian), as Confluent writes it.
+            message.setHeader("CpiKafkaPlusSchemaId", ByteBuffer.wrap(record.value(), 1, 4).getInt());
+        }
         if (record.headers() != null) {
             record.headers().forEach(header -> {
                 String headerName = "kafka.header." + header.key();
