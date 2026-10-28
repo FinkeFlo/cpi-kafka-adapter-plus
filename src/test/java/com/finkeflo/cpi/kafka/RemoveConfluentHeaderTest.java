@@ -118,10 +118,69 @@ public class RemoveConfluentHeaderTest {
     }
 
     @Test
-    public void aValueOfOnlyTheHeaderBecomesEmpty() throws Exception {
-        Message message = deliverOne(endpoint(REMOVE), null, framed(42, ""));
+    public void aValueOfOnlyTheHeaderIsPassedOnUnchanged() throws Exception {
+        // Nothing follows the header, so there is no JSON value to hand on: keep the header.
+        Message message = deliverOne(endpoint(REMOVE), null, framed(42, new byte[0]));
 
-        Assert.assertEquals("", message.getBody(String.class));
+        Assert.assertEquals("\u0000\u0000\u0000\u0000*", message.getBody(String.class));
+        Assert.assertNull(message.getHeader("CpiKafkaPlusSchemaId"));
+    }
+
+    @Test
+    public void aJsonScalarAfterTheHeaderIsTheBody() throws Exception {
+        Message message = deliverOne(endpoint(REMOVE), null, framed(42, "\"a\""));
+
+        Assert.assertEquals("\"a\"", message.getBody(String.class));
+        Assert.assertEquals(42, message.getHeader("CpiKafkaPlusSchemaId"));
+    }
+
+    @Test
+    public void avroBehindTheHeaderIsPassedOnUnchanged() throws Exception {
+        // Confluent's Avro serializer with the Schema Registry off: a record {name: "a", qty: 8}
+        // in Avro binary, the string as zigzag length 1 and its byte, then the int 8 as zigzag 16.
+        byte[] value = framed(42, new byte[] {0x02, 'a', 0x10});
+
+        Message message = deliverOne(endpoint(REMOVE), null, value);
+
+        Assert.assertEquals(new String(value, StandardCharsets.UTF_8), message.getBody(String.class));
+        Assert.assertNull(message.getHeader("CpiKafkaPlusSchemaId"));
+    }
+
+    @Test
+    public void protobufBehindTheHeaderIsPassedOnUnchanged() throws Exception {
+        // Confluent's Protobuf serializer writes the message indexes after the header (0x00 for the
+        // first message type), then the message: field 1, a string of length 1.
+        byte[] value = framed(42, new byte[] {0x00, 0x0A, 0x01, 'a'});
+
+        Message message = deliverOne(endpoint(REMOVE), null, value);
+
+        Assert.assertEquals(new String(value, StandardCharsets.UTF_8), message.getBody(String.class));
+        Assert.assertNull(message.getHeader("CpiKafkaPlusSchemaId"));
+    }
+
+    @Test
+    public void textAfterTheHeaderThatIsNotOneJsonValueIsPassedOnUnchanged() throws Exception {
+        for (String text : new String[] {"{\"id\":", "{\"id\":\"a\"} {\"id\":\"b\"}", "id=a"}) {
+            delivered.clear();
+            byte[] value = framed(42, text);
+
+            Message message = deliverOne(endpoint(REMOVE), null, value);
+
+            Assert.assertEquals(text, new String(value, StandardCharsets.UTF_8), message.getBody(String.class));
+            Assert.assertNull(text, message.getHeader("CpiKafkaPlusSchemaId"));
+        }
+    }
+
+    @Test
+    public void aLongJsonStringAfterTheHeaderIsStillRemoved() throws Exception {
+        // Longer than Jackson's default limit of 20,000,000 characters for one string.
+        char[] chars = new char[20_000_001];
+        Arrays.fill(chars, 'x');
+        String json = "{\"id\":\"" + new String(chars) + "\"}";
+
+        Message message = deliverOne(endpoint(REMOVE), null, framed(42, json));
+
+        Assert.assertEquals(json.length(), message.getBody(String.class).length());
         Assert.assertEquals(42, message.getHeader("CpiKafkaPlusSchemaId"));
     }
 
@@ -259,7 +318,11 @@ public class RemoveConfluentHeaderTest {
 
     /** {@code json} behind the Confluent header of {@code schemaId}. */
     private static byte[] framed(int schemaId, String json) {
-        byte[] payload = json.getBytes(StandardCharsets.UTF_8);
+        return framed(schemaId, json.getBytes(StandardCharsets.UTF_8));
+    }
+
+    /** {@code payload} behind the Confluent header of {@code schemaId}. */
+    private static byte[] framed(int schemaId, byte[] payload) {
         return ByteBuffer.allocate(5 + payload.length).put((byte) 0).putInt(schemaId).put(payload).array();
     }
 

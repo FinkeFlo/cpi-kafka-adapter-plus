@@ -76,7 +76,8 @@ tab *Message Handling*) removes the header before the value is read as UTF-8 tex
 
 | Value | What the integration flow gets |
 |---|---|
-| At least 5 bytes, the first one `0x00` | The bytes after the header as UTF-8 text. For `{"id":"a"}` behind the header of schema ID 42, the bytes `00 00 00 00 2A 7B 22 …`, the body is `{"id":"a"}`. |
+| At least 5 bytes, the first one `0x00`, and exactly one JSON value after the header | The bytes after the header as UTF-8 text. For `{"id":"a"}` behind the header of schema ID 42, the bytes `00 00 00 00 2A 7B 22 …`, the body is `{"id":"a"}`. |
+| The header, but no JSON after it, such as Avro or Protobuf from Confluent's serializers | The value unchanged, header included, and no `CpiKafkaPlusSchemaId`. The sender logs a warning once per consumer. For Avro, use **Enable Schema Registry** with **Deserialize Values as Avro** instead; Protobuf is not supported. |
 | Anything else, such as plain JSON from another producer | The value unchanged. JSON text never starts with `0x00`, so the two cannot be confused. |
 
 - With **Batch Mode** off, the header `CpiKafkaPlusSchemaId` (`Integer`) carries the schema ID of the
@@ -85,7 +86,9 @@ tab *Message Handling*) removes the header before the value is read as UTF-8 tex
   text, not as Base64. **JSON Schema Validation** checks the JSON after the header against the schema
   in the channel.
 - The Schema Registry is not called and the schema ID is not checked, so no registry connection is
-  needed.
+  needed. Whether JSON follows the header is checked on the value itself: JSON that was already
+  malformed when it was produced keeps its header as well, so **JSON Schema Validation** then reports
+  the control characters of the header rather than the syntax error behind it.
 - A record that goes to the Dead Letter Queue keeps its header: the DLQ gets the value as it was
   consumed.
 - Keys are not changed. The receiver writes no Confluent header.

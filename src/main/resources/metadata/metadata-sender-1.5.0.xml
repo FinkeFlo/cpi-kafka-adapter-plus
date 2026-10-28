@@ -236,7 +236,7 @@
                 </GuiLabels>
                 <AttributeReference>
                     <ReferenceName>removeConfluentHeader</ReferenceName>
-                    <description>Remove the 5-byte header that Confluent's JSON Schema serializer writes in front of every value: the magic byte 0x00 and the 4-byte schema ID. The JSON after it then reaches the IFlow, a batch and JSON Schema Validation as it was produced. A value with fewer than 5 bytes or another first byte is passed on unchanged. When each message has its own IFlow run (Batch Mode off), the header CpiKafkaPlusSchemaId carries the schema ID. No Schema Registry is called. Only editable while 'Enable Schema Registry' is off; with it on, the Avro deserialization reads the header itself.</description>
+                    <description>Remove the 5-byte header that Confluent's JSON Schema serializer writes in front of every value: the magic byte 0x00 and the 4-byte schema ID. The JSON after it then reaches the IFlow, a batch and JSON Schema Validation as it was produced. A value with fewer than 5 bytes, another first byte, or no JSON after the header (such as Avro or Protobuf) is passed on unchanged. When each message has its own IFlow run (Batch Mode off), the header CpiKafkaPlusSchemaId carries the schema ID. No Schema Registry is called. Only editable while 'Enable Schema Registry' is off; with it on, the Avro deserialization reads the header itself.</description>
                     <EditCondition>
                         <AttributeName>schemaRegistryEnabled</AttributeName>
                         <AttributeValue>false</AttributeValue>
