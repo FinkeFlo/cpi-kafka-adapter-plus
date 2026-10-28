@@ -32,8 +32,8 @@ import java.util.Map;
 import org.apache.kafka.common.compress.Compression;
 import org.apache.kafka.common.record.internal.CompressionType;
 import org.apache.kafka.common.record.internal.RecordBatch;
-import org.apache.kafka.common.utils.BufferSupplier;
-import org.apache.kafka.common.utils.ByteBufferOutputStream;
+import org.apache.kafka.common.utils.internals.BufferSupplier;
+import org.apache.kafka.common.utils.internals.ByteBufferOutputStream;
 
 /**
  * Exercises every Kafka compression codec once, in the calling class space, so that their native

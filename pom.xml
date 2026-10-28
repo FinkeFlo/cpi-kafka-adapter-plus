@@ -27,9 +27,9 @@
         <maven.compiler.release>11</maven.compiler.release>
         <camel.version>3.14.7</camel.version>
         <adk.version>2.3.0</adk.version>
-        <kafka.version>4.3.1</kafka.version>
+        <kafka.version>4.4.0</kafka.version>
         <avro.version>1.12.2</avro.version>
-        <jackson.version>2.22.3</jackson.version>
+        <jackson.version>2.22.4</jackson.version>
         <!-- Shared by the runtime linux_amd64 zstd-jni dependency and the test-only darwin_aarch64
              one in the zstd-darwin-aarch64 profile; both must stay on the same version. -->
         <zstd-jni.version>1.5.7-23</zstd-jni.version>
@@ -118,8 +118,9 @@
         <!-- The lz4 codec: the at.yawk.lz4 fork that kafka-clients depends on, declared so its
              version is visible here. org.lz4:lz4-java 1.8.0, pinned until 1.4.1, is affected by
              CVE-2025-12183 and CVE-2025-66566 and is not maintained any more (#240). The 1.10.2
-             that kafka-clients 4.3.1 asks for is affected by GHSA-mcr4-qmvw-px4g (CVE-2026-106451)
-             and five lesser advisories, which 1.11.4 fixes. The fork's
+             that kafka-clients 4.3.1 asked for is affected by GHSA-mcr4-qmvw-px4g (CVE-2026-106451)
+             and five lesser advisories, which 1.11.4 fixes. kafka-clients 4.4.0 asks for 1.11.2;
+             the adapter declares the newer 1.12.1. The fork's
              own OSGi manifest does not resolve on CPI (it imports java.* packages), so it must
              never ship as a bundle of its own: Embed-Dependency puts it on the Bundle-ClassPath of
              the adapter bundle, where its manifest is not read, at.yawk.lz4 is in the
@@ -128,7 +129,7 @@
         <dependency>
             <groupId>at.yawk.lz4</groupId>
             <artifactId>lz4-java</artifactId>
-            <version>1.11.4</version>
+            <version>1.12.1</version>
             <scope>runtime</scope>
         </dependency>
 
@@ -225,7 +226,7 @@
         <dependency>
             <groupId>com.squareup.okhttp3</groupId>
             <artifactId>mockwebserver</artifactId>
-            <version>4.12.0</version>
+            <version>4.12.1</version>
             <scope>test</scope>
         </dependency>
         <dependency>
@@ -375,8 +376,11 @@
                         <DynamicImport-Package>*</DynamicImport-Package>
                         <Export-Package>com.finkeflo.cpi.kafka</Export-Package>
                         <!-- kafka-clients is unpacked into target/classes by maven-dependency-plugin;
-                             listed here as Private-Package so bnd includes it without re-exporting. -->
-                        <Private-Package>org.apache.kafka.*,org.ietf.jgss</Private-Package>
+                             listed here as Private-Package so bnd includes it without re-exporting.
+                             Since 4.4.0 kafka-clients shades commons-net 3.13.0 (for CidrUtils), with a
+                             package that holds only a fuzzer test case of commons-net, which no code
+                             reads; it is left out, and BundleContentIT would flag it otherwise. -->
+                        <Private-Package>!org.apache.kafka.shaded.org.apache.commons.net.fuzzer,org.apache.kafka.*,org.ietf.jgss</Private-Package>
                         <Embed-Dependency>
                             avro;scope=compile,
                             jackson-databind;scope=compile,
@@ -485,7 +489,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
-                <version>3.6.0</version>
+                <version>3.6.1</version>
                 <configuration>
                     <skip>${skip.unit.tests}</skip>
                 </configuration>
@@ -494,7 +498,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-failsafe-plugin</artifactId>
-                <version>3.6.0</version>
+                <version>3.6.1</version>
                 <configuration>
                     <excludes>
                         <exclude>**/FullVolumeIT.java</exclude>
@@ -667,7 +671,7 @@
                     <dependency>
                         <groupId>org.ow2.asm</groupId>
                         <artifactId>asm</artifactId>
-                        <version>9.10.1</version>
+                        <version>9.11.1</version>
                     </dependency>
                 </dependencies>
             </plugin>
