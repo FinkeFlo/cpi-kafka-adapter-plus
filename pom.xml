@@ -27,9 +27,9 @@
         <maven.compiler.release>11</maven.compiler.release>
         <camel.version>3.14.7</camel.version>
         <adk.version>2.3.0</adk.version>
-        <kafka.version>4.3.1</kafka.version>
+        <kafka.version>4.4.0</kafka.version>
         <avro.version>1.12.2</avro.version>
-        <jackson.version>2.22.3</jackson.version>
+        <jackson.version>2.22.4</jackson.version>
         <!-- Shared by the runtime linux_amd64 zstd-jni dependency and the test-only darwin_aarch64
              one in the zstd-darwin-aarch64 profile; both must stay on the same version. -->
         <zstd-jni.version>1.5.7-23</zstd-jni.version>
@@ -128,7 +128,7 @@
         <dependency>
             <groupId>at.yawk.lz4</groupId>
             <artifactId>lz4-java</artifactId>
-            <version>1.11.4</version>
+            <version>1.12.1</version>
             <scope>runtime</scope>
         </dependency>
 
@@ -225,7 +225,7 @@
         <dependency>
             <groupId>com.squareup.okhttp3</groupId>
             <artifactId>mockwebserver</artifactId>
-            <version>4.12.0</version>
+            <version>4.12.1</version>
             <scope>test</scope>
         </dependency>
         <dependency>
@@ -485,7 +485,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
-                <version>3.6.0</version>
+                <version>3.6.1</version>
                 <configuration>
                     <skip>${skip.unit.tests}</skip>
                 </configuration>
@@ -494,7 +494,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-failsafe-plugin</artifactId>
-                <version>3.6.0</version>
+                <version>3.6.1</version>
                 <configuration>
                     <excludes>
                         <exclude>**/FullVolumeIT.java</exclude>
@@ -667,7 +667,7 @@
                     <dependency>
                         <groupId>org.ow2.asm</groupId>
                         <artifactId>asm</artifactId>
-                        <version>9.10.1</version>
+                        <version>9.11.1</version>
                     </dependency>
                 </dependencies>
             </plugin>
