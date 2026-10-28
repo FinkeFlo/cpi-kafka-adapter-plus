@@ -135,6 +135,11 @@ the header `CpiKafkaPlusFallbackMode=true` (see [Kafka Headers](kafka-headers.md
 
 This means a single bad record does not drag the entire batch into the DLQ.
 
+A batch of **one** record is not run a second time: its failed batch run counts as the record's
+first attempt. A permanent error sends it straight to the DLQ, a transient one continues with the
+record's retries, which carry `CpiKafkaPlusFallbackMode=true`. Up to 1.4.2 the record ran through
+the IFlow once more as a fallback before its retries started.
+
 ### Example: 5-Record Batch with One Bad Record
 
 **Setup:** **Max Records per IFlow Run (MPL)** (`batchSize`) = 5, **Retries before DLQ (additional attempts)** (`dlqMaxRetries`) = 2, Record #3 contains invalid data.
@@ -176,6 +181,34 @@ own with the next retry.
 
 This applies to every way a record reaches the DLQ: failed IFlow processing, failed
 deserialization and failed JSON Schema validation.
+
+The failed write is reported in the CPI monitor too, in one MPL entry per failure with the code
+`KP-DLQ-001`. The status text leads with the failed write and its root cause, followed by the
+original failure, for example:
+
+```
+KP-DLQ-001: dead-letter write to orders-dlq failed: InvalidRecordException: Compacted topic cannot accept message without key in topic partition orders-dlq-0. (original: KP-FLOW-001: <flow error>)
+```
+
+The `KafkaAdapterError` attachment holds both stack traces (the original failure and, under
+`--- DLQ Error ---`, the failed write) and, for well-known causes, a `hint`:
+
+| Root cause | Hint |
+|------------|------|
+| `InvalidRecordException` on a compacted topic | The DLQ topic is compacted and the record has no key: use `cleanup.policy=delete` |
+| `InvalidRecordException`, other | The broker rejected the record: check the DLQ topic configuration |
+| `AuthenticationException` | Authentication of the DLQ producer failed |
+| `TopicAuthorizationException` / `AuthorizationException` | The credentials lack `WRITE` (or `DESCRIBE`) on the DLQ topic |
+| `UnknownTopicOrPartitionException`, metadata timeout | The DLQ topic does not exist or is not visible to these credentials |
+| `RecordTooLargeException` | The record exceeds `max.message.bytes` of the DLQ topic or broker |
+
+A record the broker rejects (`InvalidRecordException`) is a data error: the DLQ producer is not
+rebuilt for it, since a fresh producer would be rejected the same way.
+
+The custom header properties `KafkaAdapterOriginalErrorCode`, `KafkaAdapterDlqOutcome`
+(`MOVED`/`SEND_FAILED`) and `KafkaAdapterDlqTopic` make these messages searchable, and every MPL
+entry with a DLQ outcome names the source topic as sender (`SAP_Sender`) and the DLQ topic as
+receiver (`SAP_Receiver`).
 
 ## Error Handling Without DLQ
 

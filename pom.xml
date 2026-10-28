@@ -32,7 +32,7 @@
         <jackson.version>2.22.3</jackson.version>
         <!-- Shared by the runtime linux_amd64 zstd-jni dependency and the test-only darwin_aarch64
              one in the zstd-darwin-aarch64 profile; both must stay on the same version. -->
-        <zstd-jni.version>1.5.7-21</zstd-jni.version>
+        <zstd-jni.version>1.5.7-23</zstd-jni.version>
         <!-- CI toggle: when true, Surefire (unit tests) is skipped so the integration-test
              CI job can run *IT tests only, without re-running the unit tests. Default false. -->
         <skip.unit.tests>false</skip.unit.tests>
@@ -136,7 +136,7 @@
         <dependency>
             <groupId>org.xerial.snappy</groupId>
             <artifactId>snappy-java</artifactId>
-            <version>1.1.10.8</version>
+            <version>1.1.10.12</version>
             <scope>runtime</scope>
         </dependency>
 

@@ -36,5 +36,9 @@ public class CpiKafkaPlusErrorCodeTest {
     @Test public void testInitGeneric() { assertEquals(CpiKafkaPlusErrorCode.KP_PROD_001, CpiKafkaPlusErrorCode.fromProducerInitFailure(new RuntimeException("r"))); }
     @Test public void testInitSpecific() { assertEquals(CpiKafkaPlusErrorCode.KP_SEC_001, CpiKafkaPlusErrorCode.fromProducerInitFailure(new AuthenticationException("a"))); }
     @Test public void testJsonSchema() { assertEquals(CpiKafkaPlusErrorCode.KP_CFG_002, CpiKafkaPlusErrorCode.fromJsonSchemaValidationFailure(new RuntimeException("r"))); }
+    @Test public void testRouteFailure() {
+        assertEquals("KP-FLOW-001", CpiKafkaPlusErrorCode.fromRouteFailure(new IllegalStateException("backend")).code());
+        assertEquals("iflow.processing_failed", CpiKafkaPlusErrorCode.KP_FLOW_001.operation());
+    }
     @Test public void testUnique() { CpiKafkaPlusErrorCode[] v = CpiKafkaPlusErrorCode.values(); for (int i=0;i<v.length;i++) for (int j=i+1;j<v.length;j++) assertNotEquals(v[i].code(), v[j].code()); }
 }

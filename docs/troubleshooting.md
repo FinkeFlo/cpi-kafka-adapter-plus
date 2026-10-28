@@ -48,6 +48,7 @@ tickets: it identifies the failure class precisely and survives copy-paste bette
 | `KP-META-001` | `metadata.fetch_timeout` | Metadata fetch timed out |
 | `KP-META-002` | `metadata.monitor_state_fault` | KAFKA-10902 monitor fault (see below) |
 | `KP-DLQ-001` | `dlq.delivery_failed` | Dead-letter queue delivery failed |
+| `KP-FLOW-001` | `iflow.processing_failed` | The integration flow failed to process the records a sender handed to it. The cause is in the flow (mapping, script, receiver call), not in Kafka |
 | `KP-SR-001` | `schema_registry.failed` | Schema Registry call failed |
 | `KP-GEN-001` | `unclassified` | No code matched. Treated as unknown rather than guessed — see *Exception classification* below |
 
@@ -586,6 +587,9 @@ Four custom header properties are attached to the failed message's MPL entry:
 | `KafkaAdapterTopic` | The target topic |
 | `KafkaAdapterProducerPath` | `SHARED` or `TRANSACTIONAL`, only when the failure carries a producer path |
 | `KafkaAdapterRetryable` | `true` if the classification was `RETRIABLE`, otherwise `false` |
+| `KafkaAdapterOriginalErrorCode` | Sender only, with a DLQ outcome: the code of the failure that sent the record to the DLQ, e.g. `KP-FLOW-001` |
+| `KafkaAdapterDlqOutcome` | Sender only: `MOVED` if the record was written to the DLQ, `SEND_FAILED` if that write failed |
+| `KafkaAdapterDlqTopic` | Sender only: the dead-letter topic of the outcome above |
 
 These properties are visible in the monitor's message detail view and are searchable. They do **not**
 require MPL tracing to be enabled — they are attached via `addCustomHeaderProperty`, which works
@@ -608,6 +612,24 @@ of the tenant trace file, so when a cause chain is deep this is where to read it
 When a failed consume record is successfully routed to DLQ, the MPL status message now also
 states that outcome directly (`moved to dead-letter topic <topic>`), so the routing result is
 visible in the main MPL error text and not only in the attachment.
+
+When the DLQ write itself fails, the message carries `KP-DLQ-001` and the status text names that
+write and its root cause first, then the failure that sent the record there:
+
+```
+KP-DLQ-001: dead-letter write to <dlq topic> failed: <root cause class>: <root cause message> (original: KP-FLOW-001: <flow error>)
+```
+
+The attachment keeps the original failure under `Exception:` and adds a `--- DLQ Error ---` section
+with the full stack trace of the failed write. Its context lists `dlqRootCauseClass`,
+`dlqRootCauseMessage`, `consequence` and, for well-known causes, a `hint` (for example a record
+without key on a compacted DLQ topic, missing `WRITE` on the DLQ topic, a DLQ topic that does not
+exist, or a record larger than the topic accepts). The hint is added to the root cause, it never
+replaces it. See [When the DLQ Write Fails](features/dead-letter-queue.md#when-the-dlq-write-fails).
+
+Every failure is reported once by the adapter, in one MPL entry. A message whose record has a DLQ
+outcome names the source topic as sender (`SAP_Sender`) and the DLQ topic as receiver
+(`SAP_Receiver`), so it can be found in the monitor by either topic.
 
 A second trace-independent channel writes the same four facts as adapter attributes
 (`errorCode`, `topic`, `producerPath`, `retryable`) via `putAdapterAttribute`. It is redundant on

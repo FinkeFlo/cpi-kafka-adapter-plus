@@ -191,6 +191,11 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
         }
 
         @Override
+        public void handleReportedException(String message, Exchange exchange, Exception e) {
+            getExceptionHandler().handleException(message, exchange, e);
+        }
+
+        @Override
         public Exchange createExchange() {
             return endpoint.createExchange();
         }
