@@ -68,6 +68,13 @@
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
+            <!-- Test-only, via kafka-schema-registry-client; not in the bundle. Pinned above 33.7.2 for
+                 the CompactHashMap deserialization advisory (Dependabot alert #35). -->
+            <dependency>
+                <groupId>com.google.guava</groupId>
+                <artifactId>guava</artifactId>
+                <version>33.8.0-jre</version>
+            </dependency>
         </dependencies>
     </dependencyManagement>
 
