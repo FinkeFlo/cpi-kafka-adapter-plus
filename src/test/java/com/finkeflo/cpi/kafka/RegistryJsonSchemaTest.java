@@ -324,6 +324,19 @@ public class RegistryJsonSchemaTest {
                 "{\"$schema\":\"http://json-schema.org/draft-04/schema#\",\"required\":[\"a\"]}").validate("{}"));
     }
 
+    @Test
+    public void theSchemeAndAnEmptyFragmentDoNotMatter() {
+        for (String uri : new String[] {"http://json-schema.org/draft-07/schema",
+                "https://json-schema.org/draft-07/schema#", "http://json-schema.org/draft-04/schema",
+                "https://json-schema.org/draft-06/schema"}) {
+            Assert.assertNotNull(uri, JsonSchemaValidator.forRegistrySchema(
+                    "{\"$schema\":\"" + uri + "\",\"required\":[\"a\"]}").validate("{}"));
+        }
+        Assert.assertNotNull("2020-12 with a trailing #", JsonSchemaValidator.forRegistrySchema(
+                "{\"$schema\":\"https://json-schema.org/draft/2020-12/schema#\","
+                + "\"prefixItems\":[{\"type\":\"string\"}]}").validate("[1]"));
+    }
+
     @Test(expected = IllegalArgumentException.class)
     public void anUnknownSchemaIsRejected() {
         JsonSchemaValidator.forRegistrySchema("{\"$schema\":\"https://example.com/my-dialect\"}");

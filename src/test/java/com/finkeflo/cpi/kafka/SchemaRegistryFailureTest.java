@@ -172,7 +172,7 @@ public class SchemaRegistryFailureTest {
     /** {@code avro} in the Confluent wire format, with schema ID {@link #SCHEMA_ID}. */
     private static byte[] record(byte[] avro) {
         return ByteBuffer.allocate(5 + avro.length)
-                .put(AvroDeserializerHelper.MAGIC_BYTE)
+                .put(ConfluentWireFormat.MAGIC_BYTE)
                 .putInt(SCHEMA_ID)
                 .put(avro)
                 .array();

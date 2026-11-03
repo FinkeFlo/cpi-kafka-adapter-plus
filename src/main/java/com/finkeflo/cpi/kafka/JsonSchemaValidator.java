@@ -20,7 +20,6 @@
  */
 package com.finkeflo.cpi.kafka;
 
-import java.util.Optional;
 import java.util.Set;
 
 import com.fasterxml.jackson.core.JsonParser;
@@ -29,7 +28,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.networknt.schema.JsonSchema;
 import com.networknt.schema.JsonSchemaFactory;
 import com.networknt.schema.SpecVersion;
-import com.networknt.schema.SpecVersionDetector;
 import com.networknt.schema.ValidationMessage;
 import com.networknt.schema.resource.DisallowSchemaLoader;
 import org.slf4j.Logger;
@@ -98,12 +96,27 @@ public final class JsonSchemaValidator {
         if (!dialect.isTextual()) {
             throw new IllegalArgumentException("Invalid JSON Schema: $schema must be a string, got: " + dialect);
         }
-        Optional<SpecVersion.VersionFlag> known = SpecVersionDetector.detectOptionalVersion(dialect.asText());
-        if (!known.isPresent()) {
-            throw new IllegalArgumentException("Invalid JSON Schema: unsupported $schema '" + dialect.asText()
-                    + "'; supported are draft-04, draft-06, draft-07, 2019-09 and 2020-12");
+        String id = canonicalDialectId(dialect.asText());
+        for (SpecVersion.VersionFlag flag : SpecVersion.VersionFlag.values()) {
+            if (canonicalDialectId(flag.getId()).equals(id)) {
+                return flag;
+            }
         }
-        return known.get();
+        throw new IllegalArgumentException("Invalid JSON Schema: unsupported $schema '" + dialect.asText()
+                + "'; supported are draft-04, draft-06, draft-07, 2019-09 and 2020-12");
+    }
+
+    /**
+     * The meta-schema URI without the scheme and an empty fragment, so that the forms found in practice,
+     * such as {@code https://json-schema.org/draft-07/schema} for {@code http://json-schema.org/draft-07/schema#},
+     * name the same draft.
+     */
+    private static String canonicalDialectId(String uri) {
+        String id = uri.trim();
+        if (id.endsWith("#")) {
+            id = id.substring(0, id.length() - 1);
+        }
+        return id.replaceFirst("^https?://", "");
     }
 
     /**

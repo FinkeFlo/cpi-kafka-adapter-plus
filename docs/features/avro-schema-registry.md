@@ -108,7 +108,8 @@ handled once, with both messages; the registry's is prefixed `Registry schema <i
 - Avro values are not validated by this option.
 - With the option on but *Deserialize Values via Schema Registry* off, the sender logs
   `consumer.config.ineffective parameter=registrySchemaValidation` at start.
-- iFlows on metadata version 1.0 to 1.5 have no such field; move them to 1.6 with *Update Version*.
+- Sender channels on metadata version 1.2 to 1.5 have no such field; move them to 1.6 with *Update Version*.
+  Channels on 1.0 and 1.1 cannot use *Update Version* and have to be recreated.
 
 ## JSON Values with the Confluent Header
 

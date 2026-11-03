@@ -20,8 +20,6 @@
  */
 package com.finkeflo.cpi.kafka;
 
-import java.io.IOException;
-import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -46,9 +44,6 @@ import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.errors.InterruptException;
 import org.apache.kafka.common.errors.RebalanceInProgressException;
 import org.apache.kafka.common.errors.WakeupException;
-import com.fasterxml.jackson.core.JsonFactory;
-import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.core.StreamReadConstraints;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -68,18 +63,6 @@ final class RecordProcessor {
 
     private static final Logger LOG = LoggerFactory.getLogger(RecordProcessor.class);
 
-    /**
-     * Checks that JSON follows a Confluent header (#284). Without Jackson's default limits, so that a
-     * value is not kept with its header only because it is large: the IFlow gets it either way.
-     */
-    private static final JsonFactory CONFLUENT_JSON_CHECK = JsonFactory.builder()
-            .streamReadConstraints(StreamReadConstraints.builder()
-                    .maxStringLength(Integer.MAX_VALUE)
-                    .maxNumberLength(Integer.MAX_VALUE)
-                    .maxNameLength(Integer.MAX_VALUE)
-                    .maxNestingDepth(Integer.MAX_VALUE)
-                    .build())
-            .build();
     private static final long MAX_RETRY_DELAY_SECONDS = 300; // 5 minutes
 
     /**
@@ -1125,7 +1108,7 @@ final class RecordProcessor {
             result = avroHelper.decode(topic, data);
         } else if ((json = jsonBehindConfluentHeader(topic, data)) != null) {
             // The ID from the removed header, bytes 1 to 4 (big-endian), as Confluent writes it.
-            result = new DecodedValue(json, ByteBuffer.wrap(data, 1, 4).getInt(), null, null);
+            result = new DecodedValue(json, ConfluentWireFormat.schemaId(data), null, null);
         } else {
             result = DecodedValue.of(new String(data, StandardCharsets.UTF_8));
         }
@@ -1188,13 +1171,12 @@ final class RecordProcessor {
      */
     private String jsonBehindConfluentHeader(String topic, byte[] data) {
         if (!endpoint.isRemoveConfluentHeader() || endpoint.isSchemaRegistryEnabled()
-                || data == null || data.length < AvroDeserializerHelper.HEADER_LENGTH
-                || data[0] != AvroDeserializerHelper.MAGIC_BYTE) {
+                || !ConfluentWireFormat.hasHeader(data)) {
             return null;
         }
-        int header = AvroDeserializerHelper.HEADER_LENGTH;
+        int header = ConfluentWireFormat.HEADER_LENGTH;
         String text = new String(data, header, data.length - header, StandardCharsets.UTF_8);
-        if (isOneJsonValue(text)) {
+        if (ConfluentWireFormat.isOneJsonValue(text)) {
             return text;
         }
         if (reportedNoJsonBehindConfluentHeader.compareAndSet(false, true)) {
@@ -1202,24 +1184,12 @@ final class RecordProcessor {
             AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("consumer.config.ineffective")
                     .with("parameter", "removeConfluentHeader")
                     .with("topic", topic)
-                    .with("schemaId", ByteBuffer.wrap(data, 1, 4).getInt())
+                    .with("schemaId", ConfluentWireFormat.schemaId(data))
                     .with("reason", "no JSON after the Confluent header, so the value is passed on unchanged; "
                             + "Avro needs Enable Schema Registry and Deserialize Values via Schema Registry, Protobuf is "
                             + "not supported"));
         }
         return null;
-    }
-
-    static boolean isOneJsonValue(String text) {
-        try (JsonParser parser = CONFLUENT_JSON_CHECK.createParser(text)) {
-            if (parser.nextToken() == null) {
-                return false;
-            }
-            parser.skipChildren();
-            return parser.nextToken() == null;
-        } catch (IOException e) {
-            return false;
-        }
     }
 
     // --- Header mapping ---
@@ -1255,11 +1225,7 @@ final class RecordProcessor {
     /**
      * @param payloadSize size of the deserialized Camel body in UTF-8 bytes
      */
-    void setSingleRecordHeaders(Message message, ConsumerRecord<byte[], byte[]> record, String key, int payloadSize) {
-        setSingleRecordHeaders(message, record, decodeValue(record.topic(), record.value(), null), key, payloadSize);
-    }
-
-    private void setSingleRecordHeaders(Message message, ConsumerRecord<byte[], byte[]> record, DecodedValue decoded,
+    void setSingleRecordHeaders(Message message, ConsumerRecord<byte[], byte[]> record, DecodedValue decoded,
                                         String key, int payloadSize) {
         message.setHeader("SAP_Sender", record.topic());
         message.setHeader("CpiKafkaPlusTopic", record.topic());

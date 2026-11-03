@@ -54,14 +54,13 @@ public class AvroDeserializerHelper implements Closeable {
 
     private static final Logger LOG = LoggerFactory.getLogger(AvroDeserializerHelper.class);
 
-    static final byte MAGIC_BYTE = 0x00;
-    static final int  HEADER_LENGTH = 5; // magic byte + 4-byte schema ID
-
     private final SchemaRegistryHttpClient registryClient;
     private final String                   avroOutputFormat;
     private final boolean                  registrySchemaValidation;
     /** Compiled registry JSON Schemas by ID, which is immutable. */
     private final ConcurrentHashMap<Integer, JsonSchemaValidator> validators = new ConcurrentHashMap<>();
+    /** Why a registry schema cannot be used for validation, per schema ID, so that it is not compiled again. */
+    private final ConcurrentHashMap<Integer, String> unusableSchemas = new ConcurrentHashMap<>();
     private final AtomicBoolean reportedXmlForJson = new AtomicBoolean();
 
     public AvroDeserializerHelper(CpiKafkaPlusEndpoint endpoint) {
@@ -101,16 +100,16 @@ public class AvroDeserializerHelper implements Closeable {
         if (data == null || data.length == 0) {
             return DecodedValue.of(null);
         }
-        if (data.length < HEADER_LENGTH) {
+        if (data.length < ConfluentWireFormat.HEADER_LENGTH) {
             throw new RuntimeException(
                     "Schema Registry value too short (" + data.length + " bytes) — expected at least "
-                    + HEADER_LENGTH + " bytes (Confluent wire format header). "
+                    + ConfluentWireFormat.HEADER_LENGTH + " bytes (Confluent wire format header). "
                     + "Is this topic actually written with a Schema Registry serializer?");
         }
 
         ByteBuffer buf = ByteBuffer.wrap(data);
         byte magic = buf.get();
-        if (magic != MAGIC_BYTE) {
+        if (magic != ConfluentWireFormat.MAGIC_BYTE) {
             throw new RuntimeException(
                     "Invalid magic byte: 0x" + Integer.toHexString(magic & 0xFF)
                     + " (expected 0x00). Message may not be in Confluent wire format.");
@@ -189,13 +188,14 @@ public class AvroDeserializerHelper implements Closeable {
             text = StandardCharsets.UTF_8.newDecoder()
                     .onMalformedInput(CodingErrorAction.REPORT)
                     .onUnmappableCharacter(CodingErrorAction.REPORT)
-                    .decode(ByteBuffer.wrap(data, HEADER_LENGTH, data.length - HEADER_LENGTH))
+                    .decode(ByteBuffer.wrap(data, ConfluentWireFormat.HEADER_LENGTH,
+                            data.length - ConfluentWireFormat.HEADER_LENGTH))
                     .toString();
         } catch (CharacterCodingException e) {
             throw new RegistryValueException(schemaId, registered.type(),
                     "the value after the header is not valid UTF-8", e);
         }
-        if (!RecordProcessor.isOneJsonValue(text)) {
+        if (!ConfluentWireFormat.isOneJsonValue(text)) {
             throw new RegistryValueException(schemaId, registered.type(),
                     "the value after the header is not exactly one JSON value");
         }
@@ -218,16 +218,23 @@ public class AvroDeserializerHelper implements Closeable {
         if (cached != null) {
             return cached;
         }
+        String unusable = unusableSchemas.get(registered.id());
+        if (unusable != null) {
+            throw new RegistryValueException(registered.id(), registered.type(), unusable);
+        }
         if (registered.hasReferences()) {
-            throw new RegistryValueException(registered.id(), registered.type(), "the schema refers to other "
-                    + "registered schemas (references), which Validate with Registry Schema does not resolve");
+            unusable = "the schema refers to other registered schemas (references), which Validate with "
+                    + "Registry Schema does not resolve";
+            unusableSchemas.put(registered.id(), unusable);
+            throw new RegistryValueException(registered.id(), registered.type(), unusable);
         }
         JsonSchemaValidator validator;
         try {
             validator = JsonSchemaValidator.forRegistrySchema(registered.text());
         } catch (IllegalArgumentException e) {
-            throw new RegistryValueException(registered.id(), registered.type(),
-                    "the registered JSON Schema cannot be used for validation: " + e.getMessage(), e);
+            unusable = "the registered JSON Schema cannot be used for validation: " + e.getMessage();
+            unusableSchemas.put(registered.id(), unusable);
+            throw new RegistryValueException(registered.id(), registered.type(), unusable, e);
         }
         validators.put(registered.id(), validator);
         return validator;
