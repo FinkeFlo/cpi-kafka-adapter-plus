@@ -254,7 +254,7 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
                     + "schema ID) that Confluent's JSON Schema serializer writes in front of every value, "
                     + "before the value is read as UTF-8 text. A value with fewer than 5 bytes, another "
                     + "first byte, or no JSON after the header (such as Avro or Protobuf) is passed on "
-                    + "unchanged. Ignored while schemaRegistryEnabled is on: its Avro deserialization reads "
+                    + "unchanged. Ignored while schemaRegistryEnabled is on: its deserialization reads "
                     + "the header itself.")
     private boolean removeConfluentHeader = false;
 
@@ -400,8 +400,19 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
     private String avroOutputFormat = "JSON";
 
     @UriParam(label = "avro", defaultValue = "true",
-            description = "Deserialize message values using Avro (requires Schema Registry)")
+            description = "Sender: deserialize message values with the Schema Registry (requires "
+                    + "schemaRegistryEnabled). The registry's schemaType of each value's schema ID decides: "
+                    + "Avro is converted to JSON or XML (avroOutputFormat), JSON Schema values are passed "
+                    + "on as JSON without the 5-byte Confluent header. Other types, such as Protobuf, fail.")
     private boolean avroValueDeserialization = true;
+
+    @UriParam(label = "avro", defaultValue = "false",
+            description = "Sender only. Validate each JSON Schema value against the schema registered for its "
+                    + "schema ID. A violation is handled like a failed JSON Schema validation "
+                    + "(jsonSchemaReportError, DLQ). Requires schemaRegistryEnabled and "
+                    + "avroValueDeserialization. Schemas with references or a $ref to another URI are not "
+                    + "supported for validation.")
+    private boolean registrySchemaValidation = false;
 
     @UriParam(label = "avro", defaultValue = "true",
             description = "Serialize message values using Avro (requires Schema Registry)")
@@ -766,6 +777,11 @@ public class CpiKafkaPlusEndpoint extends DefaultPollingEndpoint {
 
     public boolean isAvroValueDeserialization() { return avroValueDeserialization; }
     public void setAvroValueDeserialization(boolean avroValueDeserialization) { this.avroValueDeserialization = avroValueDeserialization; }
+
+    public boolean isRegistrySchemaValidation() { return registrySchemaValidation; }
+    public void setRegistrySchemaValidation(boolean registrySchemaValidation) {
+        this.registrySchemaValidation = registrySchemaValidation;
+    }
 
     public boolean isAvroValueSerialization() { return avroValueSerialization; }
     public void setAvroValueSerialization(boolean avroValueSerialization) { this.avroValueSerialization = avroValueSerialization; }

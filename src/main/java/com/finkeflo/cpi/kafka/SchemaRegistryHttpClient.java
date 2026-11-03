@@ -30,7 +30,12 @@ import java.net.MalformedURLException;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
+import java.util.Locale;
 import java.util.concurrent.ConcurrentHashMap;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import org.apache.avro.Schema;
 import org.slf4j.Logger;
@@ -43,7 +48,7 @@ import org.slf4j.LoggerFactory;
  *
  * <p>Supports:
  * <ul>
- *   <li>Fetching schemas by ID: {@code GET /schemas/ids/{id}}</li>
+ *   <li>Fetching schemas by ID: {@code GET /schemas/ids/{id}}, of any {@code schemaType}</li>
  *   <li>Fetching latest schema by subject: {@code GET /subjects/{subject}/versions/latest}</li>
  *   <li>Registering schemas: {@code POST /subjects/{subject}/versions}</li>
  *   <li>Basic Auth via {@code Authorization: Basic} header</li>
@@ -64,7 +69,11 @@ final class SchemaRegistryHttpClient {
     private final int     connectTimeoutMs;
     private final int     readTimeoutMs;
 
-    /** Cache: schema ID → parsed Avro Schema (IDs are immutable in Schema Registry). */
+    private static final ObjectMapper MAPPER = new ObjectMapper();
+
+    /** Cache: schema ID → schema as registered, of any type (IDs are immutable in Schema Registry). */
+    private final ConcurrentHashMap<Integer, RegisteredSchema> idToRegistered = new ConcurrentHashMap<>();
+    /** Cache: schema ID → parsed Avro Schema. */
     private final ConcurrentHashMap<Integer, Schema> idToSchema     = new ConcurrentHashMap<>();
     /** Cache: subject → latest schema ID. */
     private final ConcurrentHashMap<String, Integer> subjectToId    = new ConcurrentHashMap<>();
@@ -95,6 +104,21 @@ final class SchemaRegistryHttpClient {
     // -----------------------------------------------------------------------
 
     /**
+     * Returns the schema registered under {@code schemaId} as the registry stores it, whatever its
+     * {@code schemaType}. Result is cached; subsequent calls for the same ID return immediately.
+     */
+    RegisteredSchema fetchRegisteredSchema(int schemaId) throws Exception {
+        RegisteredSchema cached = idToRegistered.get(schemaId);
+        if (cached != null) {
+            return cached;
+        }
+        RegisteredSchema registered = RegisteredSchema.parse(schemaId, get("/schemas/ids/" + schemaId));
+        idToRegistered.put(schemaId, registered);
+        LOG.debug("[CPI-KAFKA-PLUS-DIAG] schema-registry: fetched schema id={} type={}", schemaId, registered.type());
+        return registered;
+    }
+
+    /**
      * Returns the Avro Schema for the given schema ID.
      * Result is cached; subsequent calls for the same ID return immediately.
      */
@@ -103,11 +127,8 @@ final class SchemaRegistryHttpClient {
         if (cached != null) {
             return cached;
         }
-        String json      = get("/schemas/ids/" + schemaId);
-        String schemaStr = extractStringField(json, "schema");
-        Schema schema    = new Schema.Parser().parse(schemaStr);
+        Schema schema = new Schema.Parser().parse(fetchRegisteredSchema(schemaId).text());
         idToSchema.put(schemaId, schema);
-        LOG.debug("[CPI-KAFKA-PLUS-DIAG] schema-registry: fetched schema id={}", schemaId);
         return schema;
     }
 
@@ -120,9 +141,9 @@ final class SchemaRegistryHttpClient {
         if (cached != null) {
             return cached;
         }
-        String json      = get("/subjects/" + urlEncode(subject) + "/versions/latest");
-        String schemaStr = extractStringField(json, "schema");
-        int    id        = extractIntField(json, "id");
+        JsonNode json    = parseResponse(get("/subjects/" + urlEncode(subject) + "/versions/latest"));
+        String schemaStr = requiredText(json, "schema");
+        int    id        = requiredInt(json, "id");
         Schema schema    = new Schema.Parser().parse(schemaStr);
         idToSchema.put(id, schema);
         subjectToId.put(subject, id);
@@ -149,9 +170,9 @@ final class SchemaRegistryHttpClient {
      * The response schema and ID are added to all caches.
      */
     int registerSchema(String subject, String schemaJson) throws Exception {
-        String body     = "{\"schema\":" + toJsonString(schemaJson) + "}";
-        String response = post("/subjects/" + urlEncode(subject) + "/versions", body);
-        int    id       = extractIntField(response, "id");
+        ObjectNode request = MAPPER.createObjectNode().put("schema", schemaJson);
+        String response = post("/subjects/" + urlEncode(subject) + "/versions", MAPPER.writeValueAsString(request));
+        int    id       = requiredInt(parseResponse(response), "id");
         Schema schema   = new Schema.Parser().parse(schemaJson);
         idToSchema.put(id, schema);
         subjectToId.put(subject, id);
@@ -241,88 +262,76 @@ final class SchemaRegistryHttpClient {
     }
 
     // -----------------------------------------------------------------------
-    // JSON field extraction (no external library)
+    // Response parsing
     // -----------------------------------------------------------------------
 
-    /**
-     * Extracts the value of a JSON string field from a flat JSON object.
-     * Handles {@code \"} and {@code \\} escape sequences within the value.
-     * Package-private for unit testing.
-     */
-    static String extractStringField(String json, String field) {
-        String key   = "\"" + field + "\":\"";
-        int    start = json.indexOf(key);
-        if (start < 0) {
+    private static JsonNode parseResponse(String json) {
+        JsonNode node;
+        try {
+            node = MAPPER.readTree(json);
+        } catch (Exception e) {
+            throw new IllegalArgumentException("Schema Registry response is not valid JSON: " + abbreviate(json), e);
+        }
+        if (node == null || !node.isObject()) {
+            throw new IllegalArgumentException("Schema Registry response is not a JSON object: " + abbreviate(json));
+        }
+        return node;
+    }
+
+    private static String requiredText(JsonNode json, String field) {
+        JsonNode value = json.get(field);
+        if (value == null || !value.isTextual()) {
             throw new IllegalArgumentException(
-                    "Field '" + field + "' not found in Schema Registry response: " + abbreviate(json));
+                    "Field '" + field + "' not found in Schema Registry response: " + abbreviate(json.toString()));
         }
-        start += key.length();
-        StringBuilder sb      = new StringBuilder();
-        boolean       escaped = false;
-        for (int i = start; i < json.length(); i++) {
-            char c = json.charAt(i);
-            if (escaped) {
-                switch (c) {
-                    case '"':  sb.append('"');  break;
-                    case '\\': sb.append('\\'); break;
-                    case 'n':  sb.append('\n'); break;
-                    case 'r':  sb.append('\r'); break;
-                    case 't':  sb.append('\t'); break;
-                    default:   sb.append(c);    break;
-                }
-                escaped = false;
-            } else if (c == '\\') {
-                escaped = true;
-            } else if (c == '"') {
-                break;
-            } else {
-                sb.append(c);
-            }
+        return value.asText();
+    }
+
+    private static int requiredInt(JsonNode json, String field) {
+        JsonNode value = json.get(field);
+        if (value == null || !value.canConvertToInt()) {
+            throw new IllegalArgumentException(
+                    "Field '" + field + "' has no integer value in: " + abbreviate(json.toString()));
         }
-        return sb.toString();
+        return value.asInt();
     }
 
     /**
-     * Extracts the value of a JSON integer field from a flat JSON object.
-     * Package-private for unit testing.
+     * A schema as {@code GET /schemas/ids/{id}} returns it. The registry omits {@code schemaType}
+     * for Avro, its default type.
      */
-    static int extractIntField(String json, String field) {
-        String key   = "\"" + field + "\":";
-        int    start = json.indexOf(key);
-        if (start < 0) {
-            throw new IllegalArgumentException(
-                    "Field '" + field + "' not found in Schema Registry response: " + abbreviate(json));
-        }
-        start += key.length();
-        while (start < json.length() && json.charAt(start) == ' ') {
-            start++;
-        }
-        int end = start;
-        while (end < json.length() && Character.isDigit(json.charAt(end))) {
-            end++;
-        }
-        if (start == end) {
-            throw new IllegalArgumentException(
-                    "Field '" + field + "' has no integer value in: " + abbreviate(json));
-        }
-        return Integer.parseInt(json.substring(start, end));
-    }
+    static final class RegisteredSchema {
+        static final String AVRO = "AVRO";
+        static final String JSON = "JSON";
 
-    /** Encodes a JSON string value including surrounding quotes. */
-    static String toJsonString(String s) {
-        StringBuilder sb = new StringBuilder("\"");
-        for (int i = 0; i < s.length(); i++) {
-            char c = s.charAt(i);
-            switch (c) {
-                case '"':  sb.append("\\\""); break;
-                case '\\': sb.append("\\\\"); break;
-                case '\n': sb.append("\\n");  break;
-                case '\r': sb.append("\\r");  break;
-                case '\t': sb.append("\\t");  break;
-                default:   sb.append(c);       break;
-            }
+        private final int id;
+        private final String type;
+        private final String text;
+        private final boolean references;
+
+        RegisteredSchema(int id, String type, String text, boolean references) {
+            this.id = id;
+            this.type = type;
+            this.text = text;
+            this.references = references;
         }
-        return sb.append('"').toString();
+
+        static RegisteredSchema parse(int id, String response) {
+            JsonNode json = parseResponse(response);
+            JsonNode type = json.get("schemaType");
+            String schemaType = type == null || type.isNull() || type.asText().trim().isEmpty()
+                    ? AVRO : type.asText().trim().toUpperCase(Locale.ROOT);
+            JsonNode references = json.get("references");
+            return new RegisteredSchema(id, schemaType, requiredText(json, "schema"),
+                    references != null && references.isArray() && references.size() > 0);
+        }
+
+        int id() { return id; }
+        /** {@code AVRO}, {@code JSON}, {@code PROTOBUF} or another type a newer registry knows. */
+        String type() { return type; }
+        String text() { return text; }
+        /** Whether the schema refers to other registered schemas, which are not resolved. */
+        boolean hasReferences() { return references; }
     }
 
     // -----------------------------------------------------------------------

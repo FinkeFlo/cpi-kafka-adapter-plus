@@ -187,7 +187,8 @@ public class RemoveConfluentHeaderTest {
         String line = "ERROR " + RecordProcessor.class.getName() + " - [CPI-KAFKA-PLUS-DIAG] "
                 + "consumer.config.ineffective parameter=removeConfluentHeader topic=orders schemaId=42 "
                 + "reason='no JSON after the Confluent header, so the value is passed on unchanged; Avro "
-                + "needs Enable Schema Registry and Deserialize Values as Avro, Protobuf is not supported'";
+                + "needs Enable Schema Registry and Deserialize Values via Schema Registry, Protobuf is not "
+                + "supported'";
         Assert.assertEquals(logged, 1, logged.split("consumer\\.config\\.ineffective", -1).length - 1);
         Assert.assertTrue(logged, logged.contains("] " + line + "\n"));
     }

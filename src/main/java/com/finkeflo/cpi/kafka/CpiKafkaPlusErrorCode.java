@@ -37,6 +37,7 @@ public enum CpiKafkaPlusErrorCode {
     KP_META_002("KP-META-002", "metadata.monitor_state_fault", "KAFKA-10902 monitor fault."),
     KP_DLQ_001("KP-DLQ-001", "dlq.delivery_failed", "DLQ delivery failed."),
     KP_SR_001("KP-SR-001", "schema_registry.failed", "Schema Registry failed."),
+    KP_SR_002("KP-SR-002", "schema_registry.value_unreadable", "Value does not fit its registry schema."),
     KP_FLOW_001("KP-FLOW-001", "iflow.processing_failed", "iFlow processing failed."),
     KP_GEN_001("KP-GEN-001", "unclassified", "Unclassified error.");
 
@@ -58,6 +59,8 @@ public enum CpiKafkaPlusErrorCode {
             if (c instanceof RecordTooLargeException) return KP_PROD_003;
             if (c instanceof InvalidTopicException) return KP_CFG_001;
             if (c instanceof SerializationException) return KP_PROD_004;
+            if (c instanceof SchemaRegistryHttpClient.SchemaRegistryException) return KP_SR_001;
+            if (c instanceof RegistryValueException) return KP_SR_002;
             if (c instanceof TimeoutException) {
                 String m = c.getMessage();
                 return (m != null && m.toLowerCase().contains("metadata")) ? KP_META_001 : KP_PROD_002;

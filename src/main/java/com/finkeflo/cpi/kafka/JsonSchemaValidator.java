@@ -20,6 +20,7 @@
  */
 package com.finkeflo.cpi.kafka;
 
+import java.util.Optional;
 import java.util.Set;
 
 import com.fasterxml.jackson.core.JsonParser;
@@ -28,7 +29,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.networknt.schema.JsonSchema;
 import com.networknt.schema.JsonSchemaFactory;
 import com.networknt.schema.SpecVersion;
+import com.networknt.schema.SpecVersionDetector;
 import com.networknt.schema.ValidationMessage;
+import com.networknt.schema.resource.DisallowSchemaLoader;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -56,6 +59,51 @@ public final class JsonSchemaValidator {
         } catch (Exception e) {
             throw new IllegalArgumentException("Invalid JSON Schema: " + e.getMessage(), e);
         }
+    }
+
+    private JsonSchemaValidator(JsonSchema schema, ObjectMapper objectMapper) {
+        this.schema = schema;
+        this.objectMapper = objectMapper;
+    }
+
+    /**
+     * A validator for a JSON Schema from the Schema Registry. Unlike the inline schema, its
+     * draft follows {@code $schema} (draft-04 to 2020-12; without one draft-07, the default of
+     * Confluent's JSON Schema serializer), and it may load no other schema: a {@code $ref} to a
+     * remote or classpath URI fails here, when the schema is compiled, instead of fetching anything.
+     *
+     * @throws IllegalArgumentException if the schema is not one JSON document, names an unknown
+     *                                  {@code $schema}, or cannot be compiled
+     */
+    static JsonSchemaValidator forRegistrySchema(String schemaText) {
+        ObjectMapper mapper = new ObjectMapper();
+        JsonNode schemaNode = parseSchemaDocument(mapper, schemaText);
+        SpecVersion.VersionFlag dialect = registryDialect(schemaNode);
+        JsonSchemaFactory factory = JsonSchemaFactory.getInstance(dialect,
+                builder -> builder.schemaLoaders(loaders -> loaders.add(DisallowSchemaLoader.getInstance())));
+        try {
+            JsonSchema compiled = factory.getSchema(schemaNode);
+            compiled.initializeValidators();
+            return new JsonSchemaValidator(compiled, mapper);
+        } catch (Exception e) {
+            throw new IllegalArgumentException("Invalid JSON Schema: " + e.getMessage(), e);
+        }
+    }
+
+    private static SpecVersion.VersionFlag registryDialect(JsonNode schemaNode) {
+        JsonNode dialect = schemaNode.isObject() ? schemaNode.get("$schema") : null;
+        if (dialect == null) {
+            return SpecVersion.VersionFlag.V7;
+        }
+        if (!dialect.isTextual()) {
+            throw new IllegalArgumentException("Invalid JSON Schema: $schema must be a string, got: " + dialect);
+        }
+        Optional<SpecVersion.VersionFlag> known = SpecVersionDetector.detectOptionalVersion(dialect.asText());
+        if (!known.isPresent()) {
+            throw new IllegalArgumentException("Invalid JSON Schema: unsupported $schema '" + dialect.asText()
+                    + "'; supported are draft-04, draft-06, draft-07, 2019-09 and 2020-12");
+        }
+        return known.get();
     }
 
     /**

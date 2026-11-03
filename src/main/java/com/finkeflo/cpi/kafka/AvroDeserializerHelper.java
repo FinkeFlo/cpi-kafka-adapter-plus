@@ -23,6 +23,11 @@ package com.finkeflo.cpi.kafka;
 import java.io.ByteArrayOutputStream;
 import java.io.Closeable;
 import java.nio.ByteBuffer;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.CodingErrorAction;
+import java.nio.charset.StandardCharsets;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.apache.avro.Schema;
 import org.apache.avro.generic.GenericDatumWriter;
@@ -32,15 +37,18 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Handles Avro deserialization using a lightweight JDK-only Schema Registry client.
+ * Reads values in the Confluent wire format through a lightweight JDK-only Schema Registry client.
  * Replaces the Confluent {@code KafkaAvroDeserializer} — no Confluent dependencies required.
  *
  * <p>Wire format (Confluent-compatible):
  * <pre>
  *   Byte 0:    0x00  (magic byte)
  *   Bytes 1-4: schema ID (big-endian int)
- *   Bytes 5+:  Avro binary payload
+ *   Bytes 5+:  payload: Avro binary, or JSON text for a JSON Schema
  * </pre>
+ *
+ * <p>The registry's {@code schemaType} of the ID decides how the payload is read: Avro is converted
+ * to JSON or XML, JSON is passed on as it is. Other types, such as Protobuf, are rejected.
  */
 public class AvroDeserializerHelper implements Closeable {
 
@@ -51,6 +59,10 @@ public class AvroDeserializerHelper implements Closeable {
 
     private final SchemaRegistryHttpClient registryClient;
     private final String                   avroOutputFormat;
+    private final boolean                  registrySchemaValidation;
+    /** Compiled registry JSON Schemas by ID, which is immutable. */
+    private final ConcurrentHashMap<Integer, JsonSchemaValidator> validators = new ConcurrentHashMap<>();
+    private final AtomicBoolean reportedXmlForJson = new AtomicBoolean();
 
     public AvroDeserializerHelper(CpiKafkaPlusEndpoint endpoint) {
         CredentialHelper.UserCredentials creds = CredentialHelper.requireUserCredential(
@@ -62,61 +74,163 @@ public class AvroDeserializerHelper implements Closeable {
 
         this.registryClient   = new SchemaRegistryHttpClient(endpoint.getSchemaRegistryUrl(), username, password);
         this.avroOutputFormat = endpoint.getAvroOutputFormat();
+        this.registrySchemaValidation = endpoint.isRegistrySchemaValidation();
 
         LOG.info("[CPI-KAFKA-PLUS-DIAG] Avro deserializer initialized with Schema Registry at '{}', output format: {}",
                 SchemaRegistryHttpClient.withoutUserInfo(endpoint.getSchemaRegistryUrl()), avroOutputFormat);
     }
 
     /**
-     * Deserializes Avro-encoded bytes to JSON or XML.
+     * Deserializes a value in the Confluent wire format: Avro to JSON or XML, JSON as it is.
      *
-     * @param data raw bytes from Kafka (Confluent wire format: magic byte + schema ID + Avro binary)
-     * @return deserialized string in the configured output format, or {@code null} for empty input
+     * @param data raw bytes from Kafka (Confluent wire format: magic byte + schema ID + payload)
+     * @return deserialized string, or {@code null} for empty input
      */
     public String deserialize(String topic, byte[] data) {
+        return decode(topic, data).payload();
+    }
+
+    /**
+     * As {@link #deserialize}, together with the schema ID and type, and, with
+     * {@code registrySchemaValidation} on, the validator for a JSON value.
+     *
+     * @throws SchemaRegistryHttpClient.SchemaRegistryException if the registry cannot serve the schema
+     * @throws RegistryValueException if the value cannot be read with its registered schema
+     */
+    DecodedValue decode(String topic, byte[] data) {
         if (data == null || data.length == 0) {
-            return null;
+            return DecodedValue.of(null);
         }
         if (data.length < HEADER_LENGTH) {
             throw new RuntimeException(
-                    "Avro message too short (" + data.length + " bytes) — expected at least "
+                    "Schema Registry value too short (" + data.length + " bytes) — expected at least "
                     + HEADER_LENGTH + " bytes (Confluent wire format header). "
-                    + "Is this topic actually Avro-encoded?");
+                    + "Is this topic actually written with a Schema Registry serializer?");
         }
 
         ByteBuffer buf = ByteBuffer.wrap(data);
         byte magic = buf.get();
         if (magic != MAGIC_BYTE) {
             throw new RuntimeException(
-                    "Invalid Avro magic byte: 0x" + Integer.toHexString(magic & 0xFF)
+                    "Invalid magic byte: 0x" + Integer.toHexString(magic & 0xFF)
                     + " (expected 0x00). Message may not be in Confluent wire format.");
         }
 
         int schemaId = buf.getInt();
-
+        SchemaRegistryHttpClient.RegisteredSchema registered;
         try {
-            Schema schema = registryClient.fetchSchemaById(schemaId);
+            registered = registryClient.fetchRegisteredSchema(schemaId);
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            throw avroFailure(topic, schemaId, e);
+        }
+        if (SchemaRegistryHttpClient.RegisteredSchema.AVRO.equals(registered.type())) {
+            return new DecodedValue(deserializeAvro(topic, schemaId, buf), schemaId, registered.type(), null);
+        }
+        if (SchemaRegistryHttpClient.RegisteredSchema.JSON.equals(registered.type())) {
+            return decodeJson(topic, registered, data);
+        }
+        throw new RegistryValueException(schemaId, registered.type(), "schema ID " + schemaId + " has schemaType "
+                + registered.type() + ", which cannot be deserialized; supported are AVRO and JSON");
+    }
 
-            // Remaining bytes after the 5-byte header are the Avro binary payload
-            byte[] avroBytes = new byte[buf.remaining()];
-            buf.get(avroBytes);
+    private String deserializeAvro(String topic, int schemaId, ByteBuffer buf) {
+        Schema schema;
+        try {
+            schema = registryClient.fetchSchemaById(schemaId);
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            throw avroFailure(topic, schemaId, e);
+        }
 
+        // Remaining bytes after the 5-byte header are the Avro binary payload
+        byte[] avroBytes = new byte[buf.remaining()];
+        buf.get(avroBytes);
+        GenericRecord record;
+        try {
             org.apache.avro.generic.GenericDatumReader<GenericRecord> reader =
                     new org.apache.avro.generic.GenericDatumReader<>(schema);
             org.apache.avro.io.Decoder decoder =
                     org.apache.avro.io.DecoderFactory.get().binaryDecoder(avroBytes, null);
-            GenericRecord record = reader.read(null, decoder);
-
+            record = reader.read(null, decoder);
+        } catch (java.io.IOException | org.apache.avro.AvroRuntimeException e) {
+            // The record's own bytes do not fit its schema, such as a truncated payload: not the registry.
+            throw new RegistryValueException(schemaId, SchemaRegistryHttpClient.RegisteredSchema.AVRO,
+                    "the Avro binary does not fit the registered schema: " + e, e);
+        }
+        try {
             return convertGenericRecord(record);
         } catch (RuntimeException e) {
             throw e;
         } catch (Exception e) {
-            AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("avro.deserialization.failed")
-                    .with("errorCode", CpiKafkaPlusErrorCode.KP_SR_001.code())
-                    .with("topic", topic)
-                    .with("schemaId", schemaId), e);
-            throw new RuntimeException("Avro deserialization failed: " + e.getMessage(), e);
+            throw avroFailure(topic, schemaId, e);
         }
+    }
+
+    private RuntimeException avroFailure(String topic, int schemaId, Exception e) {
+        AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("avro.deserialization.failed")
+                .with("errorCode", CpiKafkaPlusErrorCode.KP_SR_001.code())
+                .with("topic", topic)
+                .with("schemaId", schemaId), e);
+        return new RuntimeException("Avro deserialization failed: " + e.getMessage(), e);
+    }
+
+    /**
+     * The JSON after the header, strictly UTF-8 and exactly one JSON value, so that a corrupt record
+     * fails here rather than reaching the integration flow with replacement characters.
+     */
+    private DecodedValue decodeJson(String topic, SchemaRegistryHttpClient.RegisteredSchema registered,
+                                    byte[] data) {
+        int schemaId = registered.id();
+        String text;
+        try {
+            text = StandardCharsets.UTF_8.newDecoder()
+                    .onMalformedInput(CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(CodingErrorAction.REPORT)
+                    .decode(ByteBuffer.wrap(data, HEADER_LENGTH, data.length - HEADER_LENGTH))
+                    .toString();
+        } catch (CharacterCodingException e) {
+            throw new RegistryValueException(schemaId, registered.type(),
+                    "the value after the header is not valid UTF-8", e);
+        }
+        if (!RecordProcessor.isOneJsonValue(text)) {
+            throw new RegistryValueException(schemaId, registered.type(),
+                    "the value after the header is not exactly one JSON value");
+        }
+        if ("XML".equalsIgnoreCase(avroOutputFormat) && reportedXmlForJson.compareAndSet(false, true)) {
+            // ERROR, not WARN: only ERROR reaches the tenant trace (ADR 0004). Once per consumer.
+            AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("consumer.config.ineffective")
+                    .with("parameter", "avroOutputFormat")
+                    .with("value", avroOutputFormat)
+                    .with("topic", topic)
+                    .with("schemaId", schemaId)
+                    .with("schemaType", registered.type())
+                    .with("reason", "applies to Avro values only; JSON Schema values are passed on as JSON"));
+        }
+        return new DecodedValue(text, schemaId, registered.type(),
+                registrySchemaValidation ? validatorFor(registered) : null);
+    }
+
+    private JsonSchemaValidator validatorFor(SchemaRegistryHttpClient.RegisteredSchema registered) {
+        JsonSchemaValidator cached = validators.get(registered.id());
+        if (cached != null) {
+            return cached;
+        }
+        if (registered.hasReferences()) {
+            throw new RegistryValueException(registered.id(), registered.type(), "the schema refers to other "
+                    + "registered schemas (references), which Validate with Registry Schema does not resolve");
+        }
+        JsonSchemaValidator validator;
+        try {
+            validator = JsonSchemaValidator.forRegistrySchema(registered.text());
+        } catch (IllegalArgumentException e) {
+            throw new RegistryValueException(registered.id(), registered.type(),
+                    "the registered JSON Schema cannot be used for validation: " + e.getMessage(), e);
+        }
+        validators.put(registered.id(), validator);
+        return validator;
     }
 
     private String convertGenericRecord(GenericRecord record) throws Exception {

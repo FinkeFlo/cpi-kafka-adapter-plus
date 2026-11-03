@@ -1618,12 +1618,12 @@ public class RecordProcessorProgressTest {
     private static AvroDeserializerHelper failingAvro(CpiKafkaPlusEndpoint endpoint) {
         return new AvroDeserializerHelper(endpoint) {
             @Override
-            public String deserialize(String topic, byte[] data) {
+            DecodedValue decode(String topic, byte[] data) {
                 String value = new String(data, StandardCharsets.UTF_8);
                 if ("BAD".equals(value)) {
                     throw new IllegalArgumentException("Unknown magic byte!");
                 }
-                return value;
+                return DecodedValue.of(value);
             }
         };
     }
@@ -1633,12 +1633,12 @@ public class RecordProcessorProgressTest {
                                                                   RuntimeException failure) {
         return new AvroDeserializerHelper(endpoint) {
             @Override
-            public String deserialize(String topic, byte[] data) {
+            DecodedValue decode(String topic, byte[] data) {
                 String value = new String(data, StandardCharsets.UTF_8);
                 if ("DOWN".equals(value)) {
                     throw failure;
                 }
-                return value;
+                return DecodedValue.of(value);
             }
         };
     }
@@ -1651,12 +1651,12 @@ public class RecordProcessorProgressTest {
     private static AvroDeserializerHelper erroringAvro(CpiKafkaPlusEndpoint endpoint, Error error) {
         return new AvroDeserializerHelper(endpoint) {
             @Override
-            public String deserialize(String topic, byte[] data) {
+            DecodedValue decode(String topic, byte[] data) {
                 String value = new String(data, StandardCharsets.UTF_8);
                 if ("ERR".equals(value)) {
                     throw error;
                 }
-                return value;
+                return DecodedValue.of(value);
             }
         };
     }
@@ -1666,12 +1666,12 @@ public class RecordProcessorProgressTest {
         AtomicInteger reads = new AtomicInteger();
         return new AvroDeserializerHelper(endpoint) {
             @Override
-            public String deserialize(String topic, byte[] data) {
+            DecodedValue decode(String topic, byte[] data) {
                 String value = new String(data, StandardCharsets.UTF_8);
                 if ("FLAKY".equals(value) && reads.incrementAndGet() != 2) {
                     throw new IllegalStateException("Schema Registry unreachable");
                 }
-                return value;
+                return DecodedValue.of(value);
             }
         };
     }

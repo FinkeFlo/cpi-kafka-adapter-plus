@@ -21,7 +21,8 @@ When the adapter delivers a Kafka record to an iFlow, it sets the following Came
 | `CpiKafkaPlusConsumerGroup` | `String` | Consumer group ID |
 | `CpiKafkaPlusCommitStrategy` | `String` | Commit strategy configured on the endpoint |
 | `CpiKafkaPlusPayloadSize` | `Integer` | Serialized payload size in bytes |
-| `CpiKafkaPlusSchemaId` | `Integer` | Schema ID from the Confluent header that **Remove Confluent Header** removed from the value; only set when it removed one (see [Avro / Schema Registry](avro-schema-registry.md#json-values-with-the-confluent-header)) |
+| `CpiKafkaPlusSchemaId` | `Integer` | Schema ID from the Confluent header of the value: set when **Remove Confluent Header** removed one (see [Avro / Schema Registry](avro-schema-registry.md#json-values-with-the-confluent-header)), or when the Schema Registry deserialized the value |
+| `CpiKafkaPlusSchemaType` | `String` | `AVRO` or `JSON`: the registry's schema type of a value the Schema Registry deserialized (see [JSON Schema Values](avro-schema-registry.md#json-schema-values-via-the-schema-registry)) |
 | `kafka.header.<name>` | `String` | Every Kafka record header is forwarded as a Camel header with this prefix, e.g. `kafka.header.traceparent` |
 
 ### Batch Mode
@@ -41,7 +42,7 @@ With **Batch Mode** (`batchMode=true`) the adapter delivers up to `batchSize` re
 | `CpiKafkaPlusConsumerGroup` | `String` | Consumer group ID |
 | `CpiKafkaPlusCommitStrategy` | `String` | Commit strategy |
 | `CpiKafkaPlusDlqCount` | `Integer` | Number of records routed to the DLQ *(only when DLQ is enabled)* |
-| `CpiKafkaPlusSchemaValidationFailures` | `Integer` | Number of schema validation failures *(only when JSON Schema validation is enabled)* |
+| `CpiKafkaPlusSchemaValidationFailures` | `Integer` | Number of schema validation failures *(only when JSON Schema validation or Validate with Registry Schema is enabled)* |
 
 With a DLQ enabled, a batch that fails is processed again record by record (see
 [Dead Letter Queue](dead-letter-queue.md#batch-mode-behavior)). Each of these messages is a batch of
