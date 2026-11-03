@@ -208,7 +208,7 @@ public class RegistryJsonSchemaTest {
         registered(7, "AVRO", AVRO_SCHEMA);
 
         try {
-            new AvroDeserializerHelper(endpoint("")).decode("orders", framed(7, new byte[] {20, 'a'}));
+            new RegistryValueDeserializer(endpoint("")).decode("orders", framed(7, new byte[] {20, 'a'}));
             Assert.fail("a truncated Avro value was read");
         } catch (RegistryValueException expected) {
             Assert.assertEquals(7, expected.getSchemaId());
@@ -469,7 +469,7 @@ public class RegistryJsonSchemaTest {
     private RecordProcessor processor(CpiKafkaPlusEndpoint endpoint, JsonSchemaValidator validator,
                                       DlqProducerHelper dlq) {
         return new RecordProcessor(endpoint, new AdapterTracingHelper(endpoint), validator, dlq,
-                new AvroDeserializerHelper(endpoint),
+                new RegistryValueDeserializer(endpoint),
                 new RecordProcessor.ConsumerCallback() {
                     @Override
                     public void processExchange(Exchange exchange) {

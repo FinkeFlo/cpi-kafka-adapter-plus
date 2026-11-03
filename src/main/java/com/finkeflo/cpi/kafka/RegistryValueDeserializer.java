@@ -50,9 +50,9 @@ import org.slf4j.LoggerFactory;
  * <p>The registry's {@code schemaType} of the ID decides how the payload is read: Avro is converted
  * to JSON or XML, JSON is passed on as it is. Other types, such as Protobuf, are rejected.
  */
-public class AvroDeserializerHelper implements Closeable {
+public class RegistryValueDeserializer implements Closeable {
 
-    private static final Logger LOG = LoggerFactory.getLogger(AvroDeserializerHelper.class);
+    private static final Logger LOG = LoggerFactory.getLogger(RegistryValueDeserializer.class);
 
     private final SchemaRegistryHttpClient registryClient;
     private final String                   avroOutputFormat;
@@ -63,7 +63,7 @@ public class AvroDeserializerHelper implements Closeable {
     private final ConcurrentHashMap<Integer, String> unusableSchemas = new ConcurrentHashMap<>();
     private final AtomicBoolean reportedXmlForJson = new AtomicBoolean();
 
-    public AvroDeserializerHelper(CpiKafkaPlusEndpoint endpoint) {
+    public RegistryValueDeserializer(CpiKafkaPlusEndpoint endpoint) {
         CredentialHelper.UserCredentials creds = CredentialHelper.requireUserCredential(
                 endpoint.getSchemaRegistryCredentialAlias(),
                 UiLabels.field("schemaRegistryCredentialAlias"));
@@ -75,7 +75,7 @@ public class AvroDeserializerHelper implements Closeable {
         this.avroOutputFormat = endpoint.getAvroOutputFormat();
         this.registrySchemaValidation = endpoint.isRegistrySchemaValidation();
 
-        LOG.info("[CPI-KAFKA-PLUS-DIAG] Avro deserializer initialized with Schema Registry at '{}', output format: {}",
+        LOG.info("[CPI-KAFKA-PLUS-DIAG] Schema Registry deserializer initialized at '{}', output format: {}",
                 SchemaRegistryHttpClient.withoutUserInfo(endpoint.getSchemaRegistryUrl()), avroOutputFormat);
     }
 
@@ -122,7 +122,7 @@ public class AvroDeserializerHelper implements Closeable {
         } catch (RuntimeException e) {
             throw e;
         } catch (Exception e) {
-            throw avroFailure(topic, schemaId, e);
+            throw registryFailure(topic, schemaId, e);
         }
         if (SchemaRegistryHttpClient.RegisteredSchema.AVRO.equals(registered.type())) {
             return new DecodedValue(deserializeAvro(topic, schemaId, buf), schemaId, registered.type(), null);
@@ -141,7 +141,7 @@ public class AvroDeserializerHelper implements Closeable {
         } catch (RuntimeException e) {
             throw e;
         } catch (Exception e) {
-            throw avroFailure(topic, schemaId, e);
+            throw registryFailure(topic, schemaId, e);
         }
 
         // Remaining bytes after the 5-byte header are the Avro binary payload
@@ -161,19 +161,20 @@ public class AvroDeserializerHelper implements Closeable {
         }
         try {
             return convertGenericRecord(record);
-        } catch (RuntimeException e) {
-            throw e;
         } catch (Exception e) {
-            throw avroFailure(topic, schemaId, e);
+            throw new RegistryValueException(schemaId, SchemaRegistryHttpClient.RegisteredSchema.AVRO,
+                    "the Avro record cannot be converted to " + ("XML".equalsIgnoreCase(avroOutputFormat)
+                            ? "XML" : "JSON") + ": " + e, e);
         }
     }
 
-    private RuntimeException avroFailure(String topic, int schemaId, Exception e) {
-        AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("avro.deserialization.failed")
+    private RuntimeException registryFailure(String topic, int schemaId, Exception e) {
+        AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("schema_registry.fetch.failed")
                 .with("errorCode", CpiKafkaPlusErrorCode.KP_SR_001.code())
                 .with("topic", topic)
                 .with("schemaId", schemaId), e);
-        return new RuntimeException("Avro deserialization failed: " + e.getMessage(), e);
+        return new RuntimeException("Schema Registry lookup of schema ID " + schemaId + " failed: "
+                + e.getMessage(), e);
     }
 
     /**

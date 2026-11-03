@@ -155,7 +155,7 @@ public class SchemaRegistryFailureTest {
     private static RuntimeException deserializeFails(String registryUrl, byte[] value) {
         CpiKafkaPlusEndpoint endpoint = new CpiKafkaPlusEndpoint();
         endpoint.setSchemaRegistryUrl(registryUrl);
-        try (AvroDeserializerHelper helper = new AvroDeserializerHelper(endpoint)) {
+        try (RegistryValueDeserializer helper = new RegistryValueDeserializer(endpoint)) {
             helper.deserialize("orders", value);
         } catch (RuntimeException expected) {
             return expected;

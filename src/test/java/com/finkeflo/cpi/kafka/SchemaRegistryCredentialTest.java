@@ -52,7 +52,7 @@ public class SchemaRegistryCredentialTest {
         CredentialHelper.setCredentialResolver(alias -> null);
         CpiKafkaPlusEndpoint endpoint = endpoint("sr-cred");
         try {
-            new AvroDeserializerHelper(endpoint);
+            new RegistryValueDeserializer(endpoint);
             Assert.fail("expected the missing credential to fail the helper");
         } catch (IllegalStateException expected) {
             Assert.assertTrue(expected.getMessage(), expected.getMessage().contains("sr-cred"));
@@ -70,7 +70,7 @@ public class SchemaRegistryCredentialTest {
         CredentialHelper.setCredentialResolver(alias -> {
             throw new AssertionError("must not be called without an alias");
         });
-        new AvroDeserializerHelper(endpoint(""));
+        new RegistryValueDeserializer(endpoint(""));
         new AvroSerializerHelper(endpoint(null));
     }
 
@@ -89,14 +89,14 @@ public class SchemaRegistryCredentialTest {
                 return false;
             }
         });
-        new AvroDeserializerHelper(endpoint("sr-cred"));
+        new RegistryValueDeserializer(endpoint("sr-cred"));
         new AvroSerializerHelper(endpoint("sr-cred"));
     }
 
     @Test
     public void aResolvableAliasIsUsed() throws Exception {
         CredentialHelper.setCredentialResolver(alias -> new CredentialHelper.UserCredentials("u", "p"));
-        new AvroDeserializerHelper(endpoint("sr-cred"));
+        new RegistryValueDeserializer(endpoint("sr-cred"));
     }
 
     /** A distinct URI per alias, so Camel's endpoint cache does not hand back a shared instance. */

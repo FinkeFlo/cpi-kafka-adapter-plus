@@ -104,7 +104,7 @@ public class AvroXmlOutputTest {
         CpiKafkaPlusEndpoint endpoint = new CpiKafkaPlusEndpoint();
         endpoint.setSchemaRegistryUrl(server.url("/").toString());
         endpoint.setAvroOutputFormat("XML");
-        try (AvroDeserializerHelper helper = new AvroDeserializerHelper(endpoint)) {
+        try (RegistryValueDeserializer helper = new RegistryValueDeserializer(endpoint)) {
             return helper.deserialize("orders", wire.toByteArray());
         }
     }

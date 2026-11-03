@@ -129,7 +129,7 @@ final class RecordProcessor {
     private final AdapterTracingHelper tracingHelper;
     private final JsonSchemaValidator jsonSchemaValidator;
     private final DlqProducerHelper dlqHelper;
-    private final AvroDeserializerHelper avroHelper;
+    private final RegistryValueDeserializer registryDeserializer;
     private final ConsumerCallback callback;
     private final OffsetCommitTracker offsetTracker;
     private final RecordFailurePolicy failurePolicy;
@@ -142,10 +142,10 @@ final class RecordProcessor {
                     AdapterTracingHelper tracingHelper,
                     JsonSchemaValidator jsonSchemaValidator,
                     DlqProducerHelper dlqHelper,
-                    AvroDeserializerHelper avroHelper,
+                    RegistryValueDeserializer registryDeserializer,
                     ConsumerCallback callback,
                     OffsetCommitTracker offsetTracker) {
-        this(endpoint, tracingHelper, jsonSchemaValidator, dlqHelper, avroHelper, callback, offsetTracker,
+        this(endpoint, tracingHelper, jsonSchemaValidator, dlqHelper, registryDeserializer, callback, offsetTracker,
                 System::currentTimeMillis);
     }
 
@@ -154,7 +154,7 @@ final class RecordProcessor {
                     AdapterTracingHelper tracingHelper,
                     JsonSchemaValidator jsonSchemaValidator,
                     DlqProducerHelper dlqHelper,
-                    AvroDeserializerHelper avroHelper,
+                    RegistryValueDeserializer registryDeserializer,
                     ConsumerCallback callback,
                     OffsetCommitTracker offsetTracker,
                     LongSupplier clock) {
@@ -162,7 +162,7 @@ final class RecordProcessor {
         this.tracingHelper = tracingHelper;
         this.jsonSchemaValidator = jsonSchemaValidator;
         this.dlqHelper = dlqHelper;
-        this.avroHelper = avroHelper;
+        this.registryDeserializer = registryDeserializer;
         this.callback = callback;
         this.offsetTracker = offsetTracker;
         this.clock = clock;
@@ -1105,7 +1105,7 @@ final class RecordProcessor {
         DecodedValue result;
         String json;
         if (registryDeserializationActive()) {
-            result = avroHelper.decode(topic, data);
+            result = registryDeserializer.decode(topic, data);
         } else if ((json = jsonBehindConfluentHeader(topic, data)) != null) {
             // The ID from the removed header, bytes 1 to 4 (big-endian), as Confluent writes it.
             result = new DecodedValue(json, ConfluentWireFormat.schemaId(data), null, null);
@@ -1119,7 +1119,7 @@ final class RecordProcessor {
     }
 
     private boolean registryDeserializationActive() {
-        return endpoint.isSchemaRegistryEnabled() && endpoint.isAvroValueDeserialization() && avroHelper != null;
+        return endpoint.isSchemaRegistryEnabled() && endpoint.isAvroValueDeserialization() && registryDeserializer != null;
     }
 
     private boolean registrySchemaValidationActive() {
