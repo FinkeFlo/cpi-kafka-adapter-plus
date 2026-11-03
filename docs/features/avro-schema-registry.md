@@ -1,6 +1,8 @@
 # Avro / Schema Registry
 
-The adapter integrates with Confluent Schema Registry for Avro serialization and deserialization.
+The adapter integrates with Confluent Schema Registry for Avro serialization and deserialization. The
+sender also reads JSON Schema values from the registry (see
+[JSON Schema Values via the Schema Registry](#json-schema-values-via-the-schema-registry)).
 
 ## Overview
 
@@ -16,7 +18,8 @@ When working with Avro-encoded Kafka topics, the adapter can automatically deser
 | `autoRegisterSchemas` | `false` | Automatically register schemas when producing |
 | `subjectNameStrategy` | `TopicNameStrategy` | Subject naming strategy for Producer (Receiver) serialization |
 | `avroOutputFormat` | `JSON` | Deserialized output format: `JSON` or `XML` |
-| `avroValueDeserialization` | `true` | Deserialize Avro message values when consuming |
+| `avroValueDeserialization` | `true` | Deserialize message values via the Schema Registry when consuming: Avro and JSON Schema |
+| `registrySchemaValidation` | `false` | Sender: validate JSON Schema values against their registry schema (metadata version 1.6) |
 | `avroValueSerialization` | `true` | Serialize message values to Avro when producing |
 
 ## Consumer (Sender) Setup
@@ -62,6 +65,52 @@ A record that is not in the Confluent wire format, or whose schema ID the regist
 Up to 1.4.1 a registry outage was treated the same way, so every record with an unknown schema ID
 went to the DLQ, or was skipped with *Skip Failed Message*.
 
+## JSON Schema Values via the Schema Registry
+
+From 1.6, **Deserialize Values via Schema Registry** (`avroValueDeserialization`, up to metadata
+version 1.5 labelled *Deserialize Values as Avro*) asks the registry for the `schemaType` of each
+value's schema ID (`GET /schemas/ids/{id}`, fetched once per ID) and reads the value accordingly:
+
+| `schemaType` | What the integration flow gets |
+|---|---|
+| `AVRO` (or none) | As before: the Avro record converted to JSON or XML (`avroOutputFormat`). |
+| `JSON` | The bytes after the 5-byte header as UTF-8 text, unchanged. They must be valid UTF-8 and exactly one JSON value. `avroOutputFormat` `XML` does not apply; the sender logs that once per consumer as `consumer.config.ineffective parameter=avroOutputFormat schemaType=JSON`. |
+| `PROTOBUF` or other | Nothing: the record fails as `DESERIALIZATION`. |
+
+- One topic may mix Avro and JSON Schema values; each record is read with the type of its own
+  schema ID.
+- With **Batch Mode** off, the headers `CpiKafkaPlusSchemaId` (`Integer`) and `CpiKafkaPlusSchemaType`
+  (`String`, `AVRO` or `JSON`) carry the schema ID and type, for Avro values as well.
+- The runtime is shared by all metadata versions: a channel on 1.5 or older with the Schema Registry
+  and *Deserialize Values as Avro* on reads JSON Schema values too. Up to 1.5 each such record was a
+  poison pill, because its JSON schema failed to parse as Avro.
+- A value that is not valid UTF-8 or not exactly one JSON value, an Avro value whose bytes do not fit
+  its schema (such as a truncated one), or a schema type other than `AVRO` and `JSON`, is a poison pill
+  with the code `KP-SR-002`: it goes to the DLQ as `DESERIALIZATION`, or
+  *Error Handling* decides. The trace and the MPL carry `schemaId` and `schemaType`. A registry that
+  cannot serve the schema is handled as described above, with `KP-SR-001`.
+
+### Validating against the registry schema
+
+From metadata version 1.6, **Validate with Registry Schema** (`registrySchemaValidation`, tab
+*Avro / Schema Registry*, default off) validates each JSON Schema value against the schema registered
+for its ID. A violation is handled like a failed **JSON Schema Validation**: reported with
+`KP-CFG-002` (with **Report Validation Errors**), sent to the DLQ with the original bytes, header
+included, or handled by *Error Handling*. With both validations on, a record that violates both is
+handled once, with both messages; the registry's is prefixed `Registry schema <id>: `.
+
+- The draft follows the schema's `$schema`: draft-04, draft-06, draft-07, 2019-09 or 2020-12. Without
+  `$schema`, draft-07 applies, as for Confluent's serializer. Another `$schema` is a `KP-SR-002`
+  failure of the record.
+- The sender loads no other schema: a schema with `references` (to other registered subjects), or with
+  a `$ref` to a remote or classpath URI, fails every record of that schema ID with `KP-SR-002` while
+  validation is on. Without validation, references do not matter.
+- Avro values are not validated by this option.
+- With the option on but *Deserialize Values via Schema Registry* off, the sender logs
+  `consumer.config.ineffective parameter=registrySchemaValidation` at start.
+- Sender channels on metadata version 1.2 to 1.5 have no such field; move them to 1.6 with *Update Version*.
+  Channels on 1.0 and 1.1 cannot use *Update Version* and have to be recreated.
+
 ## JSON Values with the Confluent Header
 
 Confluent's JSON Schema serializer writes the same 5-byte header in front of every value as its Avro
@@ -77,7 +126,7 @@ tab *Message Handling*) removes the header before the value is read as UTF-8 tex
 | Value | What the integration flow gets |
 |---|---|
 | At least 5 bytes, the first one `0x00`, and exactly one JSON value after the header | The bytes after the header as UTF-8 text. For `{"id":"a"}` behind the header of schema ID 42, the bytes `00 00 00 00 2A 7B 22 …`, the body is `{"id":"a"}`. |
-| The header, but no JSON after it, such as Avro or Protobuf from Confluent's serializers | The value unchanged, header included, and no `CpiKafkaPlusSchemaId`. The sender logs this once per consumer as ERROR (`consumer.config.ineffective parameter=removeConfluentHeader`, see [Troubleshooting](../troubleshooting.md#consumerconfigineffective-and-consumerconfigclamped)). For Avro, use **Enable Schema Registry** with **Deserialize Values as Avro** instead; Protobuf is not supported. |
+| The header, but no JSON after it, such as Avro or Protobuf from Confluent's serializers | The value unchanged, header included, and no `CpiKafkaPlusSchemaId`. The sender logs this once per consumer as ERROR (`consumer.config.ineffective parameter=removeConfluentHeader`, see [Troubleshooting](../troubleshooting.md#consumerconfigineffective-and-consumerconfigclamped)). For Avro, use **Enable Schema Registry** with **Deserialize Values via Schema Registry** instead; Protobuf is not supported. |
 | Anything else, such as plain JSON from another producer | The value unchanged. JSON text never starts with `0x00`, so the two cannot be confused. |
 
 - With **Batch Mode** off, the header `CpiKafkaPlusSchemaId` (`Integer`) carries the schema ID of the
@@ -94,7 +143,9 @@ tab *Message Handling*) removes the header before the value is read as UTF-8 tex
 - Keys are not changed. The receiver writes no Confluent header.
 
 The option can only be edited while **Enable Schema Registry** is off, and is ignored while it is on:
-the Avro deserialization reads the header itself. iFlows on metadata version 1.0 to 1.4 have no such
+the registry deserialization reads the header itself. With a registry at hand, prefer
+[JSON Schema Values via the Schema Registry](#json-schema-values-via-the-schema-registry), which also
+checks the value against its schema ID. iFlows on metadata version 1.0 to 1.4 have no such
 field; move them to 1.5 with *Update Version*.
 
 ## Producer (Receiver) Setup

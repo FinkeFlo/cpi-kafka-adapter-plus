@@ -36,9 +36,9 @@ import org.junit.Test;
 import io.confluent.kafka.serializers.KafkaAvroSerializer;
 
 /**
- * Integration tests for {@link AvroDeserializerHelper} with a real Schema Registry.
+ * Integration tests for {@link RegistryValueDeserializer} with a real Schema Registry.
  */
-public class AvroDeserializerHelperIT {
+public class RegistryValueDeserializerIT {
 
     private static final String USER_SCHEMA_JSON =
             "{\"type\":\"record\",\"name\":\"User\",\"namespace\":\"com.test\","
@@ -55,8 +55,8 @@ public class AvroDeserializerHelperIT {
             + "{\"name\":\"customer\",\"type\":" + USER_SCHEMA_JSON + "}"
             + "]}";
 
-    private static AvroDeserializerHelper jsonHelper;
-    private static AvroDeserializerHelper xmlHelper;
+    private static RegistryValueDeserializer jsonHelper;
+    private static RegistryValueDeserializer xmlHelper;
     private static KafkaAvroSerializer valueSerializer;
     private static Schema userSchema;
     private static Schema orderSchema;
@@ -87,14 +87,14 @@ public class AvroDeserializerHelperIT {
                 + "&groupId=avro-test-group&securityProtocol=PLAINTEXT"
                 + "&schemaRegistryEnabled=true&schemaRegistryUrl=" + schemaRegistryUrl
                 + "&avroOutputFormat=JSON");
-        jsonHelper = new AvroDeserializerHelper(jsonEndpoint);
+        jsonHelper = new RegistryValueDeserializer(jsonEndpoint);
 
         CpiKafkaPlusEndpoint xmlEndpoint = (CpiKafkaPlusEndpoint) ctx.getEndpoint(
                 "cpi-kafka-plus:avro-test-xml?bootstrapServers=" + KafkaTestInfrastructure.getBootstrapServers()
                 + "&groupId=avro-test-group&securityProtocol=PLAINTEXT"
                 + "&schemaRegistryEnabled=true&schemaRegistryUrl=" + schemaRegistryUrl
                 + "&avroOutputFormat=XML");
-        xmlHelper = new AvroDeserializerHelper(xmlEndpoint);
+        xmlHelper = new RegistryValueDeserializer(xmlEndpoint);
 
         userSchema = new Schema.Parser().parse(USER_SCHEMA_JSON);
         orderSchema = new Schema.Parser().parse(NESTED_SCHEMA_JSON);

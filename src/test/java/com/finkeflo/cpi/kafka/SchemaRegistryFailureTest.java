@@ -155,7 +155,7 @@ public class SchemaRegistryFailureTest {
     private static RuntimeException deserializeFails(String registryUrl, byte[] value) {
         CpiKafkaPlusEndpoint endpoint = new CpiKafkaPlusEndpoint();
         endpoint.setSchemaRegistryUrl(registryUrl);
-        try (AvroDeserializerHelper helper = new AvroDeserializerHelper(endpoint)) {
+        try (RegistryValueDeserializer helper = new RegistryValueDeserializer(endpoint)) {
             helper.deserialize("orders", value);
         } catch (RuntimeException expected) {
             return expected;
@@ -172,7 +172,7 @@ public class SchemaRegistryFailureTest {
     /** {@code avro} in the Confluent wire format, with schema ID {@link #SCHEMA_ID}. */
     private static byte[] record(byte[] avro) {
         return ByteBuffer.allocate(5 + avro.length)
-                .put(AvroDeserializerHelper.MAGIC_BYTE)
+                .put(ConfluentWireFormat.MAGIC_BYTE)
                 .putInt(SCHEMA_ID)
                 .put(avro)
                 .array();

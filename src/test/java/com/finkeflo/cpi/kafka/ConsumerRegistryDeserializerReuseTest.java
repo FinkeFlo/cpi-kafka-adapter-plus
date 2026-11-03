@@ -32,7 +32,7 @@ import org.junit.Test;
  * the DLQ producer since #171: the replaced one was never closed, and its schema cache — schema IDs
  * are immutable — was thrown away on every reconnect.
  */
-public class ConsumerAvroHelperReuseTest {
+public class ConsumerRegistryDeserializerReuseTest {
 
     @Test
     public void reinitializingTheHelpersKeepsTheAvroDeserializer() throws Exception {
@@ -49,20 +49,20 @@ public class ConsumerAvroHelperReuseTest {
             createHelpers.setAccessible(true);
             try {
                 createHelpers.invoke(consumer);
-                Object first = avroHelper(consumer);
+                Object first = registryDeserializer(consumer);
                 // What a reconnect after failed polls or a fenced instance does next.
                 createHelpers.invoke(consumer);
 
                 Assert.assertNotNull("precondition: the Avro deserializer was created", first);
-                Assert.assertSame("one Avro deserializer per consumer", first, avroHelper(consumer));
+                Assert.assertSame("one registry deserializer per consumer", first, registryDeserializer(consumer));
             } finally {
                 consumer.doStop();
             }
         }
     }
 
-    private static Object avroHelper(CpiKafkaPlusConsumer consumer) throws Exception {
-        Field field = CpiKafkaPlusConsumer.class.getDeclaredField("avroHelper");
+    private static Object registryDeserializer(CpiKafkaPlusConsumer consumer) throws Exception {
+        Field field = CpiKafkaPlusConsumer.class.getDeclaredField("registryDeserializer");
         field.setAccessible(true);
         return field.get(consumer);
     }

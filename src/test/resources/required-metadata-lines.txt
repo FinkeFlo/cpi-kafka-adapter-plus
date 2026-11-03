@@ -20,3 +20,4 @@ receiver=1.4
 sender=1.4
 receiver=1.5
 sender=1.5
+sender=1.6

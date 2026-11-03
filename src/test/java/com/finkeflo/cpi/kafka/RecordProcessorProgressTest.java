@@ -1452,12 +1452,12 @@ public class RecordProcessorProgressTest {
     }
 
     private RecordProcessor processor(CpiKafkaPlusEndpoint endpoint, DlqProducerHelper dlq,
-                                      AvroDeserializerHelper avro) {
+                                      RegistryValueDeserializer avro) {
         return processor(endpoint, dlq, avro, new AdapterTracingHelper(endpoint));
     }
 
     private RecordProcessor processor(CpiKafkaPlusEndpoint endpoint, DlqProducerHelper dlq,
-                                      AvroDeserializerHelper avro, AdapterTracingHelper tracing) {
+                                      RegistryValueDeserializer avro, AdapterTracingHelper tracing) {
         JsonSchemaValidator validator = endpoint.isJsonSchemaValidation()
                 ? new JsonSchemaValidator(endpoint.getJsonSchema()) : null;
         return new RecordProcessor(endpoint, tracing, validator, dlq, avro,
@@ -1615,30 +1615,30 @@ public class RecordProcessorProgressTest {
     }
 
     /** Fails for the value "BAD", like a record that is not in Confluent Avro wire format. */
-    private static AvroDeserializerHelper failingAvro(CpiKafkaPlusEndpoint endpoint) {
-        return new AvroDeserializerHelper(endpoint) {
+    private static RegistryValueDeserializer failingAvro(CpiKafkaPlusEndpoint endpoint) {
+        return new RegistryValueDeserializer(endpoint) {
             @Override
-            public String deserialize(String topic, byte[] data) {
+            DecodedValue decode(String topic, byte[] data) {
                 String value = new String(data, StandardCharsets.UTF_8);
                 if ("BAD".equals(value)) {
                     throw new IllegalArgumentException("Unknown magic byte!");
                 }
-                return value;
+                return DecodedValue.of(value);
             }
         };
     }
 
     /** Throws {@code failure} for the value "DOWN", like a Schema Registry that cannot serve its schema. */
-    private static AvroDeserializerHelper unavailableRegistryAvro(CpiKafkaPlusEndpoint endpoint,
+    private static RegistryValueDeserializer unavailableRegistryAvro(CpiKafkaPlusEndpoint endpoint,
                                                                   RuntimeException failure) {
-        return new AvroDeserializerHelper(endpoint) {
+        return new RegistryValueDeserializer(endpoint) {
             @Override
-            public String deserialize(String topic, byte[] data) {
+            DecodedValue decode(String topic, byte[] data) {
                 String value = new String(data, StandardCharsets.UTF_8);
                 if ("DOWN".equals(value)) {
                     throw failure;
                 }
-                return value;
+                return DecodedValue.of(value);
             }
         };
     }
@@ -1648,30 +1648,30 @@ public class RecordProcessorProgressTest {
     }
 
     /** Throws {@code error} for the value "ERR", like a class that an adapter update took away. */
-    private static AvroDeserializerHelper erroringAvro(CpiKafkaPlusEndpoint endpoint, Error error) {
-        return new AvroDeserializerHelper(endpoint) {
+    private static RegistryValueDeserializer erroringAvro(CpiKafkaPlusEndpoint endpoint, Error error) {
+        return new RegistryValueDeserializer(endpoint) {
             @Override
-            public String deserialize(String topic, byte[] data) {
+            DecodedValue decode(String topic, byte[] data) {
                 String value = new String(data, StandardCharsets.UTF_8);
                 if ("ERR".equals(value)) {
                     throw error;
                 }
-                return value;
+                return DecodedValue.of(value);
             }
         };
     }
 
     /** Fails the first and the third time it reads the value "FLAKY", and succeeds in between. */
-    private static AvroDeserializerHelper flakyAvro(CpiKafkaPlusEndpoint endpoint) {
+    private static RegistryValueDeserializer flakyAvro(CpiKafkaPlusEndpoint endpoint) {
         AtomicInteger reads = new AtomicInteger();
-        return new AvroDeserializerHelper(endpoint) {
+        return new RegistryValueDeserializer(endpoint) {
             @Override
-            public String deserialize(String topic, byte[] data) {
+            DecodedValue decode(String topic, byte[] data) {
                 String value = new String(data, StandardCharsets.UTF_8);
                 if ("FLAKY".equals(value) && reads.incrementAndGet() != 2) {
                     throw new IllegalStateException("Schema Registry unreachable");
                 }
-                return value;
+                return DecodedValue.of(value);
             }
         };
     }

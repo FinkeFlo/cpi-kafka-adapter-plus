@@ -100,7 +100,7 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
     /** Number of consecutive fenced-instance incidents since the last successful poll, for exponential backoff. */
     private int fencedBackoffAttempt = 0;
     private volatile boolean initialized = false;
-    private AvroDeserializerHelper avroHelper;
+    private RegistryValueDeserializer registryDeserializer;
     private AdapterTracingHelper tracingHelper;
     private JsonSchemaValidator jsonSchemaValidator;
     private volatile DlqProducerHelper dlqHelper;
@@ -328,13 +328,13 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
             }
             dlqHelper = null;
         }
-        if (avroHelper != null) {
+        if (registryDeserializer != null) {
             try {
-                avroHelper.close();
+                registryDeserializer.close();
             } catch (Exception e) {
                 LOG.warn("[CPI-KAFKA-PLUS-DIAG] doStop: error closing Avro helper: {}", e.getMessage());
             }
-            avroHelper = null;
+            registryDeserializer = null;
         }
 
         // Step 5: Reset state.
@@ -413,7 +413,7 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
             circuitBreaker = new ConsumerCircuitBreaker(endpoint, tracingHelper);
         }
         recordProcessor = new RecordProcessor(endpoint, tracingHelper,
-                jsonSchemaValidator, dlqHelper, avroHelper, consumerCallback,
+                jsonSchemaValidator, dlqHelper, registryDeserializer, consumerCallback,
                 new OffsetCommitTracker());
         // A fresh consumer starts unpaused, so the backoff state starts over with it.
         retryBackoff = new PartitionBackoff(
@@ -490,9 +490,9 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
             // its schema-by-ID cache stays valid (IDs are immutable), and the replaced one was never
             // closed.
             if (endpoint.isSchemaRegistryEnabled()
-                    && endpoint.isAvroValueDeserialization() && avroHelper == null) {
-                avroHelper = BundleBackedClassLoader.withBundleClassLoader(getClass(),
-                        () -> new AvroDeserializerHelper(endpoint));
+                    && endpoint.isAvroValueDeserialization() && registryDeserializer == null) {
+                registryDeserializer = BundleBackedClassLoader.withBundleClassLoader(getClass(),
+                        () -> new RegistryValueDeserializer(endpoint));
             }
             if (endpoint.isJsonSchemaValidation()) {
                 jsonSchemaValidator = new JsonSchemaValidator(endpoint.getJsonSchema());
@@ -509,9 +509,9 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
             return true;
         } catch (Throwable e) {
             logInitFailure("helpers", e);
-            if (avroHelper != null) {
-                try { avroHelper.close(); } catch (Exception ignored) { }
-                avroHelper = null;
+            if (registryDeserializer != null) {
+                try { registryDeserializer.close(); } catch (Exception ignored) { }
+                registryDeserializer = null;
             }
             jsonSchemaValidator = null;
             if (dlqHelper != null) {

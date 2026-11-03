@@ -75,7 +75,7 @@ For detailed security setup, see [Authentication](security/authentication.md).
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `removeConfluentHeader` | `false` | Remove the 5-byte Confluent header (magic byte `0x00` and the 4-byte schema ID) that Confluent's JSON Schema serializer writes in front of every value, before the value is read as UTF-8 text (UI: "Remove Confluent Header"). A value with fewer than 5 bytes, another first byte, or no JSON behind the header (such as Avro or Protobuf) is passed on unchanged; the last case is logged once per consumer as ERROR (`consumer.config.ineffective`). With `batchMode=false` the header `CpiKafkaPlusSchemaId` carries the schema ID. No Schema Registry is called. Editable only while `schemaRegistryEnabled` is `false`, and ignored while it is `true`, because the Avro deserialization reads the header itself. Available from metadata version 1.5; iFlows on an older version (1.0 to 1.4) have no such field — move them to 1.5 with *Update Version*. |
+| `removeConfluentHeader` | `false` | Remove the 5-byte Confluent header (magic byte `0x00` and the 4-byte schema ID) that Confluent's JSON Schema serializer writes in front of every value, before the value is read as UTF-8 text (UI: "Remove Confluent Header"). A value with fewer than 5 bytes, another first byte, or no JSON behind the header (such as Avro or Protobuf) is passed on unchanged; the last case is logged once per consumer as ERROR (`consumer.config.ineffective`). With `batchMode=false` the header `CpiKafkaPlusSchemaId` carries the schema ID. No Schema Registry is called. Editable only while `schemaRegistryEnabled` is `false`, and ignored while it is `true`, because the registry deserialization reads the header itself. Available from metadata version 1.5; iFlows on an older version (1.0 to 1.4) have no such field — move them to 1.5 with *Update Version*. |
 
 For more details, see [Avro / Schema Registry](features/avro-schema-registry.md#json-values-with-the-confluent-header).
 
@@ -107,7 +107,8 @@ In `XML_LIST` mode, each `<value>` element carries a `format` attribute (`"xml"`
 | `schemaRegistryUrl` | _(required)_ | Confluent Schema Registry URL. Required when `schemaRegistryEnabled` is `true`. It must start with `http://` or `https://`, in any letter case: while `schemaRegistryEnabled` and `avroValueDeserialization` are on, any other URL fails the deployment. |
 | `schemaRegistryCredentialAlias` | — | Credential alias for Schema Registry authentication. |
 | `avroOutputFormat` | `JSON` | Avro output format: `JSON`, `XML`. |
-| `avroValueDeserialization` | `true` | Deserialize message values using Avro. Requires Schema Registry. |
+| `avroValueDeserialization` | `true` | Deserialize message values via the Schema Registry (UI: "Deserialize Values via Schema Registry", up to metadata version 1.5 "Deserialize Values as Avro"). The registry's `schemaType` of each value's schema ID decides: Avro is converted to `avroOutputFormat`, JSON Schema values are passed on as JSON without the 5-byte header. Protobuf is not supported. |
+| `registrySchemaValidation` | `false` | Sender only. Validate each JSON Schema value against the schema registered for its schema ID (UI: "Validate with Registry Schema"). A violation is handled like a failed JSON Schema validation. Requires `schemaRegistryEnabled` and `avroValueDeserialization`. Available from metadata version 1.6; channels on 1.2 to 1.5 get it with *Update Version*, channels on 1.0 and 1.1 have to be recreated. See [JSON Schema Values](features/avro-schema-registry.md#json-schema-values-via-the-schema-registry). |
 
 For details on Avro integration, see [Avro / Schema Registry](features/avro-schema-registry.md).
 

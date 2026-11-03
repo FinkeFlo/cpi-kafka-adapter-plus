@@ -98,6 +98,7 @@ public class CpiKafkaPlusComponentTest {
         Assert.assertEquals(5000, endpoint.getBatchTimeout());
         Assert.assertEquals("JSON_ARRAY", endpoint.getBatchOutputFormat());
         Assert.assertFalse(endpoint.isRemoveConfluentHeader());
+        Assert.assertFalse(endpoint.isRegistrySchemaValidation());
         Assert.assertTrue(endpoint.isAvroValueDeserialization());
         Assert.assertEquals("BATCH_COMPLETE", endpoint.getCommitStrategy());
         Assert.assertEquals("SCHEDULED", endpoint.getConsumptionMode());

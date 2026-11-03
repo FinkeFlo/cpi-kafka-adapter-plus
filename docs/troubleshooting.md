@@ -50,6 +50,7 @@ tickets: it identifies the failure class precisely and survives copy-paste bette
 | `KP-DLQ-001` | `dlq.delivery_failed` | Dead-letter queue delivery failed |
 | `KP-FLOW-001` | `iflow.processing_failed` | The integration flow failed to process the records a sender handed to it. The cause is in the flow (mapping, script, receiver call), not in Kafka |
 | `KP-SR-001` | `schema_registry.failed` | Schema Registry call failed |
+| `KP-SR-002` | `schema_registry.value_unreadable` | A value cannot be read with the schema its ID has in the registry: not UTF-8 or not one JSON value behind a JSON Schema ID, Avro bytes that do not fit the schema, a schema type such as Protobuf, or a registry schema that cannot be used for validation |
 | `KP-GEN-001` | `unclassified` | No code matched. Treated as unknown rather than guessed — see *Exception classification* below |
 
 The symbol is not the operation token at the start of the log line; the two are separate
@@ -332,7 +333,7 @@ value or spaces around it show.
   *Schema Registry URL* that does not start with `http://` or `https://`.
 * **Sender:** a *Dead Letter Topic* that Kafka refuses as a topic name: Kafka takes 1 to 249 characters
   from `a-z`, `A-Z`, `0-9`, `.`, `_` and `-`, but not `.` or `..` alone. With *Enable Schema Registry*
-  and *Deserialize Values as Avro* on, a *Schema Registry URL* that does not start with `http://` or
+  and *Deserialize Values via Schema Registry* (up to metadata version 1.5 *Deserialize Values as Avro*) on, a *Schema Registry URL* that does not start with `http://` or
   `https://`.
 * **Both:** a *Bootstrap Servers* entry that Kafka cannot read as `host:port`, such as `broker1` or
   `b1:9092;b2:9092`, or whose port is above 65535, and, with a SASL *Security Protocol*, a
@@ -520,6 +521,13 @@ logged once, as ERROR, at deployment unless stated otherwise, and the channel st
   are formatted as `JSON_ARRAY`.
 * `consumer.config.ineffective parameter=avroOutputFormat`: an unknown *Avro Output Format*; Avro
   records are converted to JSON.
+* `consumer.config.ineffective parameter=avroOutputFormat value=XML topic=… schemaId=… schemaType=JSON`:
+  *Avro Output Format* is `XML`, but a value's schema ID is a JSON Schema in the registry. XML applies to
+  Avro values only; the JSON value is passed on as JSON. Logged once per consumer, when the first such
+  value arrives rather than at deployment.
+* `consumer.config.ineffective parameter=registrySchemaValidation value=true`: **Validate with Registry
+  Schema** is on while **Deserialize Values via Schema Registry** is off, so no value is validated
+  against a registry schema.
 * `consumer.config.ineffective parameter=securityProtocol value=''`: an empty *Security Protocol*, as an
   externalized value can be; the Kafka client connects with `PLAINTEXT`, without TLS and without
   authentication, which works against a `PLAINTEXT` listener only. Up to 1.4.1 this was not logged.
@@ -528,7 +536,7 @@ logged once, as ERROR, at deployment unless stated otherwise, and the channel st
   such as Avro or Protobuf from Confluent's serializers. The value is passed on unchanged, header
   included, and without `CpiKafkaPlusSchemaId`. Logged once per consumer, when the first such value
   arrives rather than at deployment. For Avro, use **Enable Schema Registry** with **Deserialize Values
-  as Avro**; Protobuf is not supported.
+  via Schema Registry**; Protobuf is not supported.
 * `consumer.config.clamped`: with **Auto-Pause on Errors**, a *Consecutive Error Threshold* or an
   *Initial Pause Duration (sec)* below 1 is used as 1, and an *Initial Pause Duration (sec)* above 900
   as 900, the longest pause there is. Up to 1.4.1 a value above 900 was cut without a line.

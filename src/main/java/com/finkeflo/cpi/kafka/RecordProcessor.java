@@ -20,8 +20,6 @@
  */
 package com.finkeflo.cpi.kafka;
 
-import java.io.IOException;
-import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -46,9 +44,6 @@ import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.errors.InterruptException;
 import org.apache.kafka.common.errors.RebalanceInProgressException;
 import org.apache.kafka.common.errors.WakeupException;
-import com.fasterxml.jackson.core.JsonFactory;
-import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.core.StreamReadConstraints;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -68,18 +63,6 @@ final class RecordProcessor {
 
     private static final Logger LOG = LoggerFactory.getLogger(RecordProcessor.class);
 
-    /**
-     * Checks that JSON follows a Confluent header (#284). Without Jackson's default limits, so that a
-     * value is not kept with its header only because it is large: the IFlow gets it either way.
-     */
-    private static final JsonFactory CONFLUENT_JSON_CHECK = JsonFactory.builder()
-            .streamReadConstraints(StreamReadConstraints.builder()
-                    .maxStringLength(Integer.MAX_VALUE)
-                    .maxNumberLength(Integer.MAX_VALUE)
-                    .maxNameLength(Integer.MAX_VALUE)
-                    .maxNestingDepth(Integer.MAX_VALUE)
-                    .build())
-            .build();
     private static final long MAX_RETRY_DELAY_SECONDS = 300; // 5 minutes
 
     /**
@@ -146,7 +129,7 @@ final class RecordProcessor {
     private final AdapterTracingHelper tracingHelper;
     private final JsonSchemaValidator jsonSchemaValidator;
     private final DlqProducerHelper dlqHelper;
-    private final AvroDeserializerHelper avroHelper;
+    private final RegistryValueDeserializer registryDeserializer;
     private final ConsumerCallback callback;
     private final OffsetCommitTracker offsetTracker;
     private final RecordFailurePolicy failurePolicy;
@@ -159,10 +142,10 @@ final class RecordProcessor {
                     AdapterTracingHelper tracingHelper,
                     JsonSchemaValidator jsonSchemaValidator,
                     DlqProducerHelper dlqHelper,
-                    AvroDeserializerHelper avroHelper,
+                    RegistryValueDeserializer registryDeserializer,
                     ConsumerCallback callback,
                     OffsetCommitTracker offsetTracker) {
-        this(endpoint, tracingHelper, jsonSchemaValidator, dlqHelper, avroHelper, callback, offsetTracker,
+        this(endpoint, tracingHelper, jsonSchemaValidator, dlqHelper, registryDeserializer, callback, offsetTracker,
                 System::currentTimeMillis);
     }
 
@@ -171,7 +154,7 @@ final class RecordProcessor {
                     AdapterTracingHelper tracingHelper,
                     JsonSchemaValidator jsonSchemaValidator,
                     DlqProducerHelper dlqHelper,
-                    AvroDeserializerHelper avroHelper,
+                    RegistryValueDeserializer registryDeserializer,
                     ConsumerCallback callback,
                     OffsetCommitTracker offsetTracker,
                     LongSupplier clock) {
@@ -179,7 +162,7 @@ final class RecordProcessor {
         this.tracingHelper = tracingHelper;
         this.jsonSchemaValidator = jsonSchemaValidator;
         this.dlqHelper = dlqHelper;
-        this.avroHelper = avroHelper;
+        this.registryDeserializer = registryDeserializer;
         this.callback = callback;
         this.offsetTracker = offsetTracker;
         this.clock = clock;
@@ -197,7 +180,7 @@ final class RecordProcessor {
         LOG.debug("[CPI-KAFKA-PLUS-DIAG] processBatch: {} records across {} partition(s)",
                 records.count(), byPartition.size());
 
-        IdentityHashMap<byte[], String> cache = new IdentityHashMap<>();
+        IdentityHashMap<byte[], DecodedValue> cache = new IdentityHashMap<>();
         int[] filterCounts = filterInvalidRecords(kafkaConsumer, byPartition, cache, progress);
         int schemaValidationFailures = filterCounts[0];
         int dlqCount = filterCounts[1];
@@ -260,9 +243,9 @@ final class RecordProcessor {
     private int[] filterInvalidRecords(
             Consumer<byte[], byte[]> kafkaConsumer,
             Map<TopicPartition, List<ConsumerRecord<byte[], byte[]>>> byPartition,
-            IdentityHashMap<byte[], String> cache,
+            IdentityHashMap<byte[], DecodedValue> cache,
             PollProgress progress) {
-        if (jsonSchemaValidator == null) {
+        if (jsonSchemaValidator == null && !registrySchemaValidationActive()) {
             return new int[]{0, 0};
         }
 
@@ -276,9 +259,9 @@ final class RecordProcessor {
 
             for (ConsumerRecord<byte[], byte[]> record : partitionRecords) {
                 progress.processing(tp, record.offset());
-                String value;
+                DecodedValue decoded;
                 try {
-                    value = deserializeValue(record.topic(), record.value(), cache);
+                    decoded = decodeValue(record.topic(), record.value(), cache);
                 } catch (Exception deserErr) {
                     // Committed with the batches around it, never from here.
                     handleDeserializationFailure(kafkaConsumer, record, deserErr, false, progress);
@@ -287,8 +270,9 @@ final class RecordProcessor {
                     }
                     continue;
                 }
+                String value = decoded.payload();
                 if (value != null) {
-                    String validationError = jsonSchemaValidator.validate(value);
+                    String validationError = validationError(decoded);
                     if (validationError != null) {
                         schemaValidationFailures++;
                         LOG.warn("[CPI-KAFKA-PLUS-DIAG] JSON Schema validation failed for record at offset={} partition={}: {}",
@@ -462,7 +446,7 @@ final class RecordProcessor {
                                 List<ConsumerRecord<byte[], byte[]>> batch,
                                 boolean commitAfterSuccess,
                                 int schemaValidationFailures, int dlqCount,
-                                IdentityHashMap<byte[], String> cache,
+                                IdentityHashMap<byte[], DecodedValue> cache,
                                 PollProgress progress) throws Exception {
         TopicPartition tp = partitionOf(batch.get(0));
         progress.processing(tp, batch.get(0).offset());
@@ -586,16 +570,17 @@ final class RecordProcessor {
         // A record whose retries an earlier poll ran out of time for continues where it stopped
         // (#192). One carried for another offset is stale: that record was resolved meanwhile.
         CarriedRetry carried = carriedRetries.remove(tp);
-        String value;
+        DecodedValue decoded;
         String key;
         try {
-            value = deserializeValue(record.topic(), record.value());
+            decoded = decodeValue(record.topic(), record.value(), null);
             key = deserializeKey(record.topic(), record.key());
         } catch (Exception deserErr) {
             return handleDeserializationFailure(kafkaConsumer, record, deserErr, commitAfterSuccess, progress);
         }
+        String value = decoded.payload();
 
-        if (handleSchemaValidationFailure(kafkaConsumer, record, value, commitAfterSuccess, progress)) {
+        if (handleSchemaValidationFailure(kafkaConsumer, record, decoded, commitAfterSuccess, progress)) {
             return progress.isBlocked(tp) ? 0 : 1;
         }
 
@@ -648,7 +633,7 @@ final class RecordProcessor {
                 exchange.getIn().setHeader("CpiKafkaPlusFallbackMode", true);
                 exchange.getIn().setHeader("CpiKafkaPlusKey", key);
             } else {
-                setSingleRecordHeaders(exchange.getIn(), record, key,
+                setSingleRecordHeaders(exchange.getIn(), record, decoded, key,
                         value != null ? value.getBytes(StandardCharsets.UTF_8).length : 0);
             }
 
@@ -733,12 +718,13 @@ final class RecordProcessor {
      */
     private boolean handleSchemaValidationFailure(Consumer<byte[], byte[]> kafkaConsumer,
                                                    ConsumerRecord<byte[], byte[]> record,
-                                                   String value, boolean commitAfterSuccess,
+                                                   DecodedValue decoded, boolean commitAfterSuccess,
                                                    PollProgress progress) {
-        if (jsonSchemaValidator == null || value == null) {
+        String value = decoded.payload();
+        if (value == null) {
             return false;
         }
-        String validationError = jsonSchemaValidator.validate(value);
+        String validationError = validationError(decoded);
         if (validationError == null) {
             return false;
         }
@@ -1024,8 +1010,14 @@ final class RecordProcessor {
         context.put("partition", String.valueOf(record.partition()));
         context.put("offset", String.valueOf(record.offset()));
         context.put("failureType", "DESERIALIZATION");
-        // Deserialization has no code of its own in the central taxonomy: what the Avro path throws,
-        // such as the RuntimeException for a wrong magic byte, maps to KP-GEN-001 (#284).
+        RegistryValueException unreadable = findCause(cause, RegistryValueException.class);
+        if (unreadable != null) {
+            context.put("schemaId", String.valueOf(unreadable.getSchemaId()));
+            context.put("schemaType", unreadable.getSchemaType());
+        }
+        // A Schema Registry failure maps to KP-SR-001, a value that does not fit its registry schema to
+        // KP-SR-002. Anything else, such as the RuntimeException for a wrong magic byte, maps to
+        // KP-GEN-001 (#284).
         String errorCode = CpiKafkaPlusErrorCode.fromThrowable(cause).code();
         String message = "Could not deserialize Kafka record at offset " + record.offset();
         progress.failed();
@@ -1077,7 +1069,7 @@ final class RecordProcessor {
     // --- Formatting and deserialization ---
 
     private String formatBatch(List<ConsumerRecord<byte[], byte[]>> batch,
-                               final IdentityHashMap<byte[], String> cache) throws Exception {
+                               final IdentityHashMap<byte[], DecodedValue> cache) throws Exception {
         java.util.function.BiFunction<String, byte[], String> cachedDeserializer =
                 new java.util.function.BiFunction<String, byte[], String>() {
                     @Override
@@ -1100,24 +1092,67 @@ final class RecordProcessor {
     }
 
     private String deserializeValue(String topic, byte[] data,
-                                     IdentityHashMap<byte[], String> cache) {
-        if (data == null) return null;
+                                     IdentityHashMap<byte[], DecodedValue> cache) {
+        return decodeValue(topic, data, cache).payload();
+    }
+
+    private DecodedValue decodeValue(String topic, byte[] data,
+                                     IdentityHashMap<byte[], DecodedValue> cache) {
+        if (data == null) return DecodedValue.of(null);
         if (cache != null && cache.containsKey(data)) {
             return cache.get(data);
         }
-        String result;
+        DecodedValue result;
         String json;
-        if (endpoint.isSchemaRegistryEnabled() && endpoint.isAvroValueDeserialization() && avroHelper != null) {
-            result = avroHelper.deserialize(topic, data);
+        if (registryDeserializationActive()) {
+            result = registryDeserializer.decode(topic, data);
         } else if ((json = jsonBehindConfluentHeader(topic, data)) != null) {
-            result = json;
+            // The ID from the removed header, bytes 1 to 4 (big-endian), as Confluent writes it.
+            result = new DecodedValue(json, ConfluentWireFormat.schemaId(data), null, null);
         } else {
-            result = new String(data, StandardCharsets.UTF_8);
+            result = DecodedValue.of(new String(data, StandardCharsets.UTF_8));
         }
         if (cache != null) {
             cache.put(data, result);
         }
         return result;
+    }
+
+    private boolean registryDeserializationActive() {
+        return endpoint.isSchemaRegistryEnabled() && endpoint.isAvroValueDeserialization() && registryDeserializer != null;
+    }
+
+    private boolean registrySchemaValidationActive() {
+        return endpoint.isRegistrySchemaValidation() && registryDeserializationActive();
+    }
+
+    /**
+     * The violations of the inline JSON Schema and of the value's registry schema together, so that a
+     * record that fails both is handled once, or {@code null} if it fails neither.
+     */
+    private String validationError(DecodedValue decoded) {
+        String value = decoded.payload();
+        if (value == null) {
+            return null;
+        }
+        String inline = jsonSchemaValidator != null ? jsonSchemaValidator.validate(value) : null;
+        String registry = decoded.registryValidator() != null ? decoded.registryValidator().validate(value) : null;
+        if (registry != null) {
+            registry = "Registry schema " + decoded.schemaId() + ": " + registry;
+        }
+        if (inline == null) {
+            return registry;
+        }
+        return registry == null ? inline : inline + "; " + registry;
+    }
+
+    private static <T extends Throwable> T findCause(Throwable t, Class<T> type) {
+        for (Throwable c = t; c != null; c = c.getCause() == c ? null : c.getCause()) {
+            if (type.isInstance(c)) {
+                return type.cast(c);
+            }
+        }
+        return null;
     }
 
     String deserializeKey(String topic, byte[] data) {
@@ -1136,13 +1171,12 @@ final class RecordProcessor {
      */
     private String jsonBehindConfluentHeader(String topic, byte[] data) {
         if (!endpoint.isRemoveConfluentHeader() || endpoint.isSchemaRegistryEnabled()
-                || data == null || data.length < AvroDeserializerHelper.HEADER_LENGTH
-                || data[0] != AvroDeserializerHelper.MAGIC_BYTE) {
+                || !ConfluentWireFormat.hasHeader(data)) {
             return null;
         }
-        int header = AvroDeserializerHelper.HEADER_LENGTH;
+        int header = ConfluentWireFormat.HEADER_LENGTH;
         String text = new String(data, header, data.length - header, StandardCharsets.UTF_8);
-        if (isOneJsonValue(text)) {
+        if (ConfluentWireFormat.isOneJsonValue(text)) {
             return text;
         }
         if (reportedNoJsonBehindConfluentHeader.compareAndSet(false, true)) {
@@ -1150,24 +1184,12 @@ final class RecordProcessor {
             AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("consumer.config.ineffective")
                     .with("parameter", "removeConfluentHeader")
                     .with("topic", topic)
-                    .with("schemaId", ByteBuffer.wrap(data, 1, 4).getInt())
+                    .with("schemaId", ConfluentWireFormat.schemaId(data))
                     .with("reason", "no JSON after the Confluent header, so the value is passed on unchanged; "
-                            + "Avro needs Enable Schema Registry and Deserialize Values as Avro, Protobuf is "
+                            + "Avro needs Enable Schema Registry and Deserialize Values via Schema Registry, Protobuf is "
                             + "not supported"));
         }
         return null;
-    }
-
-    private static boolean isOneJsonValue(String text) {
-        try (JsonParser parser = CONFLUENT_JSON_CHECK.createParser(text)) {
-            if (parser.nextToken() == null) {
-                return false;
-            }
-            parser.skipChildren();
-            return parser.nextToken() == null;
-        } catch (IOException e) {
-            return false;
-        }
     }
 
     // --- Header mapping ---
@@ -1195,7 +1217,7 @@ final class RecordProcessor {
         if (endpoint.isDlqEnabled()) {
             message.setHeader("CpiKafkaPlusDlqCount", dlqCount);
         }
-        if (endpoint.isJsonSchemaValidation()) {
+        if (endpoint.isJsonSchemaValidation() || registrySchemaValidationActive()) {
             message.setHeader("CpiKafkaPlusSchemaValidationFailures", schemaValidationFailures);
         }
     }
@@ -1203,7 +1225,8 @@ final class RecordProcessor {
     /**
      * @param payloadSize size of the deserialized Camel body in UTF-8 bytes
      */
-    void setSingleRecordHeaders(Message message, ConsumerRecord<byte[], byte[]> record, String key, int payloadSize) {
+    void setSingleRecordHeaders(Message message, ConsumerRecord<byte[], byte[]> record, DecodedValue decoded,
+                                        String key, int payloadSize) {
         message.setHeader("SAP_Sender", record.topic());
         message.setHeader("CpiKafkaPlusTopic", record.topic());
         message.setHeader("CpiKafkaPlusPayloadSize", payloadSize);
@@ -1213,9 +1236,11 @@ final class RecordProcessor {
         message.setHeader("CpiKafkaPlusTimestamp", record.timestamp());
         message.setHeader("CpiKafkaPlusConsumerGroup", endpoint.getGroupId());
         message.setHeader("CpiKafkaPlusCommitStrategy", endpoint.getCommitStrategy());
-        if (jsonBehindConfluentHeader(record.topic(), record.value()) != null) {
-            // The ID from the removed header, bytes 1 to 4 (big-endian), as Confluent writes it.
-            message.setHeader("CpiKafkaPlusSchemaId", ByteBuffer.wrap(record.value(), 1, 4).getInt());
+        if (decoded.schemaId() != null) {
+            message.setHeader("CpiKafkaPlusSchemaId", decoded.schemaId());
+        }
+        if (decoded.schemaType() != null) {
+            message.setHeader("CpiKafkaPlusSchemaType", decoded.schemaType());
         }
         if (record.headers() != null) {
             record.headers().forEach(header -> {

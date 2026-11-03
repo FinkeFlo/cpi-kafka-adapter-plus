@@ -201,6 +201,16 @@ final class SenderConfigValidator {
                     .with("value", endpoint.getAvroOutputFormat())
                     .with("reason", "unknown value; Avro records are converted to JSON"));
         }
+        // Only while the field is visible: with the Schema Registry off it is hidden, and a value saved
+        // before could not be cleared without turning the registry on again.
+        if (endpoint.isRegistrySchemaValidation() && endpoint.isSchemaRegistryEnabled()
+                && !endpoint.isAvroValueDeserialization()) {
+            AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("consumer.config.ineffective")
+                    .with("parameter", "registrySchemaValidation")
+                    .with("value", true)
+                    .with("reason", "needs avroValueDeserialization; "
+                            + "values are not validated against a registry schema"));
+        }
         if (endpoint.isAutoPauseEnabled()
                 && (endpoint.getAutoPauseErrorThreshold() < 1 || endpoint.getAutoPauseCooldownSeconds() < 1)) {
             AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("consumer.config.clamped")

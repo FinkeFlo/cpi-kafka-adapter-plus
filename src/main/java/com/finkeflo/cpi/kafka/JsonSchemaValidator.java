@@ -29,6 +29,7 @@ import com.networknt.schema.JsonSchema;
 import com.networknt.schema.JsonSchemaFactory;
 import com.networknt.schema.SpecVersion;
 import com.networknt.schema.ValidationMessage;
+import com.networknt.schema.resource.DisallowSchemaLoader;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -56,6 +57,66 @@ public final class JsonSchemaValidator {
         } catch (Exception e) {
             throw new IllegalArgumentException("Invalid JSON Schema: " + e.getMessage(), e);
         }
+    }
+
+    private JsonSchemaValidator(JsonSchema schema, ObjectMapper objectMapper) {
+        this.schema = schema;
+        this.objectMapper = objectMapper;
+    }
+
+    /**
+     * A validator for a JSON Schema from the Schema Registry. Unlike the inline schema, its
+     * draft follows {@code $schema} (draft-04 to 2020-12; without one draft-07, the default of
+     * Confluent's JSON Schema serializer), and it may load no other schema: a {@code $ref} to a
+     * remote or classpath URI fails here, when the schema is compiled, instead of fetching anything.
+     *
+     * @throws IllegalArgumentException if the schema is not one JSON document, names an unknown
+     *                                  {@code $schema}, or cannot be compiled
+     */
+    static JsonSchemaValidator forRegistrySchema(String schemaText) {
+        ObjectMapper mapper = new ObjectMapper();
+        JsonNode schemaNode = parseSchemaDocument(mapper, schemaText);
+        SpecVersion.VersionFlag dialect = registryDialect(schemaNode);
+        JsonSchemaFactory factory = JsonSchemaFactory.getInstance(dialect,
+                builder -> builder.schemaLoaders(loaders -> loaders.add(DisallowSchemaLoader.getInstance())));
+        try {
+            JsonSchema compiled = factory.getSchema(schemaNode);
+            compiled.initializeValidators();
+            return new JsonSchemaValidator(compiled, mapper);
+        } catch (Exception e) {
+            throw new IllegalArgumentException("Invalid JSON Schema: " + e.getMessage(), e);
+        }
+    }
+
+    private static SpecVersion.VersionFlag registryDialect(JsonNode schemaNode) {
+        JsonNode dialect = schemaNode.isObject() ? schemaNode.get("$schema") : null;
+        if (dialect == null) {
+            return SpecVersion.VersionFlag.V7;
+        }
+        if (!dialect.isTextual()) {
+            throw new IllegalArgumentException("Invalid JSON Schema: $schema must be a string, got: " + dialect);
+        }
+        String id = canonicalDialectId(dialect.asText());
+        for (SpecVersion.VersionFlag flag : SpecVersion.VersionFlag.values()) {
+            if (canonicalDialectId(flag.getId()).equals(id)) {
+                return flag;
+            }
+        }
+        throw new IllegalArgumentException("Invalid JSON Schema: unsupported $schema '" + dialect.asText()
+                + "'; supported are draft-04, draft-06, draft-07, 2019-09 and 2020-12");
+    }
+
+    /**
+     * The meta-schema URI without the scheme and an empty fragment, so that the forms found in practice,
+     * such as {@code https://json-schema.org/draft-07/schema} for {@code http://json-schema.org/draft-07/schema#},
+     * name the same draft.
+     */
+    private static String canonicalDialectId(String uri) {
+        String id = uri.trim();
+        if (id.endsWith("#")) {
+            id = id.substring(0, id.length() - 1);
+        }
+        return id.replaceFirst("^https?://", "");
     }
 
     /**

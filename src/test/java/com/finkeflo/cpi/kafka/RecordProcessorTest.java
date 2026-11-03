@@ -182,7 +182,7 @@ public class RecordProcessorTest {
             Message message = endpoint.createExchange().getIn();
             ConsumerRecord<byte[], byte[]> record = rec("test-topic", 1, 42);
 
-            rp.setSingleRecordHeaders(message, record, "my-key", 100);
+            rp.setSingleRecordHeaders(message, record, DecodedValue.of(null), "my-key", 100);
 
             Assert.assertEquals(100, message.getHeader("CpiKafkaPlusPayloadSize"));
             Assert.assertEquals("single-group", message.getHeader("CpiKafkaPlusConsumerGroup"));
