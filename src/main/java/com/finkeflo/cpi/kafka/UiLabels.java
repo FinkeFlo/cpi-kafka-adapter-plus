@@ -70,8 +70,9 @@ final class UiLabels {
         put("batchSize", "Max Records per IFlow Run (MPL)");
         put("batchOutputFormat", "Batch Output Format");
         put("removeConfluentHeader", "Remove Confluent Header");
+        put("registrySchemaValidation", "Validate with Registry Schema");
         put("avroOutputFormat", "Avro Output Format");
-        put("avroValueDeserialization", "Deserialize Values as Avro");
+        put("avroValueDeserialization", "Deserialize Values via Schema Registry");
         put("errorHandling", "Error Handling");
         put("retryDelaySeconds", "Retry Delay (Seconds)");
         put("dlqEnabled", "Enable Dead Letter Queue");

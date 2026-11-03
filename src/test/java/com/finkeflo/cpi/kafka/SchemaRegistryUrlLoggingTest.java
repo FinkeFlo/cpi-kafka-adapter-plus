@@ -44,7 +44,7 @@ public class SchemaRegistryUrlLoggingTest {
 
     @Test
     public void deserializerLogsTheRegistryWithoutCredentials() throws Exception {
-        String logged = captureStdErr(() -> new AvroDeserializerHelper(endpoint()).close());
+        String logged = captureStdErr(() -> new RegistryValueDeserializer(endpoint()).close());
 
         Assert.assertTrue("precondition: the registry is logged\n" + logged, logged.contains("sr.example.com:8081"));
         Assert.assertFalse(logged, logged.contains("s3cr3t-pw"));

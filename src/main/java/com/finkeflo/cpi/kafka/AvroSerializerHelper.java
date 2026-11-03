@@ -133,7 +133,7 @@ public class AvroSerializerHelper implements Closeable {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
 
         // 5-byte header: magic byte + schema ID
-        out.write(AvroDeserializerHelper.MAGIC_BYTE);
+        out.write(ConfluentWireFormat.MAGIC_BYTE);
         out.write(ByteBuffer.allocate(4).putInt(schemaId).array());
 
         // Avro binary payload

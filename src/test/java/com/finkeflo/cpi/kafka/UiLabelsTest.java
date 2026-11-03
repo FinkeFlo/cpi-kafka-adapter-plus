@@ -87,11 +87,11 @@ public class UiLabelsTest {
     }
 
     /**
-     * The label of every field the 1.5.0 channel of {@code direction} ("sender" or "receiver") offers,
+     * The label of every field the newest channel of {@code direction} ("sender" or "receiver") offers,
      * by parameter. A field defined in a metadata file but not referenced from a tab is not offered.
      */
     static Map<String, String> offeredLabels(String direction) throws Exception {
-        File file = new File(METADATA_DIR, "metadata-" + direction + "-1.5.0.xml");
+        File file = newestMetadata(direction);
         Document doc = DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(file);
         Map<String, String> labels = new LinkedHashMap<>();
         NodeList definitions = doc.getElementsByTagName("AttributeMetadata");
@@ -107,6 +107,31 @@ public class UiLabelsTest {
             offered.put(param, labels.get(param));
         }
         return offered;
+    }
+
+    private static File newestMetadata(String direction) {
+        File newest = null;
+        int[] newestVersion = null;
+        File[] files = METADATA_DIR.listFiles();
+        Assert.assertNotNull(files);
+        for (File f : files) {
+            String name = f.getName();
+            String prefix = "metadata-" + direction + "-";
+            if (!name.startsWith(prefix) || !name.endsWith(".xml")) {
+                continue;
+            }
+            String[] parts = name.substring(prefix.length(), name.length() - 4).split("\\.");
+            int[] version = new int[parts.length];
+            for (int i = 0; i < parts.length; i++) {
+                version[i] = Integer.parseInt(parts[i]);
+            }
+            if (newestVersion == null || java.util.Arrays.compare(version, newestVersion) > 0) {
+                newest = f;
+                newestVersion = version;
+            }
+        }
+        Assert.assertNotNull("no metadata file for " + direction, newest);
+        return newest;
     }
 
     private static String childText(Element parent, String tag) {
