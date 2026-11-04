@@ -46,10 +46,11 @@ import java.util.function.IntSupplier;
  *       whatever {@code errorHandling} says: it does not become valid by retrying.</li>
  *   <li><b>A batch that cannot be formatted:</b> a transient cause blocks the batch, as for a
  *       deserialization failure. Otherwise, with a DLQ its records are processed one by one.
- *       Without a DLQ an {@link Error} escapes the poll; any other failure takes
- *       {@code errorHandling} for the whole batch.</li>
- *   <li><b>Route failure of a batch:</b> with a DLQ its records are processed one by one, without
- *       one {@code errorHandling} applies to the whole batch.</li>
+ *       Without a DLQ an {@link Error} escapes the poll; any other failure blocks the batch with
+ *       Retry Failed Message and processes its records one by one with Skip Failed Message.</li>
+ *   <li><b>Route failure of a batch:</b> with a DLQ or with Skip Failed Message its records are
+ *       processed one by one, so only the failing record is dead-lettered or skipped (#305). With
+ *       Retry Failed Message and no DLQ the whole batch is blocked.</li>
  * </ul>
  * {@code errorHandling} is Retry Failed Message ({@link Action#BLOCK}, the default) or Skip Failed
  * Message ({@link Action#SKIP}). A failed DLQ write always blocks: the record stays unresolved and
@@ -196,7 +197,8 @@ final class RecordFailurePolicy {
      * them one by one would only split the batch. Otherwise, with a DLQ, processing its records one
      * by one dead-letters only the failing one; an {@link Error} then escapes from that record.
      * Without a DLQ an {@code Error} escapes at once: it is not a data problem, and the poll retries
-     * the batch.
+     * the batch. Any other failure blocks the batch with Retry Failed Message; with Skip Failed
+     * Message its records are processed one by one, so only the failing one is lost (#305).
      */
     Action forBatchFormatFailure(Throwable error) {
         if (error instanceof Exception && KafkaErrorHelper.isTransientForRedelivery((Exception) error)) {
@@ -208,12 +210,23 @@ final class RecordFailurePolicy {
         if (!(error instanceof Exception)) {
             return Action.ESCAPE;
         }
-        return errorHandling();
+        return forFailedBatch();
     }
 
-    /** A batch the route failed for. Without a DLQ {@code errorHandling} applies to the whole batch. */
+    /**
+     * A batch the route failed for. With a DLQ or Skip Failed Message its records are processed one
+     * by one; with Retry Failed Message and no DLQ the whole batch is blocked.
+     */
     Action forBatchRouteFailure() {
-        return deadLetterQueue ? Action.PROCESS_INDIVIDUALLY : errorHandling();
+        return deadLetterQueue ? Action.PROCESS_INDIVIDUALLY : forFailedBatch();
+    }
+
+    /**
+     * Skipping a whole batch would lose its good records with the bad one (#305): processing them
+     * one by one skips only the record that fails again.
+     */
+    private Action forFailedBatch() {
+        return errorHandling() == Action.SKIP ? Action.PROCESS_INDIVIDUALLY : Action.BLOCK;
     }
 
     /** {@code errorHandling}, for a failure without a DLQ. */

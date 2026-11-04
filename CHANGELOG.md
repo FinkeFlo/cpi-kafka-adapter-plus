@@ -19,6 +19,7 @@ iFlow compatibility.
 - The MPL shows the adapter's own version in its component ID instead of `0.0.1`. See issue #230.
 
 ### Fixed
+- Sender in batch mode without a DLQ: with **Error Handling** *Skip Failed Message* a failed batch is processed record by record, as with a DLQ, so only a record that fails again is skipped. Until now the whole batch was skipped, and one bad record lost all the others. Each record reaches the IFlow on its own with `CpiKafkaPlusFallbackMode=true`. Each record that fails again writes its own failed MPL entry and counts for **Auto-Pause on Errors**, which can therefore pause sooner. **Rollout note:** records the IFlow had already handled before the batch failed are processed a second time, as with a DLQ, and the IFlow receives single-record batches with `CpiKafkaPlusFallbackMode=true`. The old whole-batch skip cannot be restored; an IFlow that cannot handle this must check the header, or the channel must use *Retry Failed Message* or a DLQ. This applies to every metadata version that offers *Skip Failed Message* (1.4 and later), since the runtime is shared. See issue #305.
 - Receiver in batch mode without transactions: a record Kafka rejects before sending it, such as one above *Max Request Size*, stops the batch. Up to 1.6.0 the records after it were still sent, and a retry of the caller duplicated them. This applies to every metadata version, since the runtime is shared. See issue #230.
 
 ## [1.6.0] - 2026-11-03

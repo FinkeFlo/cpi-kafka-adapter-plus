@@ -822,15 +822,19 @@ public class RecordProcessorProgressTest {
     }
 
     @Test
-    public void failedBatchWithoutDlqIsSkippedWhenSkipping() throws Exception {
-        failing.add("0:0-1");
-        MockConsumer<byte[], byte[]> consumer = consumerWith(P0, "a", "b");
+    public void failedBatchWithoutDlqSkipsOnlyTheFailingRecordWhenSkipping() throws Exception {
+        failing.add("0:0-2");
+        failing.add("0:1-1");
+        MockConsumer<byte[], byte[]> consumer = consumerWith(P0, "a", "b", "c");
         RecordProcessor processor = processor(skip(batchEndpoint(false, null)), null, null);
 
-        processBatch(processor, consumer);
+        PollProgress progress = processBatch(processor, consumer);
 
-        Assert.assertEquals(2L, committed(consumer, P0));
-        Assert.assertEquals(2L, consumer.position(P0));
+        Assert.assertEquals("the records of the failed batch run on their own (#305)",
+                Arrays.asList("0:0-2", "0:0-0", "0:1-1", "0:2-2"), invoked);
+        Assert.assertFalse(progress.isBlocked(P0));
+        Assert.assertEquals(3L, committed(consumer, P0));
+        Assert.assertEquals(3L, consumer.position(P0));
     }
 
     @Test
@@ -895,7 +899,8 @@ public class RecordProcessorProgressTest {
 
         processBatch(processor, consumer);
 
-        Assert.assertTrue(invoked.isEmpty());
+        Assert.assertEquals("only the undeserializable record is skipped (#305)",
+                Collections.singletonList("0:1-1"), invoked);
         Assert.assertEquals(2L, committed(consumer, P0));
     }
 
