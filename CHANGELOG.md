@@ -7,6 +7,13 @@ and the project follows [Semantic Versioning](https://semver.org/). See
 [VERSIONING.md](https://github.com/finkeflo/cpi-kafka-adapter-plus/blob/main/VERSIONING.md) for how the adapter version maps to SAP CPI
 iFlow compatibility.
 
+## [Unreleased]
+### Added
+- Sender: the trace context headers `traceparent`, `tracestate` and `sap-passport` of a record are set on the message under their own name as well, not only as `kafka.header.<name>`, so a flow can use and pass them on without mapping. A valid `traceparent` also puts its W3C trace ID into the MPL as the custom header property `KafkaAdapterTraceId`, so Message Monitoring finds the message by the trace ID of an OpenTelemetry tool; a batch carries the distinct trace IDs of its records, at most 50. See issue #168.
+
+### Changed
+- Receiver: `traceparent`, `tracestate` and `sap-passport` are written to the record whatever **Allowed Headers** (`allowedHeaders`) says, the empty pattern included, so the trace survives the Kafka hop. The exchange property `SAP_DisableExternalW3CTraceContextTransmission` = `true` leaves them to **Allowed Headers** again. This applies to every metadata version, since the runtime is shared. See issue #168.
+
 ## [1.6.0] - 2026-11-03
 ### Added
 - Sender: JSON Schema values via the Schema Registry. With **Enable Schema Registry** and **Deserialize Values via Schema Registry** (`avroValueDeserialization`, up to metadata version 1.5 labelled *Deserialize Values as Avro*), the registry's `schemaType` of each value's schema ID decides how it is read: Avro as before, JSON Schema as the JSON after the 5-byte header, which must be valid UTF-8 and exactly one JSON value. Topics may mix both. Up to 1.5 every JSON Schema value was a poison pill, because its schema failed to parse as Avro. This applies to every metadata version, since the runtime is shared. Protobuf is rejected. With **Batch Mode** off, `CpiKafkaPlusSchemaId` and the new `CpiKafkaPlusSchemaType` carry the schema ID and type, for Avro as well. See issue #298.

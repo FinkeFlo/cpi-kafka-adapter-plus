@@ -195,6 +195,60 @@ public class RecordProcessorTest {
         }
     }
 
+    @Test
+    public void traceContextHeadersAreAlsoSetUnderTheirOwnName() throws Exception {
+        CpiKafkaPlusComponent component = new CpiKafkaPlusComponent();
+        try (DefaultCamelContext ctx = new DefaultCamelContext()) {
+            ctx.addComponent("cpi-kafka-plus", component);
+            ctx.start();
+            CpiKafkaPlusEndpoint endpoint = (CpiKafkaPlusEndpoint) ctx.getEndpoint(
+                    "cpi-kafka-plus:test-topic?bootstrapServers=localhost:9092&groupId=g");
+            RecordProcessor rp = createProcessor(endpoint);
+            String traceparent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
+            ConsumerRecord<byte[], byte[]> record = rec("test-topic", 0, 1);
+            record.headers().add("traceparent", traceparent.getBytes(StandardCharsets.UTF_8));
+            record.headers().add("tracestate", "vendor=1".getBytes(StandardCharsets.UTF_8));
+            record.headers().add("SAP-PASSPORT", "2A54482A".getBytes(StandardCharsets.UTF_8));
+            record.headers().add("X-Other", "x".getBytes(StandardCharsets.UTF_8));
+
+            Message message = endpoint.createExchange().getIn();
+            rp.setSingleRecordHeaders(message, record, DecodedValue.of(null), null, 5);
+
+            Assert.assertEquals(traceparent, message.getHeader("traceparent"));
+            Assert.assertEquals(traceparent, message.getHeader("kafka.header.traceparent"));
+            Assert.assertEquals("vendor=1", message.getHeader("tracestate"));
+            Assert.assertEquals("2A54482A", message.getHeader("SAP-PASSPORT"));
+            Assert.assertNull(message.getHeader("X-Other"));
+            Assert.assertEquals("x", message.getHeader("kafka.header.X-Other"));
+            ctx.stop();
+        }
+    }
+
+    @Test
+    public void traceIdsAreDistinctValidAndBounded() {
+        String a = "4bf92f3577b34da6a3ce929d0e0e4736";
+        String b = "0af7651916cd43dd8448eb211c80319c";
+        List<ConsumerRecord<byte[], byte[]>> batch = new ArrayList<>();
+        for (String tp : new String[] {"00-" + a + "-00f067aa0ba902b7-01", "garbage",
+                "00-" + b + "-00f067aa0ba902b7-01", "00-" + a + "-b7ad6b7169203331-01"}) {
+            ConsumerRecord<byte[], byte[]> r = rec("t", 0, batch.size());
+            r.headers().add("TraceParent", tp.getBytes(StandardCharsets.UTF_8));
+            batch.add(r);
+        }
+        batch.add(rec("t", 0, 4));
+
+        Assert.assertEquals(Arrays.asList(a, b), new ArrayList<>(RecordProcessor.traceIds(batch)));
+
+        List<ConsumerRecord<byte[], byte[]>> many = new ArrayList<>();
+        for (int i = 0; i < RecordProcessor.MAX_MPL_TRACE_IDS + 5; i++) {
+            ConsumerRecord<byte[], byte[]> r = rec("t", 0, i);
+            String id = String.format("%032x", i + 1);
+            r.headers().add("traceparent", ("00-" + id + "-00f067aa0ba902b7-01").getBytes(StandardCharsets.UTF_8));
+            many.add(r);
+        }
+        Assert.assertEquals(RecordProcessor.MAX_MPL_TRACE_IDS, RecordProcessor.traceIds(many).size());
+    }
+
     // --- Deserialization tests ---
 
     @Test

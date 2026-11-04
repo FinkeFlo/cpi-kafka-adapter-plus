@@ -26,8 +26,10 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.LongSupplier;
@@ -44,6 +46,7 @@ import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.errors.InterruptException;
 import org.apache.kafka.common.errors.RebalanceInProgressException;
 import org.apache.kafka.common.errors.WakeupException;
+import org.apache.kafka.common.header.Header;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -64,6 +67,8 @@ final class RecordProcessor {
     private static final Logger LOG = LoggerFactory.getLogger(RecordProcessor.class);
 
     private static final long MAX_RETRY_DELAY_SECONDS = 300; // 5 minutes
+    /** Bounds the MPL custom header properties a batch of many traces writes. */
+    static final int MAX_MPL_TRACE_IDS = 50;
 
     /**
      * Hard bound for the offset commit that runs inside the partition-revocation callback.
@@ -482,6 +487,7 @@ final class RecordProcessor {
         }
 
         tracingHelper.traceInbound(exchange, body);
+        tracingHelper.annotateTraceIds(exchange, traceIds(batch));
 
         exchange.getIn().setBody(body);
         setBatchHeaders(exchange.getIn(), batch, schemaValidationFailures, dlqCount,
@@ -624,6 +630,7 @@ final class RecordProcessor {
             Exchange exchange = callback.createExchange();
 
             tracingHelper.traceInbound(exchange, resolvedBody);
+            tracingHelper.annotateTraceIds(exchange, traceIds(java.util.Collections.singletonList(record)));
 
             exchange.getIn().setBody(resolvedBody);
             if (batchFallback) {
@@ -1223,6 +1230,31 @@ final class RecordProcessor {
     }
 
     /**
+     * The distinct W3C trace IDs in the {@code traceparent} headers of {@code records}, at most
+     * {@link #MAX_MPL_TRACE_IDS}, for the MPL (#168).
+     */
+    static Set<String> traceIds(List<ConsumerRecord<byte[], byte[]>> records) {
+        Set<String> ids = new LinkedHashSet<>();
+        for (ConsumerRecord<byte[], byte[]> record : records) {
+            if (record.headers() == null) {
+                continue;
+            }
+            for (Header header : record.headers()) {
+                if (ids.size() >= MAX_MPL_TRACE_IDS) {
+                    return ids;
+                }
+                if ("traceparent".equalsIgnoreCase(header.key()) && header.value() != null) {
+                    String id = TraceContext.traceId(new String(header.value(), StandardCharsets.UTF_8));
+                    if (id != null) {
+                        ids.add(id);
+                    }
+                }
+            }
+        }
+        return ids;
+    }
+
+    /**
      * @param payloadSize size of the deserialized Camel body in UTF-8 bytes
      */
     void setSingleRecordHeaders(Message message, ConsumerRecord<byte[], byte[]> record, DecodedValue decoded,
@@ -1244,8 +1276,12 @@ final class RecordProcessor {
         }
         if (record.headers() != null) {
             record.headers().forEach(header -> {
-                String headerName = "kafka.header." + header.key();
-                message.setHeader(headerName, header.value() != null ? new String(header.value(), StandardCharsets.UTF_8) : null);
+                String value = header.value() != null ? new String(header.value(), StandardCharsets.UTF_8) : null;
+                message.setHeader("kafka.header." + header.key(), value);
+                // CPI's message processing log only reads these under their own name (#168)
+                if (TraceContext.isTraceContextHeader(header.key())) {
+                    message.setHeader(header.key(), value);
+                }
             });
         }
     }
