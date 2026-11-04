@@ -476,5 +476,14 @@ final class SchemaRegistryHttpClient {
             return httpStatus == NO_RESPONSE || httpStatus == 401 || httpStatus == 408 || httpStatus == 429
                     || (httpStatus >= 500 && httpStatus <= 599);
         }
+
+        /**
+         * Whether a send repeated within seconds can serialize the record (#308): {@link #isTransient()}
+         * without 401, which needs a new credential, and 408, which the registry answers to a request it
+         * did not receive in time and which the next attempt sends no faster.
+         */
+        boolean isOutage() {
+            return isTransient() && httpStatus != 401 && httpStatus != 408;
+        }
     }
 }

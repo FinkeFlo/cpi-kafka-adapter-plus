@@ -64,7 +64,11 @@ thread. And it has a floor of one second, because three immediate retries finish
 and hit the same broker node that just disappeared.
 
 Data errors (`RecordTooLargeException`, serialization failures, an invalid topic) and unclassified
-errors are **never** retried, whatever the configuration says. A record that is too large will be
+errors are **never** retried, whatever the configuration says. A Schema Registry that does not
+answer, or answers 429 or 5xx, is not a data error: Avro serialization fails before
+anything is buffered, so the single path serializes again with the next attempt (with
+`enableIdempotence=true`, as for every single-path retry) and a transactional batch retries, both as
+`RETRIABLE` (see [Avro & Schema Registry](avro-schema-registry.md#producer-receiver-setup)). A record that is too large will be
 exactly as too large on the next attempt. A send that Kafka refused because the shared producer had
 just been closed under it is not unclassified: it is reported as `RETRIABLE` (see
 [Troubleshooting](../troubleshooting.md#exception-classification)).

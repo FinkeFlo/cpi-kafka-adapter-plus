@@ -31,6 +31,7 @@ import org.apache.camel.Message;
 import org.apache.kafka.clients.producer.Producer;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.clients.producer.RecordMetadata;
+import org.apache.kafka.common.KafkaException;
 import org.apache.kafka.common.errors.SerializationException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -214,11 +215,15 @@ public final class ProducerBatchHelper {
                 producerRecords.add(buildRecord(records.get(i), topic, fallbackKey, partition,
                         timestamp, message, headerAdder, valueSerializer, keySerializer));
             } catch (RuntimeException e) {
+                String failure = "Batch send failed at record index " + i + " (phase=SERIALIZE): "
+                        + e.getMessage();
+                if (KafkaErrorHelper.isRegistryOutage(e)) {
+                    // Not a payload problem: classified by its cause as RETRIABLE (#308).
+                    throw new KafkaException(failure, e);
+                }
                 // SerializationException classifies as FATAL_DATA_ERROR: a payload problem must not
                 // rebuild the shared producer.
-                throw new SerializationException(
-                        "Batch send failed at record index " + i + " (phase=SERIALIZE): "
-                                + e.getMessage(), e);
+                throw new SerializationException(failure, e);
             }
         }
 

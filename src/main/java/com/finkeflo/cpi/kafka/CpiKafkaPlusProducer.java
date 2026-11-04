@@ -789,28 +789,6 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
             }
         }
 
-        // Serialize value
-        byte[] value = serializeValue(topic, bodyBytes);
-
-        // Serialize key
-        byte[] key = serializeKey(topic, keyStr);
-
-        // Determine partition (optional)
-        Integer partition = parsePartitionHeader(in);
-
-        // Determine timestamp (optional)
-        Long timestamp = in.getHeader("kafka.OVERRIDE_TIMESTAMP", Long.class);
-
-        // Build ProducerRecord
-        ProducerRecord<byte[], byte[]> record = new ProducerRecord<>(topic, partition, timestamp, key, value);
-
-        // Map exchange headers to Kafka record headers
-        addRecordHeaders(record, in);
-
-        // Trace outbound
-        if (value != null) {
-            tracingHelper.traceOutbound(exchange, value);
-        }
 
         // Send synchronously to ensure delivery before IFlow continues.
         //
@@ -830,17 +808,35 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
         Exception lastError = null;
         ProducerRetryPolicy.StopReason stopReason = ProducerRetryPolicy.StopReason.RETRY_DISABLED;
         int attempt = 0;
+        ProducerRecord<byte[], byte[]> record = null;
 
         for (attempt = 1; attempt <= maxAttempts; attempt++) {
+            // Serialized again while the Schema Registry is down, which is an attempt like a failed
+            // send (#308). A record that cannot be serialized fails as before the first attempt.
+            RuntimeException registryOutage = null;
+            if (record == null) {
+                try {
+                    record = buildRecord(exchange, in, topic, bodyBytes, keyStr);
+                } catch (RuntimeException e) {
+                    if (!KafkaErrorHelper.isRegistryOutage(e)) {
+                        throw e;
+                    }
+                    registryOutage = e;
+                }
+            }
             // Outside the try: a producer that cannot be built, or is not built after the stop, fails
             // the exchange as it does before the first attempt, not as a send failure.
-            KafkaProducer<byte[], byte[]> producer = sharedProducer();
+            KafkaProducer<byte[], byte[]> producer = registryOutage == null ? sharedProducer() : null;
             // Stays true when send() itself throws: then nothing was buffered.
             boolean failedBeforeBuffering = true;
             try {
+                if (registryOutage != null) {
+                    throw registryOutage;
+                }
+                ProducerRecord<byte[], byte[]> toSend = record;
                 long deadlineMs = sendGuard.newDeadline();
                 Future<RecordMetadata> future = MonitorFaultRetry.execute(
-                        () -> producer.send(record),
+                        () -> producer.send(toSend),
                         new MonitorFaultRetry.Budget(),
                         deadlineMs,
                         topic,
@@ -993,6 +989,21 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
             }
         }
         return bodyBytes;
+    }
+
+    private ProducerRecord<byte[], byte[]> buildRecord(Exchange exchange, Message in, String topic,
+                                                       byte[] bodyBytes, String keyStr) {
+        byte[] value = serializeValue(topic, bodyBytes);
+        byte[] key = serializeKey(topic, keyStr);
+        Integer partition = parsePartitionHeader(in);
+        Long timestamp = in.getHeader("kafka.OVERRIDE_TIMESTAMP", Long.class);
+
+        ProducerRecord<byte[], byte[]> record = new ProducerRecord<>(topic, partition, timestamp, key, value);
+        addRecordHeaders(record, in);
+        if (value != null) {
+            tracingHelper.traceOutbound(exchange, value);
+        }
+        return record;
     }
 
     private byte[] serializeValue(String topic, byte[] bodyBytes) {

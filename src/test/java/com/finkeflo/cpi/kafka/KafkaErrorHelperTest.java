@@ -342,6 +342,30 @@ public class KafkaErrorHelperTest {
     }
 
     @Test
+    public void testOnlyARegistryOutageIsRetriedByTheProducer() {
+        // #308: a send repeated within seconds gets through a registry that did not answer, was
+        // overloaded or failed, but not a rejected login or a request it did not receive in time.
+        for (int status : new int[] {429, 500, 503, 599}) {
+            SchemaRegistryHttpClient.SchemaRegistryException e =
+                    new SchemaRegistryHttpClient.SchemaRegistryException("GET /subjects/s/versions/latest", status, "");
+            Assert.assertTrue("HTTP " + status, KafkaErrorHelper.isRegistryOutage(
+                    new org.apache.kafka.common.KafkaException("serialize failed", e)));
+            Assert.assertEquals("HTTP " + status, KafkaErrorHelper.Classification.RETRIABLE,
+                    KafkaErrorHelper.classify(e));
+        }
+        Assert.assertTrue("no answer", KafkaErrorHelper.isRegistryOutage(
+                new SchemaRegistryHttpClient.SchemaRegistryException("GET /subjects/s/versions/latest",
+                        new java.net.ConnectException("Connection refused"))));
+        for (int status : new int[] {401, 408, 404}) {
+            SchemaRegistryHttpClient.SchemaRegistryException e =
+                    new SchemaRegistryHttpClient.SchemaRegistryException("GET /subjects/s/versions/latest", status, "");
+            Assert.assertFalse("HTTP " + status, KafkaErrorHelper.isRegistryOutage(e));
+            Assert.assertNotEquals("HTTP " + status, KafkaErrorHelper.Classification.RETRIABLE,
+                    KafkaErrorHelper.classify(e));
+        }
+    }
+
+    @Test
     public void testIsTransientForRedeliveryFindsATransientCauseBeyondTenLevels() {
         // CauseChain walks up to 64 causes, unlike KafkaErrorHelper.classify, which stops after ten.
         Exception e = new java.net.SocketTimeoutException("Read timed out");

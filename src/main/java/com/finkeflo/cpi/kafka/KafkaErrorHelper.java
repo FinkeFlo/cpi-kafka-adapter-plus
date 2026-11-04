@@ -35,6 +35,8 @@ import org.apache.kafka.common.errors.SerializationException;
 import org.apache.kafka.common.errors.UnknownTopicOrPartitionException;
 import org.apache.kafka.common.errors.UnsupportedVersionException;
 
+import java.util.function.Predicate;
+
 /**
  * Shared error-handling utilities used by both Consumer and Producer.
  */
@@ -116,6 +118,11 @@ final class KafkaErrorHelper {
 
         // 2. Retriable (Kafka's own marker; includes TimeoutException, NetworkException, etc.)
         if (t instanceof RetriableException) return Classification.RETRIABLE;
+        // The Schema Registry, not the record, failed: the same record serializes once it is back (#308).
+        if (t instanceof SchemaRegistryHttpClient.SchemaRegistryException
+                && ((SchemaRegistryHttpClient.SchemaRegistryException) t).isOutage()) {
+            return Classification.RETRIABLE;
+        }
 
         // 3. ApplicationRecoverableException — Kafka 4.x base class for "producer is unusable, rebuild"
         //    Subclasses: ProducerFencedException, InvalidPidMappingException, InvalidProducerEpochException,
@@ -170,8 +177,23 @@ final class KafkaErrorHelper {
                     && KAFKA_RETRIABLE_EXCEPTION.isInstance(current)) {
                 return true;
             }
+        }
+        return hasRegistryFailure(e, SchemaRegistryHttpClient.SchemaRegistryException::isTransient);
+    }
+
+    /**
+     * Whether the cause chain holds a Schema Registry request a send repeated within seconds can get
+     * through, as {@link SchemaRegistryHttpClient.SchemaRegistryException#isOutage()} defines it.
+     */
+    static boolean isRegistryOutage(Throwable t) {
+        return hasRegistryFailure(t, SchemaRegistryHttpClient.SchemaRegistryException::isOutage);
+    }
+
+    private static boolean hasRegistryFailure(Throwable t,
+            Predicate<SchemaRegistryHttpClient.SchemaRegistryException> test) {
+        for (Throwable current : CauseChain.of(t)) {
             if (current instanceof SchemaRegistryHttpClient.SchemaRegistryException
-                    && ((SchemaRegistryHttpClient.SchemaRegistryException) current).isTransient()) {
+                    && test.test((SchemaRegistryHttpClient.SchemaRegistryException) current)) {
                 return true;
             }
         }
