@@ -60,7 +60,8 @@ import org.slf4j.LoggerFactory;
 public class AdapterTracingHelper {
 
     private static final Logger LOG = LoggerFactory.getLogger(AdapterTracingHelper.class);
-    private static final String COMPONENT_ID = "ctype::Adapter/cname::kafkaAdapterPlus/vendor::FinkeFlo/version::0.0.1";
+    private static final String COMPONENT_ID =
+            componentId(OsgiBundleInfo.of(AdapterTracingHelper.class).getVersion());
     private static final int MAX_TRACE_PAYLOAD_BYTES = 25 * 1024 * 1024;
     /** Attachment name for the full error diagnostic block. */
     private static final String ERROR_ATTACHMENT_NAME = "KafkaAdapterError";
@@ -255,6 +256,17 @@ public class AdapterTracingHelper {
     private static Method customHeaderProperty() throws ReflectiveOperationException {
         return Class.forName("com.sap.it.api.msglog.MessageLog")
                 .getMethod("addCustomHeaderProperty", String.class, String.class);
+    }
+
+    /**
+     * The component ID the MPL shows for this adapter, with the {@code major.minor.micro} of the
+     * bundle version; {@code 0.0.0} outside OSGi (#230).
+     */
+    static String componentId(String bundleVersion) {
+        java.util.regex.Matcher m = bundleVersion == null ? null
+                : java.util.regex.Pattern.compile("^(\\d+)\\.(\\d+)\\.(\\d+)").matcher(bundleVersion);
+        String version = m != null && m.find() ? m.group() : "0.0.0";
+        return "ctype::Adapter/cname::kafkaAdapterPlus/vendor::FinkeFlo/version::" + version;
     }
 
     /**

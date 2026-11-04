@@ -20,9 +20,6 @@
  */
 package com.finkeflo.cpi.kafka;
 
-import java.io.ByteArrayOutputStream;
-import java.io.PrintStream;
-import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 
 import org.junit.Assert;
@@ -41,7 +38,7 @@ public class ReceiverConfigValidatorTest {
     public void theDefaultsPassEveryPhaseWithoutALogLine() throws Exception {
         CpiKafkaPlusEndpoint e = endpoint();
 
-        String logged = capture(() -> {
+        String logged = LogCapture.thisThread(() -> {
             ReceiverConfigValidator.validateBeforeStart(e);
             ReceiverConfigValidator.validateTransactional(e);
             ReceiverConfigValidator.validateRetry(e);
@@ -106,7 +103,7 @@ public class ReceiverConfigValidatorTest {
         CpiKafkaPlusEndpoint e = endpoint();
         e.setEnableTransactions(true);
 
-        String logged = capture(() -> ReceiverConfigValidator.validateTransactional(e));
+        String logged = LogCapture.thisThread(() -> ReceiverConfigValidator.validateTransactional(e));
 
         assertLoggedOnce(logged, "ERROR " + PRODUCER + " - [CPI-KAFKA-PLUS-DIAG] producer.config.ineffective "
                 + "parameter=enableTransactions producerBatchMode=NONE reason='transactions apply to batches "
@@ -119,7 +116,7 @@ public class ReceiverConfigValidatorTest {
         batch.setProducerBatchMode("JSON_ARRAY");
         batch.setJsonSchemaValidation(true);
 
-        String logged = capture(() -> ReceiverConfigValidator.validateBeforeStart(batch));
+        String logged = LogCapture.thisThread(() -> ReceiverConfigValidator.validateBeforeStart(batch));
 
         assertLoggedOnce(logged, "ERROR " + PRODUCER + " - [CPI-KAFKA-PLUS-DIAG] producer.config.ineffective "
                 + "parameter=jsonSchemaValidation producerBatchMode=JSON_ARRAY reason='the JSON Schema applies "
@@ -128,7 +125,7 @@ public class ReceiverConfigValidatorTest {
         CpiKafkaPlusEndpoint single = endpoint();
         single.setJsonSchemaValidation(true);
         single.setJsonSchema("{\"type\": \"object\"}");
-        Assert.assertEquals("", capture(() -> ReceiverConfigValidator.validateBeforeStart(single)));
+        Assert.assertEquals("", LogCapture.thisThread(() -> ReceiverConfigValidator.validateBeforeStart(single)));
     }
 
     /** ERROR, because nothing below WARN reaches the tenant trace (#255). */
@@ -138,7 +135,7 @@ public class ReceiverConfigValidatorTest {
         batch.setProducerBatchMode("XML_LIST");
         batch.setProducerRetryMaxAttempts(3);
 
-        assertLoggedOnce(capture(() -> ReceiverConfigValidator.validateRetry(batch)),
+        assertLoggedOnce(LogCapture.thisThread(() -> ReceiverConfigValidator.validateRetry(batch)),
                 "ERROR " + PRODUCER + " - [CPI-KAFKA-PLUS-DIAG] producer.config.ineffective "
                         + "parameter=producerRetryMaxAttempts value=3 producerBatchMode=XML_LIST reason='a partially "
                         + "sent batch cannot be retried without duplicating records; switch on enableTransactions "
@@ -152,11 +149,25 @@ public class ReceiverConfigValidatorTest {
         singleSlot.setProducerRetryMaxAttempts(2);
         singleSlot.setProducerRetryTotalBudgetSeconds(900);
 
-        assertLoggedOnce(capture(() -> ReceiverConfigValidator.validateRetry(singleSlot)),
+        assertLoggedOnce(LogCapture.thisThread(() -> ReceiverConfigValidator.validateRetry(singleSlot)),
                 "ERROR " + PRODUCER + " - [CPI-KAFKA-PLUS-DIAG] producer.config.ineffective "
                         + "parameter=producerRetryMaxAttempts value=2 maxConcurrentTransactions=1 reason='a retry "
                         + "holds the single transaction slot for up to producerRetryTotalBudgetSeconds=900s and "
                         + "blocks every other send on this node meanwhile; raise maxConcurrentTransactions'");
+    }
+
+    /** Without idempotence single messages are never retried, so their worst case must not block (#230). */
+    @Test
+    public void retryWithoutIdempotenceIsLoggedInsteadOfBlockingTheStart() throws Exception {
+        CpiKafkaPlusEndpoint e = endpoint();
+        e.setEnableIdempotence(false);
+        e.setProducerRetryMaxAttempts(3);
+
+        assertLoggedOnce(LogCapture.thisThread(() -> ReceiverConfigValidator.validateRetry(e)),
+                "ERROR " + PRODUCER + " - [CPI-KAFKA-PLUS-DIAG] producer.config.ineffective "
+                        + "parameter=producerRetryMaxAttempts value=3 enableIdempotence=false reason='without "
+                        + "idempotence a retry could duplicate the message; switch on enableIdempotence to retry "
+                        + "single messages'");
     }
 
     private static CpiKafkaPlusEndpoint endpoint() {
@@ -183,32 +194,5 @@ public class ReceiverConfigValidatorTest {
         char[] chars = new char[count];
         Arrays.fill(chars, c);
         return new String(chars);
-    }
-
-    private interface ThrowingRunnable {
-        void run() throws Exception;
-    }
-
-    /**
-     * The lines this thread logs while {@code action} runs. Clients left by earlier tests keep
-     * logging from their own threads meanwhile.
-     */
-    private static String capture(ThrowingRunnable action) throws Exception {
-        PrintStream original = System.err;
-        ByteArrayOutputStream captured = new ByteArrayOutputStream();
-        System.setErr(new PrintStream(captured, true, "UTF-8"));
-        try {
-            action.run();
-        } finally {
-            System.setErr(original);
-        }
-        String thisThread = "[" + Thread.currentThread().getName() + "] ";
-        StringBuilder lines = new StringBuilder();
-        for (String line : new String(captured.toByteArray(), StandardCharsets.UTF_8).split("\\R")) {
-            if (line.startsWith(thisThread)) {
-                lines.append(line).append('\n');
-            }
-        }
-        return lines.toString();
     }
 }

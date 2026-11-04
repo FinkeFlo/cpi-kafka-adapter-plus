@@ -22,7 +22,6 @@ package com.finkeflo.cpi.kafka;
 
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
-import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
@@ -188,7 +187,7 @@ public class ProducerRetryDiagnosticsTest {
             String logged;
             // Attempt 1 fails before buffering (retried), attempt 2 after buffering (the last one).
             try (QueuedFutureKafkaProducer kafkaProducer = new QueuedFutureKafkaProducer(Arrays.asList(
-                    kafkaFutureFailure(new org.apache.kafka.common.errors.TimeoutException(
+                    KafkaFutures.failedBeforeBuffering(new org.apache.kafka.common.errors.TimeoutException(
                             "Topic orders not present in metadata after 2000 ms.")),
                     new PendingFailureFuture(new NetworkException("Disconnected from node 3"))))) {
                 setField(producer, "kafkaProducer", kafkaProducer);
@@ -375,13 +374,6 @@ public class ProducerRetryDiagnosticsTest {
         void run() throws Exception;
     }
 
-    @SuppressWarnings("unchecked")
-    private static Future<RecordMetadata> kafkaFutureFailure(Exception e) throws Exception {
-        Constructor<?> ctor = Class.forName(ProducerRetryPolicy.KAFKA_FUTURE_FAILURE_CLASS)
-                .getDeclaredConstructor(Exception.class);
-        ctor.setAccessible(true);
-        return (Future<RecordMetadata>) ctor.newInstance(e);
-    }
 
     /** A record the producer had buffered, still pending when send() returned, then failed. */
     private static final class PendingFailureFuture implements Future<RecordMetadata> {

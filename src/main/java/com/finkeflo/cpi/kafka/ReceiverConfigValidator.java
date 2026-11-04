@@ -226,6 +226,18 @@ final class ReceiverConfigValidator {
             return;  // no retry on this path, so its worst case must not block the deployment
         }
 
+        // Single messages without idempotence are never retried either (IDEMPOTENCE_DISABLED in
+        // ProducerRetryPolicy): a lost acknowledgement cannot be told from a lost record (#230).
+        if (!transactional && !endpoint.isEnableIdempotence()) {
+            AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("producer.config.ineffective")
+                    .with("parameter", "producerRetryMaxAttempts")
+                    .with("value", maxAttempts)
+                    .with("enableIdempotence", false)
+                    .with("reason", "without idempotence a retry could duplicate the message; "
+                            + "switch on enableIdempotence to retry single messages"));
+            return;  // no retry on this path, so its worst case must not block the deployment
+        }
+
         if (transactional && endpoint.getMaxConcurrentTransactions() == 1) {
             AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("producer.config.ineffective")
                     .with("parameter", "producerRetryMaxAttempts")

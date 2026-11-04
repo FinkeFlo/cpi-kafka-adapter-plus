@@ -191,6 +191,18 @@ public class ConsumerCircuitBreakerTest {
         Assert.assertEquals(Collections.singletonList(failure), handled);
     }
 
+    /** ERROR, because WARN never reaches the tenant trace (ADR 0004, #230). */
+    @Test
+    public void anAutoPauseIsLoggedAsAnError() throws Exception {
+        ConsumerCircuitBreaker cb = createCircuitBreaker(1, 10);
+
+        String logged = LogCapture.thisThread(cb::recordFailure);
+
+        Assert.assertTrue(logged, logged.contains("ERROR " + ConsumerCircuitBreaker.class.getName()
+                + " - [CPI-KAFKA-PLUS-DIAG] consumer.autopause.activated consecutiveFailures=1 pauseSeconds=10 "
+                + "pauseCount=1 topic=test-topic groupId=test-group"));
+    }
+
     private ConsumerCircuitBreaker createCircuitBreaker(int threshold, int cooldown) throws Exception {
         CpiKafkaPlusEndpoint endpoint = (CpiKafkaPlusEndpoint) ctx.getEndpoint(
                 "cpi-kafka-plus:test-topic?bootstrapServers=localhost:9092&groupId=test-group"

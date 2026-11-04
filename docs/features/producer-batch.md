@@ -149,7 +149,7 @@ When `producerBatchMode=NONE` (the default), each iFlow exchange sends a single 
 ## Error handling
 
 - **Parsing error:** Clear exception with error description and record index → MPL error
-- **Send error:** Fail-fast on the first error; records already sent remain in Kafka
+- **Send error:** Fail-fast on the first error, also for a record Kafka rejects before sending it (for example one above *Max Request Size*); records already sent remain in Kafka, the records after the failed one are not sent
 - **Fatal error (auth/authorization):** Reconnect is triggered automatically
 - **Transactional batch** (`enableTransactions`): a failed batch is aborted, so `read_committed`
   consumers never see a part of it. If the abort cannot reach the transaction coordinator, the

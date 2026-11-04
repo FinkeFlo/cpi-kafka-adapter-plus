@@ -231,8 +231,16 @@ public final class ProducerBatchHelper {
             final int recordIndex = i;
             final ProducerRecord<byte[], byte[]> pr = producerRecords.get(i);
             try {
-                futures.add(MonitorFaultRetry.execute(
-                        () -> producer.send(pr), batchBudget, deadlineMs, topic, recordIndex));
+                Future<RecordMetadata> future = MonitorFaultRetry.execute(
+                        () -> producer.send(pr), batchBudget, deadlineMs, topic, recordIndex);
+                futures.add(future);
+                // Kafka reports a client-side rejection (RecordTooLargeException, a metadata
+                // timeout) as an already failed future, not as an exception. Sending the rest would
+                // write records after the gap, and a caller retry would duplicate them (#230). The
+                // await loop reports the failure of this record.
+                if (ProducerRetryPolicy.failedBeforeBuffering(future)) {
+                    break;
+                }
             } catch (Exception e) {
                 AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("producer.batch.record.send")
                         .with("producerPath", producerPath)

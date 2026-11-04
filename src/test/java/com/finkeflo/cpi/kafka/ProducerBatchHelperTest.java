@@ -188,6 +188,28 @@ public class ProducerBatchHelperTest {
         }
     }
 
+    @Test
+    public void aRecordKafkaRejectsBeforeBufferingStopsTheBatch() throws Exception {
+        StubProducer producer = new StubProducer(
+                CompletableFuture.completedFuture(metadata(10L)),
+                KafkaFutures.failedBeforeBuffering(new org.apache.kafka.common.errors.RecordTooLargeException("too large")),
+                CompletableFuture.completedFuture(metadata(11L)));
+
+        try {
+            ProducerBatchHelper.sendBatch(
+                    producer, threeRecords(), "orders", null, null, null, null, null, null, null,
+                    ProducerSendGuard.of(SHORT_BUDGET_MS, "PLAINTEXT"),
+                    ProducerPath.SHARED, "test-client-id");
+            Assert.fail("Expected the rejected record to fail the batch");
+        } catch (RuntimeException e) {
+            Assert.assertTrue(e.getMessage(), e.getMessage().contains("record index 1"));
+        }
+
+        // A record after the rejected one would be written, and a caller retry would duplicate it.
+        Assert.assertEquals(2, producer.sentRecords.size());
+    }
+
+
     private static List<BatchRecord> threeRecords() {
         return Arrays.asList(new BatchRecord("k1", "v1"),
                 new BatchRecord("k2", "v2"),

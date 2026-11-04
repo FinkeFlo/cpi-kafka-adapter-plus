@@ -168,10 +168,14 @@ final class ConsumerCircuitBreaker {
                 effectiveCooldownSeconds() * (1L << clampedShift),
                 MAX_COOLDOWN_SECONDS);
         pausedUntil = System.currentTimeMillis() + (cooldownSeconds * 1000L);
-        LOG.warn("[CPI-KAFKA-PLUS-DIAG] auto-pause: ACTIVATED after {} consecutive failures. " +
-                        "Pausing for {}s (pause #{}, topic='{}' group='{}')",
-                consecutiveProcessingFailures, cooldownSeconds, pauseCount,
-                endpoint.getEffectiveTopic(), endpoint.getGroupId());
+        // ERROR, because nothing below WARN reaches the tenant trace (ADR 0004); one line per pause,
+        // so the doubling cooldown bounds it (#230).
+        AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("consumer.autopause.activated")
+                .with("consecutiveFailures", consecutiveProcessingFailures)
+                .with("pauseSeconds", cooldownSeconds)
+                .with("pauseCount", pauseCount)
+                .with("topic", endpoint.getEffectiveTopic())
+                .with("groupId", endpoint.getGroupId()));
         tracingHelper.publishConnectionStatus(false,
                 new RuntimeException("Auto-paused after " + consecutiveProcessingFailures + " consecutive processing failures"));
     }
