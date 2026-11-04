@@ -410,7 +410,7 @@
                 </AttributeReference>
                 <AttributeReference>
                     <ReferenceName>dlqCredentialAlias</ReferenceName>
-                    <description>User Credentials alias for writing to the DLQ topic. The DLQ topic is always on the same Kafka cluster (Bootstrap Servers); set an alias only if writing to it needs other SASL credentials than the Connection tab, e.g. a user with WRITE permission on the DLQ topic. Leave empty to reuse the main SASL credentials.</description>
+                    <description>User Credentials alias for writing to the DLQ topic. The DLQ topic is always on the same Kafka cluster (Bootstrap Servers); set an alias only if writing to it needs other SASL credentials than the Connection tab, e.g. a user with WRITE permission on the DLQ topic. Leave empty to reuse the main SASL credentials. With a SASL security protocol, an alias that is set but not deployed fails the start of the channel; with SSL or PLAINTEXT it is not read.</description>
                     <EditCondition>
                         <AttributeName>dlqEnabled</AttributeName>
                         <AttributeValue>true</AttributeValue>

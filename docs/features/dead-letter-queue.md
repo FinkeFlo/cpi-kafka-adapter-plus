@@ -13,7 +13,7 @@ When **Enable Dead Letter Queue** (`dlqEnabled`) is turned on, records that fail
 | `dlqEnabled` | `false` | Enable Dead Letter Queue routing for failed records |
 | `dlqTopic` | _(required)_ | Kafka topic to send failed records to. Kafka takes 1 to 249 characters from `a-z`, `A-Z`, `0-9`, `.`, `_` and `-`, but not `.` or `..` alone; any other name fails the deployment. |
 | `dlqMaxRetries` | `3` | Number of retries after the first failed attempt before a record is sent to the DLQ (UI: "Retries before DLQ (additional attempts)") |
-| `dlqCredentialAlias` | _(empty)_ | SASL credential alias for writing to the DLQ topic, if that needs other credentials than the main connection. The DLQ topic is always on the same cluster (`bootstrapServers`). Only visible when DLQ is enabled. Leave empty to reuse the main consumer credentials. |
+| `dlqCredentialAlias` | _(empty)_ | SASL credential alias for writing to the DLQ topic, if that needs other credentials than the main connection. The DLQ topic is always on the same cluster (`bootstrapServers`). Only visible when DLQ is enabled. Leave empty to reuse the main consumer credentials. With a SASL security protocol, an alias that is set but cannot be resolved fails the start of the channel. It no longer falls back to the main credentials. |
 | `retryOnlyTransientErrors` | `true` | Only retry transient errors (timeouts, connection failures). Permanent errors are sent directly to DLQ. (UI: "Retry Transient Errors Only") |
 | `retryDelaySeconds` | `0` | Initial delay between retries in seconds. Doubles after each retry (exponential backoff), capped at 300s. |
 

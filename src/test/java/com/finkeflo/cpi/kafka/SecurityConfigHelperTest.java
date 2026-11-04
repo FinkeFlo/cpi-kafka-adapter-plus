@@ -119,6 +119,119 @@ public class SecurityConfigHelperTest {
         Assert.assertNull(props.getProperty("sasl.jaas.config"));
     }
 
+    // --- aliases resolved at the start (#307) ---
+
+    @Test
+    public void anAliasTheStoreDoesNotKnowFailsTheStartOfBothDirections() throws Exception {
+        CredentialHelper.setCredentialResolver(alias -> null);
+        try (org.apache.camel.impl.DefaultCamelContext ctx = new org.apache.camel.impl.DefaultCamelContext()) {
+            ctx.addComponent("cpi-kafka-plus", new CpiKafkaPlusComponent());
+            ctx.start();
+            String uri = "cpi-kafka-plus:orders?bootstrapServers=localhost:9092&groupId=g&securityProtocol=SASL_SSL"
+                    + "&saslMechanism=PLAIN&credentialAlias=kafka-user";
+            String expected = "'Credential Alias' (credentialAlias) 'kafka-user' could not be resolved. Please "
+                    + "deploy a User Credentials artifact with this name.";
+            CpiKafkaPlusEndpoint sender = (CpiKafkaPlusEndpoint) ctx.getEndpoint(uri);
+            CpiKafkaPlusConsumer consumer = new CpiKafkaPlusConsumer(sender, exchange -> { });
+            Assert.assertEquals(expected, startFailure(consumer::doStart));
+            consumer.doStop();
+            CpiKafkaPlusEndpoint receiver = (CpiKafkaPlusEndpoint) ctx.getEndpoint(uri.replace("orders?", "invoices?"));
+            CpiKafkaPlusProducer producer = new CpiKafkaPlusProducer(receiver);
+            Assert.assertEquals(expected, startFailure(producer::doStart));
+            producer.doStop();
+        }
+    }
+
+    @Test
+    public void everyAliasTheClientReadsIsResolvedAndNoOther() {
+        CredentialHelper.setCredentialResolver(alias -> alias.startsWith("known")
+                ? new CredentialHelper.UserCredentials("u", "p") : null);
+        CpiKafkaPlusEndpoint endpoint = new CpiKafkaPlusEndpoint();
+        endpoint.setSecurityProtocol("SASL_PLAINTEXT");
+        endpoint.setSaslMechanism("PLAIN");
+        endpoint.setCredentialAlias("known-user");
+        endpoint.setDlqCredentialAlias("unknown-dlq");
+        endpoint.setSchemaRegistryCredentialAlias("unknown-registry");
+        endpoint.setSslKeystoreAlias("unknown-keystore");
+        CredentialHelper.setSslContextResolver(alias -> {
+            throw new RuntimeException("Failed to get SSLContext: no key pair " + alias,
+                    new CredentialHelper.KeystoreAliasException(new Exception("no key pair " + alias)));
+        });
+
+        // The DLQ is off, the registry not used and the protocol without SSL: none of them is read.
+        SecurityConfigHelper.requireAliases(endpoint, false);
+
+        endpoint.setDlqEnabled(true);
+        assertAliasFailure("'DLQ SASL Credential Alias' (dlqCredentialAlias) 'unknown-dlq'",
+                () -> SecurityConfigHelper.requireAliases(endpoint, false));
+        endpoint.setDlqEnabled(false);
+        assertAliasFailure("'Schema Registry Credential Alias' (schemaRegistryCredentialAlias) 'unknown-registry'",
+                () -> SecurityConfigHelper.requireAliases(endpoint, true));
+        endpoint.setSecurityProtocol("SASL_SSL");
+        assertAliasFailure("'SSL Keystore Alias' (sslKeystoreAlias) 'unknown-keystore' could not be resolved from "
+                + "the CPI keystore: Failed to get SSLContext: no key pair unknown-keystore",
+                () -> SecurityConfigHelper.requireAliases(endpoint, false));
+    }
+
+    @Test
+    public void aStoreThatCannotBeAskedDoesNotFailTheStart() {
+        CredentialHelper.setCredentialResolver(alias -> {
+            throw new RuntimeException("Failed to retrieve credentials: no API factory");
+        });
+        CpiKafkaPlusEndpoint endpoint = new CpiKafkaPlusEndpoint();
+        endpoint.setSecurityProtocol("SASL_SSL");
+        endpoint.setSaslMechanism("PLAIN");
+        endpoint.setCredentialAlias("kafka-user");
+
+        SecurityConfigHelper.requireAliases(endpoint, false);
+    }
+
+    @Test
+    public void aKeystoreThatCannotBeAskedDoesNotFailTheStart() {
+        CredentialHelper.setSslContextResolver(alias -> {
+            throw new RuntimeException("Failed to get SSLContext: no KeystoreService");
+        });
+        CpiKafkaPlusEndpoint endpoint = new CpiKafkaPlusEndpoint();
+        endpoint.setSecurityProtocol("SSL");
+        endpoint.setSslKeystoreAlias("tenant-kafka");
+
+        SecurityConfigHelper.requireAliases(endpoint, false);
+    }
+
+    @Test
+    public void aCredentialKafkaCannotTakeFailsTheStart() {
+        CredentialHelper.setCredentialResolver(alias -> new CredentialHelper.UserCredentials("u", "p\nq"));
+        CpiKafkaPlusEndpoint endpoint = new CpiKafkaPlusEndpoint();
+        endpoint.setSecurityProtocol("SASL_SSL");
+        endpoint.setSaslMechanism("PLAIN");
+        endpoint.setCredentialAlias("kafka-user");
+
+        assertUnusable("password", () -> SecurityConfigHelper.requireAliases(endpoint, false));
+    }
+
+    private interface Start {
+        void run() throws Exception;
+    }
+
+    private static String startFailure(Start start) throws Exception {
+        try {
+            start.run();
+            Assert.fail("expected the start to fail");
+            return null;
+        } catch (IllegalStateException expected) {
+            return expected.getMessage();
+        }
+    }
+
+    private static void assertAliasFailure(String start, Runnable check) {
+        try {
+            check.run();
+            Assert.fail("expected " + start + " to fail");
+        } catch (IllegalStateException expected) {
+            Assert.assertTrue(expected.getMessage(), expected.getMessage().startsWith(start));
+        }
+    }
+
     private static void assertUnusable(String what, Runnable build) {
         try {
             build.run();

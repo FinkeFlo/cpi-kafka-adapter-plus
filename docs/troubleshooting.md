@@ -483,11 +483,24 @@ Initialisation failed. `bootstrapServers` and `securityProtocol` are in the line
 cause chain usually names the problem directly — a rejected credential, a TLS handshake failure, or
 an unreachable broker.
 
-A SASL credential with a line break is refused before the client is built: the cause names the alias,
-e.g. `The password stored under 'Credential Alias' (credentialAlias) 'my-kafka-user' contains a line
-break`, never the value. The sender
-reports the same in `consumer.init.failed`, the DLQ producer in `dlq.producer.init.failed`. See
-[Authentication](security/authentication.md#cpi-secure-store).
+### `consumer.start.failed` / `producer.start.failed`
+
+The channel did not start, so the IFlow deployment fails. Besides an invalid configuration, the
+aliases the client will read are resolved here, sender and receiver alike. One the tenant does not
+have fails with a message such as `'Credential Alias' (credentialAlias) '<alias>' could not be
+resolved. Please deploy a User Credentials artifact with this name.` This covers **Credential Alias**
+with a SASL protocol, **SSL Keystore Alias** with `SSL` or `SASL_SSL`, **Schema Registry Credential
+Alias** when Avro goes through the registry, and **DLQ SASL Credential Alias** with the DLQ on and a
+SASL protocol. Deploy the artifact or correct the field, then redeploy the IFlow.
+
+A SASL credential with a line break fails the start in the same way: the cause names the alias, e.g.
+`The password stored under 'Credential Alias' (credentialAlias) 'my-kafka-user' contains a line
+break`, never the value. See [Authentication](security/authentication.md#cpi-secure-store).
+
+If the Secure Store or the keystore cannot be asked at all, the start logs `alias.check.skipped` with
+`parameter`, `alias` and `reason` and goes on; the client then reports the problem when it is built,
+in `consumer.init.failed` or `producer.init.failed`. A DLQ alias that disappears after the start is
+reported by the DLQ producer in `dlq.producer.init.failed`, when it resolves the alias.
 
 ### `producer.config.ineffective`
 
