@@ -78,6 +78,19 @@ public class ProducerRecordHeadersTest {
     }
 
     @Test
+    public void w3cTraceHeadersAreSentWhateverANonEmptyPatternSays() {
+        Exchange exchange = exchangeWithHeaders();
+        exchange.getIn().setHeader("traceparent", "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01");
+        exchange.getIn().setHeader("tracestate", "vendor=1");
+        exchange.getIn().setHeader("SAP-PASSPORT", "2A54482A");
+
+        Assert.assertEquals("[orderId, traceparent, tracestate]", names(recordFor("orderId", exchange)).toString());
+        Assert.assertEquals("[orderId, SAP-PASSPORT, SAP_Sender, traceparent, tracestate]",
+                names(recordFor("*", exchange)).toString());
+        Assert.assertTrue(names(recordFor("", exchange)).isEmpty());
+    }
+
+    @Test
     public void aByteArrayValueIsSentAsItIs() {
         Exchange exchange = new DefaultExchange(ctx);
         byte[] digest = {0x00, 0x7F, (byte) 0x80, (byte) 0xFF};

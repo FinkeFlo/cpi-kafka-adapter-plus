@@ -78,6 +78,26 @@ public class ProducerBatchHelperTest {
     }
 
     @Test
+    public void aTraceHeaderOfTheRecordReplacesTheExchangesInAnyLetterCase() throws Exception {
+        StubProducer producer = new StubProducer(CompletableFuture.completedFuture(metadata(10L)));
+        Map<String, String> recordHeaders = Collections.singletonMap("TraceParent", "from-record");
+
+        ProducerBatchHelper.sendBatch(
+                producer,
+                Collections.singletonList(new BatchRecord("k1", "v1", recordHeaders)),
+                "orders", null, null, null, null,
+                (pr, message) -> pr.headers().add("traceparent", "from-exchange".getBytes(StandardCharsets.UTF_8)),
+                null, null,
+                ProducerSendGuard.of(SHORT_BUDGET_MS, "SASL_SSL"),
+                ProducerPath.SHARED, "test-client-id");
+
+        org.apache.kafka.common.header.Header[] headers = producer.sentRecords.get(0).headers().toArray();
+        Assert.assertEquals(1, headers.length);
+        Assert.assertEquals("TraceParent", headers[0].key());
+        Assert.assertEquals("from-record", new String(headers[0].value(), StandardCharsets.UTF_8));
+    }
+
+    @Test
     public void stalledRecordRaisesSendStalledException() throws Exception {
         StubProducer producer = new StubProducer(new CompletableFuture<RecordMetadata>());
 

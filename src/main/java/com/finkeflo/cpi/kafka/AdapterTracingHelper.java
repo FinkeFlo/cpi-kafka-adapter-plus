@@ -24,6 +24,7 @@ import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
+import java.util.Collection;
 import java.util.Map;
 import java.util.UUID;
 
@@ -196,33 +197,64 @@ public class AdapterTracingHelper {
             return;
         }
         try {
-            Object factory = resolveMessageLogFactory(exchange);
-            if (factory == null) {
-                return;
-            }
-            Class<?> factoryInterface =
-                    Class.forName("com.sap.it.api.msglog.adapter.AdapterMessageLogFactory");
-            Class<?> baseMessageLogInterface =
-                    Class.forName("com.sap.it.api.msglog.MessageLog");
-
-            Method getMessageLogMethod = factoryInterface.getMethod("getMessageLog",
-                    Object.class, String.class, String.class, String.class);
-            Object mplLog = getMessageLogMethod.invoke(factory, exchange,
-                    "Kafka send recovered by retry", COMPONENT_ID, UUID.randomUUID().toString());
+            Object mplLog = openMessageLog(exchange, "Kafka send recovered by retry");
             if (mplLog == null) {
                 return;
             }
-
+            Class<?> baseMessageLogInterface = Class.forName("com.sap.it.api.msglog.MessageLog");
             Method setIntegerProperty = baseMessageLogInterface.getMethod(
                     "setIntegerProperty", String.class, Integer.class);
             setIntegerProperty.invoke(mplLog, "KafkaRetryAttempts", Integer.valueOf(attempts));
 
-            Method addCustomHeaderProperty = baseMessageLogInterface.getMethod(
-                    "addCustomHeaderProperty", String.class, String.class);
-            addCustomHeaderProperty.invoke(mplLog, "KafkaRetryAttempts", String.valueOf(attempts));
+            customHeaderProperty().invoke(mplLog, "KafkaRetryAttempts", String.valueOf(attempts));
         } catch (Exception e) {
             reportUnavailableOnce("annotating a retry success in the MPL failed", e);
         }
+    }
+
+    /**
+     * Writes the W3C trace IDs of the consumed records as the searchable MPL custom header property
+     * {@link TraceContext#MPL_TRACE_ID}, so a trace from an external monitoring tool leads to its
+     * message in Message Monitoring (#168). Trace-independent, like {@link #annotateRetrySuccess}.
+     *
+     * <p>Never throws: a diagnostic must not fail the message it describes (ADR 0004).
+     */
+    public void annotateTraceIds(Exchange exchange, Collection<String> traceIds) {
+        if (traceIds == null || traceIds.isEmpty()) {
+            return;
+        }
+        try {
+            Object mplLog = openMessageLog(exchange, "Kafka trace context");
+            if (mplLog == null) {
+                return;
+            }
+            Method addCustomHeaderProperty = customHeaderProperty();
+            for (String traceId : traceIds) {
+                addCustomHeaderProperty.invoke(mplLog, TraceContext.MPL_TRACE_ID, traceId);
+            }
+        } catch (Exception e) {
+            reportUnavailableOnce("annotating the trace ID in the MPL failed", e);
+        }
+    }
+
+    /**
+     * @return the exchange's adapter message log, or {@code null} off-platform or when the ADK
+     *         has none
+     */
+    private Object openMessageLog(Exchange exchange, String text) throws ReflectiveOperationException {
+        Object factory = resolveMessageLogFactory(exchange);
+        if (factory == null) {
+            return null;
+        }
+        Method getMessageLog = Class.forName("com.sap.it.api.msglog.adapter.AdapterMessageLogFactory")
+                .getMethod("getMessageLog", Object.class, String.class, String.class, String.class);
+        return getMessageLog.invoke(factory, exchange, text, COMPONENT_ID, UUID.randomUUID().toString());
+    }
+
+    /** {@code MessageLog.addCustomHeaderProperty(String, String)}. */
+    private static Method customHeaderProperty() throws ReflectiveOperationException {
+        return Class.forName("com.sap.it.api.msglog.MessageLog")
+                .getMethod("addCustomHeaderProperty", String.class, String.class);
     }
 
     /**

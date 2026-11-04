@@ -24,6 +24,7 @@ When the adapter delivers a Kafka record to an iFlow, it sets the following Came
 | `CpiKafkaPlusSchemaId` | `Integer` | Schema ID from the Confluent header of the value: set when **Remove Confluent Header** removed one (see [Avro / Schema Registry](avro-schema-registry.md#json-values-with-the-confluent-header)), or when the Schema Registry deserialized the value |
 | `CpiKafkaPlusSchemaType` | `String` | `AVRO` or `JSON`: the registry's schema type of a value the Schema Registry deserialized (see [JSON Schema Values](avro-schema-registry.md#json-schema-values-via-the-schema-registry)) |
 | `kafka.header.<name>` | `String` | Every Kafka record header is forwarded as a Camel header with this prefix, e.g. `kafka.header.traceparent` |
+| `traceparent`, `tracestate`, `sap-passport` | `String` | Trace context headers of the record, in addition under their own name, in the letter case of the record (see [Trace Context](#trace-context-traceparent-sap-passport)) |
 
 ### Batch Mode
 
@@ -73,6 +74,7 @@ Any additional exchange headers whose names match the **Allowed Headers** (`allo
 - Headers whose names start with `Camel`, `org.apache.camel`, `kafka.` or `CpiKafkaPlus`, in exactly this letter case, are never forwarded, whatever the pattern says.
 - `Authorization`, `Proxy-Authorization`, `Cookie` and `Set-Cookie` are forwarded only when the pattern names them exactly, for example `*|Authorization`, never through a wildcard such as `*`. Up to 1.4.1 the default `*` forwarded them, so an access token set for an earlier HTTP call ended up in the topic. Any other secret a flow keeps in a header is still forwarded by `*`: name the headers you need instead.
 - An empty pattern forwards no header.
+- `traceparent` and `tracestate` are forwarded whatever a non-empty pattern says (see [Trace Context](#trace-context-traceparent-sap-passport)).
 - A `byte[]` value is sent as it is, any other value as the UTF-8 bytes of its text. Up to 1.4.1 a `byte[]` value arrived as text such as `[B@1b6d3586`.
 - In batch mode the exchange headers that pass go to every record of the batch. Headers given per record in the batch payload bypass the filter and overwrite exchange headers of the same name (see [Producer Batch](producer-batch.md#input-formats)).
 
@@ -86,6 +88,39 @@ Any additional exchange headers whose names match the **Allowed Headers** (`allo
 | `CpiKafkaPlusOffset` | `Long` | Offset assigned to the record |
 | `CpiKafkaPlusTimestamp` | `Long` | Timestamp of the written record (epoch ms): `kafka.OVERRIDE_TIMESTAMP` or the send time, or the broker's append time on a topic with `LogAppendTime` |
 | `CpiKafkaPlusStatus` | `String` | `OK` on success |
+
+---
+
+## Trace Context (`traceparent`, `sap-passport`)
+
+The adapter carries a trace across the Kafka hop with the W3C Trace Context headers `traceparent` and
+`tracestate` and the SAP Passport `sap-passport`, the headers that Cloud Integration uses to correlate
+a message end to end (see SAP's
+[Message Processing Log - Adapter Tracing](https://github.com/SAP-docs/btp-integration-suite/blob/main/docs/ISuite_Integrations_APIs/message-processing-log-adapter-tracing-a9db4ea.md)).
+Names are compared in any letter case.
+
+**Sender.** The trace context headers of a record are set on the message under their own name, in
+addition to `kafka.header.<name>`. A flow can log them, write them to the MPL, or pass them on: a
+receiver of this adapter forwards `traceparent` and `tracestate` to the next topic (and
+`sap-passport` with the default **Allowed Headers**), so a Kafka-to-Kafka flow keeps the trace.
+With a valid `traceparent`, the adapter writes its trace ID (32 hex digits) to the MPL as the custom
+header property `KafkaAdapterTraceId`. In Message Monitoring you then find the message by the trace
+ID that an OpenTelemetry tool shows. A batch carries the distinct trace IDs of its records, at most
+50. Batch messages do not get the headers themselves, as their records can belong to different
+traces.
+
+**Receiver.** `traceparent` and `tracestate` on the exchange are written to the record whatever
+**Allowed Headers** says, as long as it is not empty: they carry only IDs and flags. An empty
+**Allowed Headers** still forwards no header at all. `sap-passport` is forwarded only when
+**Allowed Headers** lets it through, as with the default `*`, because an SAP Passport can carry the
+user and transaction of the original call. If the batch payload gives a trace context header for a
+record, it replaces the exchange's header of that name in any letter case.
+
+**Limits.** Cloud Integration keeps its own SAP Passport inside the runtime and does not show it to
+custom adapters. The receiver therefore forwards only trace context headers that are on the exchange,
+for example from a sender of this adapter or from an HTTPS sender whose *Allowed Header(s)* name
+them; it does not create them. On the sender, the headers do not replace Cloud Integration's own
+correlation of the message: the MPL shows the trace ID as `KafkaAdapterTraceId`.
 
 ---
 

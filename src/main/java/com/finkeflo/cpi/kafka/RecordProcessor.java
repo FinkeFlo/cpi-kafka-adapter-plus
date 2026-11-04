@@ -482,6 +482,7 @@ final class RecordProcessor {
         }
 
         tracingHelper.traceInbound(exchange, body);
+        tracingHelper.annotateTraceIds(exchange, TraceContext.traceIds(batch));
 
         exchange.getIn().setBody(body);
         setBatchHeaders(exchange.getIn(), batch, schemaValidationFailures, dlqCount,
@@ -624,6 +625,7 @@ final class RecordProcessor {
             Exchange exchange = callback.createExchange();
 
             tracingHelper.traceInbound(exchange, resolvedBody);
+            tracingHelper.annotateTraceIds(exchange, TraceContext.traceIds(java.util.Collections.singletonList(record)));
 
             exchange.getIn().setBody(resolvedBody);
             if (batchFallback) {
@@ -1244,8 +1246,12 @@ final class RecordProcessor {
         }
         if (record.headers() != null) {
             record.headers().forEach(header -> {
-                String headerName = "kafka.header." + header.key();
-                message.setHeader(headerName, header.value() != null ? new String(header.value(), StandardCharsets.UTF_8) : null);
+                String value = header.value() != null ? new String(header.value(), StandardCharsets.UTF_8) : null;
+                message.setHeader("kafka.header." + header.key(), value);
+                // CPI's message processing log only reads these under their own name (#168)
+                if (TraceContext.isTraceContextHeader(header.key())) {
+                    message.setHeader(header.key(), value);
+                }
             });
         }
     }

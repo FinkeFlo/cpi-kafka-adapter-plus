@@ -184,7 +184,7 @@ For detailed security setup, see [Authentication](security/authentication.md).
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `allowedHeaders` | `*` | Pipe-separated list of exchange headers to forward as Kafka record headers. `*` forwards all except those starting with `Camel`, `org.apache.camel`, `kafka.` or `CpiKafkaPlus`; `Authorization`, `Proxy-Authorization`, `Cookie` and `Set-Cookie` are forwarded only when named exactly. Empty forwards none. Note: headers explicitly mapped in a batch payload (JSON/XML) bypass this filter and overwrite exchange headers of the same name. See [Kafka Headers](features/kafka-headers.md#producer-headers-read-by-the-adapter-from-outgoing-messages). |
+| `allowedHeaders` | `*` | Pipe-separated list of exchange headers to forward as Kafka record headers. `*` forwards all except those starting with `Camel`, `org.apache.camel`, `kafka.` or `CpiKafkaPlus`; `Authorization`, `Proxy-Authorization`, `Cookie` and `Set-Cookie` are forwarded only when named exactly. Empty forwards none. A non-empty pattern always forwards `traceparent` and `tracestate` (see [Trace Context](features/kafka-headers.md#trace-context-traceparent-sap-passport)). Note: headers explicitly mapped in a batch payload (JSON/XML) bypass this filter and overwrite exchange headers of the same name. See [Kafka Headers](features/kafka-headers.md#producer-headers-read-by-the-adapter-from-outgoing-messages). |
 
 ### Advanced
 

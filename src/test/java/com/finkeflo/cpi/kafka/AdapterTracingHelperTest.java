@@ -174,7 +174,8 @@ public class AdapterTracingHelperTest {
 
     /**
      * The two reflective lookups behind {@code annotateRetrySuccess}, pinned against the real ADK
-     * jars like every other reflective call since 1.2.7. This is the success path, so a broken
+     * jars like every other reflective call since 1.2.7. {@code addCustomHeaderProperty} also
+     * carries {@code annotateTraceIds} (#168). This is the success path, so a broken
      * lookup here would not surface as a failing send — it would simply mean the retry annotation
      * quietly stops appearing in Message Monitoring.
      */
@@ -216,6 +217,15 @@ public class AdapterTracingHelperTest {
         }
         Assert.assertFalse("if the ADK gains RECEIVER_OUTBOUND_FAULT, error traces should use it",
                 receiverOutboundFaultExists);
+    }
+
+    /** Off-platform the helper must stay silent and must never fail an exchange. */
+    @Test
+    public void annotateTraceIdsIsHarmlessWhenTheMplBindingIsUnavailable() {
+        org.apache.camel.Exchange exchange = new org.apache.camel.support.DefaultExchange(ctx);
+
+        helper.annotateTraceIds(exchange, java.util.Collections.singleton("4bf92f3577b34da6a3ce929d0e0e4736"));
+        helper.annotateTraceIds(null, java.util.Collections.singleton("4bf92f3577b34da6a3ce929d0e0e4736"));
     }
 
     /** Off-platform the helper must stay silent and must never fail an exchange. */
