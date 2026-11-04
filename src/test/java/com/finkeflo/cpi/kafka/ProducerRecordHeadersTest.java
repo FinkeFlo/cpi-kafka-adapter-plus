@@ -78,27 +78,16 @@ public class ProducerRecordHeadersTest {
     }
 
     @Test
-    public void traceContextHeadersAreSentWhateverThePatternSays() {
+    public void w3cTraceHeadersAreSentWhateverANonEmptyPatternSays() {
         Exchange exchange = exchangeWithHeaders();
         exchange.getIn().setHeader("traceparent", "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01");
         exchange.getIn().setHeader("tracestate", "vendor=1");
         exchange.getIn().setHeader("SAP-PASSPORT", "2A54482A");
 
-        Assert.assertEquals("[SAP-PASSPORT, traceparent, tracestate]", names(recordFor("", exchange)).toString());
-        Assert.assertEquals("[orderId, SAP-PASSPORT, traceparent, tracestate]",
-                names(recordFor("orderId", exchange)).toString());
-        Assert.assertEquals("vendor=1", text(recordFor("", exchange), "tracestate"));
-    }
-
-    @Test
-    public void sapsSwitchLeavesTraceContextHeadersToThePattern() {
-        Exchange exchange = new DefaultExchange(ctx);
-        exchange.getIn().setHeader("traceparent", "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01");
-        exchange.getIn().setHeader("SAP-PASSPORT", "2A54482A");
-        exchange.setProperty("SAP_DisableExternalW3CTraceContextTransmission", "true");
-
+        Assert.assertEquals("[orderId, traceparent, tracestate]", names(recordFor("orderId", exchange)).toString());
+        Assert.assertEquals("[orderId, SAP-PASSPORT, SAP_Sender, traceparent, tracestate]",
+                names(recordFor("*", exchange)).toString());
         Assert.assertTrue(names(recordFor("", exchange)).isEmpty());
-        Assert.assertEquals("[traceparent]", names(recordFor("traceparent", exchange)).toString());
     }
 
     @Test

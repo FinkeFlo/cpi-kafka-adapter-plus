@@ -12,7 +12,7 @@ iFlow compatibility.
 - Sender: the trace context headers `traceparent`, `tracestate` and `sap-passport` of a record are set on the message under their own name as well, not only as `kafka.header.<name>`, so a flow can use and pass them on without mapping. A valid `traceparent` also puts its W3C trace ID into the MPL as the custom header property `KafkaAdapterTraceId`, so Message Monitoring finds the message by the trace ID of an OpenTelemetry tool; a batch carries the distinct trace IDs of its records, at most 50. See issue #168.
 
 ### Changed
-- Receiver: `traceparent`, `tracestate` and `sap-passport` are written to the record whatever **Allowed Headers** (`allowedHeaders`) says, the empty pattern included, so the trace survives the Kafka hop. The exchange property `SAP_DisableExternalW3CTraceContextTransmission` = `true` leaves them to **Allowed Headers** again. This applies to every metadata version, since the runtime is shared. See issue #168.
+- Receiver: `traceparent` and `tracestate` are written to the record whatever a non-empty **Allowed Headers** (`allowedHeaders`) says, so the trace survives the Kafka hop also with a list such as `orderId`. An empty **Allowed Headers** still forwards no header, and `sap-passport`, which can carry the original user, still needs **Allowed Headers** to let it through (the default `*` does). In batch mode, a trace context header given per record in the payload replaces the exchange's header of that name in any letter case instead of being sent next to it. This applies to every metadata version, since the runtime is shared. See issue #168.
 
 ## [1.6.0] - 2026-11-03
 ### Added

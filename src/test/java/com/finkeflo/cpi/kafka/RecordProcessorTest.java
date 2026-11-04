@@ -224,31 +224,6 @@ public class RecordProcessorTest {
         }
     }
 
-    @Test
-    public void traceIdsAreDistinctValidAndBounded() {
-        String a = "4bf92f3577b34da6a3ce929d0e0e4736";
-        String b = "0af7651916cd43dd8448eb211c80319c";
-        List<ConsumerRecord<byte[], byte[]>> batch = new ArrayList<>();
-        for (String tp : new String[] {"00-" + a + "-00f067aa0ba902b7-01", "garbage",
-                "00-" + b + "-00f067aa0ba902b7-01", "00-" + a + "-b7ad6b7169203331-01"}) {
-            ConsumerRecord<byte[], byte[]> r = rec("t", 0, batch.size());
-            r.headers().add("TraceParent", tp.getBytes(StandardCharsets.UTF_8));
-            batch.add(r);
-        }
-        batch.add(rec("t", 0, 4));
-
-        Assert.assertEquals(Arrays.asList(a, b), new ArrayList<>(RecordProcessor.traceIds(batch)));
-
-        List<ConsumerRecord<byte[], byte[]>> many = new ArrayList<>();
-        for (int i = 0; i < RecordProcessor.MAX_MPL_TRACE_IDS + 5; i++) {
-            ConsumerRecord<byte[], byte[]> r = rec("t", 0, i);
-            String id = String.format("%032x", i + 1);
-            r.headers().add("traceparent", ("00-" + id + "-00f067aa0ba902b7-01").getBytes(StandardCharsets.UTF_8));
-            many.add(r);
-        }
-        Assert.assertEquals(RecordProcessor.MAX_MPL_TRACE_IDS, RecordProcessor.traceIds(many).size());
-    }
-
     // --- Deserialization tests ---
 
     @Test

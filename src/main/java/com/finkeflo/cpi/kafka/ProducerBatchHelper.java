@@ -295,7 +295,12 @@ public final class ProducerBatchHelper {
         if (record.getHeaders() != null) {
             for (java.util.Map.Entry<String, String> entry : record.getHeaders().entrySet()) {
                 if (entry.getValue() != null) {
-                    pr.headers().remove(entry.getKey()); // overwrite if added by headerAdder
+                    // overwrite if added by headerAdder; a trace header in any letter case (#168)
+                    if (TraceContext.isTraceContextHeader(entry.getKey())) {
+                        TraceContext.removeIgnoringCase(pr.headers(), entry.getKey());
+                    } else {
+                        pr.headers().remove(entry.getKey());
+                    }
                     pr.headers().add(entry.getKey(), entry.getValue().getBytes(StandardCharsets.UTF_8));
                 }
             }

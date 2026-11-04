@@ -1035,14 +1035,14 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
     }
 
     /**
-     * Copies the exchange headers that {@code allowedHeaders} lets through to the record, and the
-     * trace context headers whatever the pattern says, unless the flow switched them off (#168). A
+     * Copies the exchange headers that {@code allowedHeaders} lets through to the record, and
+     * {@code traceparent} and {@code tracestate} whatever a non-empty pattern says (#168). A
      * {@code byte[]} value is sent as it is, any other value as the UTF-8 bytes of its text.
      */
     void addRecordHeaders(ProducerRecord<byte[], byte[]> record, Message message) {
         Map<String, Object> headers = message.getHeaders();
         String allowedHeadersPattern = endpoint.getAllowedHeaders();
-        boolean forwardTraceContext = TraceContext.forwardAlways(message);
+        boolean forwardW3c = allowedHeadersPattern != null && !allowedHeadersPattern.trim().isEmpty();
         
         for (Map.Entry<String, Object> entry : headers.entrySet()) {
             String name = entry.getKey();
@@ -1052,7 +1052,7 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
                 continue;
             }
             
-            if (!(forwardTraceContext && TraceContext.isTraceContextHeader(name))
+            if (!(forwardW3c && TraceContext.isW3cHeader(name))
                     && !HeaderFilterStrategy.isHeaderAllowed(name, allowedHeadersPattern)) {
                 continue;
             }
