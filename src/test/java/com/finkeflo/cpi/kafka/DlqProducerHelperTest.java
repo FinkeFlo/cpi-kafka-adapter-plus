@@ -206,4 +206,31 @@ public class DlqProducerHelperTest {
             Assert.assertEquals(32L * 1024 * 1024, small.get(ProducerConfig.BUFFER_MEMORY_CONFIG));
         }
     }
+    @Test
+    public void aDlqAliasThatCannotBeResolvedFailsInsteadOfFallingBackToTheMainCredentials() throws Exception {
+        CredentialHelper.setCredentialResolver(alias -> "kafka-user".equals(alias)
+                ? new CredentialHelper.UserCredentials("consumer", "secret") : null);
+        try (DefaultCamelContext ctx = new DefaultCamelContext()) {
+            ctx.addComponent("cpi-kafka-plus", new CpiKafkaPlusComponent());
+            ctx.start();
+            CpiKafkaPlusEndpoint endpoint = (CpiKafkaPlusEndpoint) ctx.getEndpoint(
+                    "cpi-kafka-plus:orders?bootstrapServers=localhost:9092&groupId=g&securityProtocol=SASL_SSL"
+                            + "&saslMechanism=PLAIN&credentialAlias=kafka-user&dlqCredentialAlias=dlq-writer");
+
+            try {
+                DlqProducerHelper.buildProducerProperties(endpoint);
+                Assert.fail("the DLQ must not be written with the consumer's credentials");
+            } catch (IllegalStateException expected) {
+                Assert.assertEquals("'DLQ SASL Credential Alias' (dlqCredentialAlias) 'dlq-writer' could not be "
+                        + "resolved. Please deploy a User Credentials artifact with this name, or clear the field "
+                        + "to use the SASL credentials of the Connection tab.", expected.getMessage());
+            }
+
+            endpoint.setSecurityProtocol("SSL");
+            Assert.assertNull("without SASL the alias is not read",
+                    DlqProducerHelper.buildProducerProperties(endpoint).get("sasl.jaas.config"));
+        } finally {
+            CredentialHelper.setCredentialResolver(null);
+        }
+    }
 }

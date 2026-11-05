@@ -248,6 +248,8 @@ public class CpiKafkaPlusConsumer extends ScheduledPollConsumer {
         // Fail-fast: validate shared configuration (Schema Registry, JSON Schema, SASL)
         endpoint.validateConfiguration();
         SenderConfigValidator.validate(endpoint);
+        SecurityConfigHelper.requireAliases(endpoint,
+                endpoint.isSchemaRegistryEnabled() && endpoint.isAvroValueDeserialization());
 
         super.doStart();
         BundleClassWarmup.ensureStarted(CpiKafkaPlusConsumer.class, "consumer.start");

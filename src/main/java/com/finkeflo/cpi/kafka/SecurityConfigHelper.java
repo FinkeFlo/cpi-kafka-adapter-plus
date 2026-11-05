@@ -141,26 +141,100 @@ public final class SecurityConfigHelper {
     }
 
     /**
+     * Resolves every alias the client will read, so that one which is not deployed fails the start
+     * instead of the first connect or send (#307). It needs no network. An alias fails the start
+     * only if the secure store or the keystore answers that it does not exist; a store that cannot
+     * be asked, as outside CPI or during a restart, is logged and left to the client build as before.
+     *
+     * @param registryUsed whether a Schema Registry client is built: the registry is on and values
+     *                     are (de)serialized through it
+     */
+    static void requireAliases(CpiKafkaPlusEndpoint endpoint, boolean registryUsed) {
+        String protocol = endpoint.getSecurityProtocol() != null ? endpoint.getSecurityProtocol().toUpperCase() : "";
+        if (protocol.contains("SASL")) {
+            String alias = trimToNull(endpoint.getCredentialAlias());
+            String parameter = UiLabels.field("credentialAlias");
+            unlessTheStoreFails(parameter, alias, () -> {
+                CredentialHelper.UserCredentials credentials = CredentialHelper.requireUserCredential(alias,
+                        parameter, null);
+                if (credentials != null) {
+                    buildJaasConfig(endpoint.getSaslMechanism(), credentials.username(), credentials.password(),
+                            parameter + " '" + alias + "'");
+                }
+            });
+            String dlqAlias = trimToNull(endpoint.getDlqCredentialAlias());
+            if (endpoint.isDlqEnabled() && dlqAlias != null) {
+                unlessTheStoreFails(UiLabels.field("dlqCredentialAlias"), dlqAlias,
+                        () -> overrideSaslCredentials(new Properties(), endpoint.getSaslMechanism(), dlqAlias));
+            }
+        }
+        String keystoreAlias = trimToNull(endpoint.getSslKeystoreAlias());
+        if (protocol.contains("SSL") && keystoreAlias != null) {
+            String parameter = UiLabels.field("sslKeystoreAlias");
+            unlessTheStoreFails(parameter, keystoreAlias, () -> {
+                try {
+                    CredentialHelper.getSSLContext(keystoreAlias);
+                } catch (RuntimeException e) {
+                    if (!isKeystoreAliasFailure(e)) {
+                        throw e;
+                    }
+                    throw new IllegalStateException(parameter + " '" + keystoreAlias + "' could not be resolved "
+                            + "from the CPI keystore: " + e.getMessage() + ". Please deploy a key pair with this "
+                            + "alias, or clear the field to use TLS without a client certificate.", e);
+                }
+            });
+        }
+        String registryAlias = trimToNull(endpoint.getSchemaRegistryCredentialAlias());
+        if (registryUsed && registryAlias != null) {
+            String parameter = UiLabels.field("schemaRegistryCredentialAlias");
+            unlessTheStoreFails(parameter, registryAlias,
+                    () -> CredentialHelper.requireUserCredential(registryAlias, parameter));
+        }
+    }
+
+    private static boolean isKeystoreAliasFailure(Throwable failure) {
+        for (Throwable cause : CauseChain.of(failure)) {
+            if (cause instanceof CredentialHelper.KeystoreAliasException) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Runs {@code check}, which throws an {@link IllegalStateException} for an alias the store does
+     * not know and an {@link UnusableCredentialException} for a credential Kafka cannot take. Any other
+     * failure means the store could not be asked: that says nothing about the alias.
+     */
+    private static void unlessTheStoreFails(String parameter, String alias, Runnable check) {
+        try {
+            check.run();
+        } catch (IllegalStateException | UnusableCredentialException e) {
+            throw e;
+        } catch (RuntimeException e) {
+            // ERROR, so that it reaches the tenant trace: a skipped check must not look like a passed one.
+            AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("alias.check.skipped")
+                    .with("parameter", parameter)
+                    .with("alias", alias)
+                    .with("reason", e.getMessage())
+                    .with("consequence", "the client reports the alias when it is built"), null);
+        }
+    }
+
+    /**
      * Override SASL credentials with a different credential alias.
      * Used by DLQ producer when the DLQ cluster requires separate credentials.
      */
     public static void overrideSaslCredentials(Properties props, String mechanism, String alias) {
-        try {
-            CredentialHelper.UserCredentials credentials = CredentialHelper.getUserCredential(alias);
-            if (credentials != null) {
-                String jaasConfig = buildJaasConfig(mechanism, credentials.username(), credentials.password(),
-                        UiLabels.field("dlqCredentialAlias") + " '" + alias + "'");
-                props.put("sasl.jaas.config", jaasConfig);
-                LOG.info("DLQ SASL credentials resolved for alias '{}'", alias);
-            } else {
-                LOG.error("[CPI-KAFKA-PLUS-DIAG] DLQ credential alias '{}' configured but no credentials resolved. " +
-                        "DLQ producer will fail to connect.", alias);
-            }
-        } catch (UnusableCredentialException e) {
-            throw e;   // as in configureSasl
-        } catch (Exception e) {
-            LOG.warn("[CPI-KAFKA-PLUS-DIAG] Could not resolve DLQ credentials from Secure Store alias '{}': {}",
-                    alias, e.getMessage());
+        // An alias that cannot be resolved fails the DLQ producer. Falling back to the main
+        // credentials wrote the DLQ with the consumer's principal (#306).
+        String parameter = UiLabels.field("dlqCredentialAlias");
+        CredentialHelper.UserCredentials credentials = CredentialHelper.requireUserCredential(alias, parameter,
+                "use the SASL credentials of the Connection tab");
+        if (credentials != null) {
+            props.put("sasl.jaas.config", buildJaasConfig(mechanism, credentials.username(),
+                    credentials.password(), parameter + " '" + alias + "'"));
+            LOG.info("DLQ SASL credentials resolved for alias '{}'", alias);
         }
     }
 

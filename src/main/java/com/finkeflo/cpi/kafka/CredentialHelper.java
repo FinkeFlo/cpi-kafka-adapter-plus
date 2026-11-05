@@ -139,19 +139,29 @@ public final class CredentialHelper {
      * the credential turned every Schema Registry call into a 401 that looked like a bad record.
      */
     public static UserCredentials requireUserCredential(String alias, String parameter) {
+        return requireUserCredential(alias, parameter, "connect without authentication");
+    }
+
+    /**
+     * @param withoutAlias what the client does when the field is empty, e.g. {@code "connect without
+     *                     authentication"}; named in the failure message and in the warning outside CPI.
+     *                     {@code null} for a field that must not be empty.
+     */
+    public static UserCredentials requireUserCredential(String alias, String parameter, String withoutAlias) {
         if (alias == null || alias.trim().isEmpty()) {
             return null;
         }
         UserCredentials credentials = getUserCredential(alias);
         if (credentials == null && !credentialResolver.isAvailable()) {
             LOG.warn("[CPI-KAFKA-PLUS-DIAG] No credential store available (not running on CPI?) - "
-                    + "{} '{}' is ignored and the connection is made without authentication", parameter, alias);
+                    + "{} '{}' is not resolved{}", parameter, alias,
+                    withoutAlias != null ? " and the client will " + withoutAlias : "");
             return null;
         }
         if (credentials == null) {
             throw new IllegalStateException(parameter + " '" + alias + "' could not be resolved. Please "
-                    + "deploy a User Credentials artifact with this name, or clear the field to connect "
-                    + "without authentication.");
+                    + "deploy a User Credentials artifact with this name"
+                    + (withoutAlias != null ? ", or clear the field to " + withoutAlias : "") + ".");
         }
         return credentials;
     }
@@ -216,6 +226,17 @@ public final class CredentialHelper {
         return sslContextResolver.resolveSslContext(keystoreAlias);
     }
 
+    /**
+     * The keystore answered, but not with a key pair for the alias: unlike a keystore that cannot be
+     * asked, this says something about the alias (#307). Thrown as the cause of the
+     * {@link #getSSLContext} failure.
+     */
+    static final class KeystoreAliasException extends RuntimeException {
+        KeystoreAliasException(Throwable cause) {
+            super(cause.getMessage(), cause);
+        }
+    }
+
     private static SSLContext resolveSslContextFromKeystore(String keystoreAlias) {
         try {
             KeystoreService keystoreService = ITApiFactory.getService(KeystoreService.class, null);
@@ -225,7 +246,12 @@ public final class CredentialHelper {
                 return null;
             }
 
-            KeyManager[] keyManagers = keystoreService.getKeyManagers(keystoreAlias);
+            KeyManager[] keyManagers;
+            try {
+                keyManagers = keystoreService.getKeyManagers(keystoreAlias);
+            } catch (Exception e) {
+                throw new KeystoreAliasException(e);
+            }
             TrustManager[] trustManagers = keystoreService.getTrustManagers();
 
             SSLContext sslContext = SSLContext.getInstance("TLSv1.3");

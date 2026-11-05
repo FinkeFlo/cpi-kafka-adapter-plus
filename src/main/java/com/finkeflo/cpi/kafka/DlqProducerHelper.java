@@ -560,8 +560,11 @@ public final class DlqProducerHelper implements Closeable {
 
         // Use DLQ-specific credentials if configured, otherwise reuse consumer credentials
         SecurityConfigHelper.configureSecurityProperties(props, endpoint);
+        // Only a SASL login reads the alias: with SSL or PLAINTEXT a channel that carries one, for
+        // example after copying an iFlow, keeps working whether or not it is deployed.
         String dlqAlias = endpoint.getDlqCredentialAlias();
-        if (dlqAlias != null && !dlqAlias.trim().isEmpty()) {
+        String protocol = endpoint.getSecurityProtocol();
+        if (dlqAlias != null && !dlqAlias.trim().isEmpty() && protocol != null && protocol.contains("SASL")) {
             SecurityConfigHelper.overrideSaslCredentials(props, endpoint.getSaslMechanism(), dlqAlias);
         }
 

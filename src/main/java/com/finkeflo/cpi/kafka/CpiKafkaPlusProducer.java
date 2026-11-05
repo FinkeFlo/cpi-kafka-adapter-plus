@@ -167,6 +167,8 @@ public class CpiKafkaPlusProducer extends DefaultProducer {
         // Fail-fast: validate shared configuration (Schema Registry, JSON Schema, SASL)
         endpoint.validateConfiguration(appliesJsonSchema());
         ReceiverConfigValidator.validateBeforeStart(endpoint);
+        SecurityConfigHelper.requireAliases(endpoint,
+                endpoint.isSchemaRegistryEnabled() && endpoint.isAvroValueSerialization());
 
         super.doStart();
         BundleClassWarmup.ensureStarted(CpiKafkaPlusProducer.class, "producer.start");
