@@ -55,8 +55,27 @@ released version avoids that trap entirely.
    accepting it. This happened with `SPLIT_EXCHANGES`, which 1.2.0 removed from `batchOutputFormat`:
    sender channels on 1.0 and 1.1 can never use "Update Version" and have to be recreated (#219).
 4. **Never edit or delete a released metadata file of a *superseded* line.** A new **significant** version (`MAJOR.MINOR`) = a **new** file (one variant per file); old files stay frozen in the bundle → backward compatibility. A **micro** bump is the exception and *must* edit its file in place — see below.
-5. **Transport order:** per tenant deploy the **adapter first**, then the iFlows. Otherwise "Route has no inputs" / "Not supported yet".
-6. **Transporting the adapter via CTS+? Upload it through the Integration Suite UI (update-in-place), not the API.** UI path (keeps the workspace `reg_id` stable): package → adapter → *Actions* → *View metadata* → *Edit* → upload the new ESA → *Save* → *Deploy*. The API import path (delete + import) regenerates the `reg_id` on every deploy, which then makes CTS+ transports fail on the target with `UniquenessViolationException` (see SAP KBA 3003834). If the `reg_id`s are already out of sync, a one-time fix is to delete the adapter on the **target** design-time (runtime untouched) and let the transport re-import it.
+5. **Existing channels keep their runtime behaviour.** SAP's rule for custom adapters is that existing
+   scenarios "should continue to work as before". The runtime is shared by every metadata line, so a
+   new default or a stricter check reaches channels on older lines as soon as the adapter is deployed,
+   including channels whose UI does not offer the field that would switch it back. A new default
+   therefore applies only to channels on the new metadata line. The runtime cannot see a channel's
+   line; it only sees whether a parameter is set. Older lines never send a parameter they do not
+   define, so the Java default of the endpoint field keeps the **old** behaviour, and only the
+   metadata `<Default>` of the new line selects the new one. A stricter check that is not an exception
+   likewise needs a parameter of the new line that switches it on, with the Java default off.
+   Exceptions are allowed only for changes that:
+   - stop data loss or duplicates, or close a security problem (for example sending with the wrong
+     principal), or
+   - surface earlier an error that already stops the channel from working (a start check for a
+     configuration Kafka rejects anyway).
+
+   Every exception needs a **Rollout note** in the CHANGELOG that names the affected channels and what
+   to do: how to keep the old behaviour where that is possible, otherwise that it cannot be kept and
+   how to adapt the channel. 1.4.1 (an unresolvable Schema Registry alias fails, where a registry
+   without authentication worked before, #183) predates this rule and stays as it is.
+6. **Transport order:** per tenant deploy the **adapter first**, then the iFlows. Otherwise "Route has no inputs" / "Not supported yet".
+7. **Transporting the adapter via CTS+? Upload it through the Integration Suite UI (update-in-place), not the API.** UI path (keeps the workspace `reg_id` stable): package → adapter → *Actions* → *View metadata* → *Edit* → upload the new ESA → *Save* → *Deploy*. The API import path (delete + import) regenerates the `reg_id` on every deploy, which then makes CTS+ transports fail on the target with `UniquenessViolationException` (see SAP KBA 3003834). If the `reg_id`s are already out of sync, a one-time fix is to delete the adapter on the **target** design-time (runtime untouched) and let the transport re-import it.
 
 ## How to version
 

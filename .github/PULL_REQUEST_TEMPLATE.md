@@ -22,3 +22,5 @@
       affected page(s) under `docs/features/` — see
       [CONTRIBUTING.md → Updating the documentation](../CONTRIBUTING.md#updating-the-documentation)
 - [ ] No secrets, credentials, tenant names or other internal data included
+- [ ] Existing channels keep their runtime behaviour, or the CHANGELOG has a Rollout note for an
+      allowed exception — see [VERSIONING.md → iron rule 5](../VERSIONING.md#iron-rules)
