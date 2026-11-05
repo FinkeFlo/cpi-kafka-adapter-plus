@@ -68,9 +68,9 @@ automatic mitigation and tell you what to try next.
 
 | Classification | Meaning | What to do |
 |----------------|---------|------------|
-| `RETRIABLE` | Transient failure (timeout, network blip). The adapter will retry automatically. | Wait. If it persists, check broker connectivity. |
+| `RETRIABLE` | Transient failure (timeout, network blip, a Schema Registry that does not answer or answers 429 or 5xx). The adapter will retry automatically. | Wait. If it persists, check broker connectivity. |
 | `FATAL_PRODUCER_UNUSABLE` | The producer cannot recover without being rebuilt (fenced, auth revoked, bad broker version). | The adapter rebuilds the producer automatically. Check credentials, ACLs, broker version. |
-| `FATAL_DATA_ERROR` | A problem with the record itself (too large, invalid topic, serialisation failure). No producer rebuild will help. | Fix the payload or configuration. |
+| `FATAL_DATA_ERROR` | A problem with the record itself (too large, invalid topic, serialisation failure, another registry answer such as 401, 404 or 422). No producer rebuild will help. | Fix the payload or configuration. |
 | `UNKNOWN_FATAL` | The adapter does not recognise this exception. | Read the full `error=` field. Report it so the classification can be improved. |
 
 `UNKNOWN_FATAL` is deliberately conservative: the adapter does not guess what went wrong, and the

@@ -65,6 +65,20 @@ public class ProducerRetryPolicyTest {
     }
 
     @Test
+    public void aRegistryOutageInTheBatchSendIsRetriedButARejectedLoginIsNot() {
+        // #308: the shape ProducerBatchHelper throws when the serializer cannot reach the registry.
+        Throwable outage = new org.apache.kafka.common.KafkaException("record index 0 (phase=SERIALIZE)",
+                new SchemaRegistryHttpClient.SchemaRegistryException("GET /subjects/orders-value/versions/latest",
+                        503, ""));
+        Assert.assertTrue(txn(outage, TxnPhase.SEND, 1, 2, true).isRetry());
+
+        Throwable rejected = new org.apache.kafka.common.errors.SerializationException(
+                "record index 0 (phase=SERIALIZE)", new SchemaRegistryHttpClient.SchemaRegistryException(
+                        "GET /subjects/orders-value/versions/latest", 401, ""));
+        Assert.assertFalse(txn(rejected, TxnPhase.SEND, 1, 2, true).isRetry());
+    }
+
+    @Test
     public void retriableErrorInsideCommitIsNeverRetried() {
         // The production shape of this: commitTransaction() times out, the record may or may not be
         // committed broker-side, and Kafka's own javadoc says a timeout "does not mean the request

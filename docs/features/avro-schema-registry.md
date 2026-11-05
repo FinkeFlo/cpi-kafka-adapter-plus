@@ -166,6 +166,16 @@ To produce Avro-encoded messages:
 | `schemaRegistryCredentialAlias` | `SchemaRegistryCreds` |
 | `autoRegisterSchemas` | `false` |
 
+When the registry does not answer, or answers 429 or 5xx, the message fails with `KP-SR-001`
+and classification `RETRIABLE`, as when the broker is down: the record itself is fine. A single message
+is serialized again with each of the **Send Attempts** when *Enable Idempotence* is on
+([Producer Retry](producer-retry.md)), a transactional batch is retried as a whole, and a
+non-transactional batch fails without sending a record. Any other answer, such as 401 for a rejected
+login, 408, 404 for an unknown subject or 422 for a record that does not fit the schema, and a JSON
+body that does not match the schema stay data errors and are never retried: a send a few seconds later
+gets the same answer. (The sender, which reads the record again much later, does retry 401 and 408.)
+Up to 1.6.0 a registry outage was a data error (`KP-PROD-004` in batch mode) and never retried.
+
 ## Subject Naming Strategy
 
 `subjectNameStrategy` affects Producer (Receiver) JSON-to-Avro serialization only. Deserialization does not use this setting.

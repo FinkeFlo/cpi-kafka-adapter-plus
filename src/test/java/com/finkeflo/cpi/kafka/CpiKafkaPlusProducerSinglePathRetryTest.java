@@ -47,6 +47,9 @@ import org.apache.kafka.common.serialization.ByteArraySerializer;
 import org.junit.Assert;
 import org.junit.Test;
 
+import okhttp3.mockwebserver.MockResponse;
+import okhttp3.mockwebserver.MockWebServer;
+
 public class CpiKafkaPlusProducerSinglePathRetryTest {
 
     @Test
@@ -181,6 +184,184 @@ public class CpiKafkaPlusProducerSinglePathRetryTest {
             Assert.assertTrue("metadata timeout must come back as Kafka's pre-buffer FutureFailure, got "
                     + future.getClass().getName(), ProducerRetryPolicy.failedBeforeBuffering(future));
         }
+    }
+
+    @Test
+    public void aRegistryOutageIsRetriedLikeASendFailure() throws Exception {
+        // #308: the registry answered 503, the record itself is fine.
+        try (DefaultCamelContext ctx = new DefaultCamelContext();
+             MockWebServer registry = new MockWebServer()) {
+            ctx.start();
+            registry.enqueue(new MockResponse().setResponseCode(503).setBody("{\"error_code\":50301}"));
+            registry.enqueue(latestSchema());
+            CpiKafkaPlusProducer producer = newRetryingProducer(ctx);
+            useAvro(producer, registry);
+            Exchange exchange = new DefaultExchange(ctx);
+            Message in = exchange.getIn();
+            in.setBody("{\"id\":\"42\"}");
+
+            try (QueuedFutureKafkaProducer kafkaProducer = new QueuedFutureKafkaProducer(Arrays.asList(
+                    CompletableFuture.completedFuture(new RecordMetadata(
+                            new TopicPartition("orders", 0), 5L, 0, 1L, 0, 0))))) {
+                setField(producer, "kafkaProducer", kafkaProducer);
+
+                invokeProcessSingle(producer, exchange, in, "orders");
+
+                Assert.assertEquals(1, kafkaProducer.sendCalls());
+                Assert.assertEquals("OK", in.getHeader("CpiKafkaPlusStatus"));
+                Assert.assertEquals(2, in.getHeader("CamelKafkaPlusRetryAttempts"));
+            }
+        }
+    }
+
+    @Test
+    public void aRegistryOutageThatOutlastsTheRetriesFailsAsATransientSendFailure() throws Exception {
+        try (DefaultCamelContext ctx = new DefaultCamelContext();
+             MockWebServer registry = new MockWebServer()) {
+            ctx.start();
+            registry.enqueue(new MockResponse().setResponseCode(503));
+            registry.enqueue(new MockResponse().setResponseCode(429));
+            CpiKafkaPlusProducer producer = newRetryingProducer(ctx);
+            useAvro(producer, registry);
+            Exchange exchange = new DefaultExchange(ctx);
+            exchange.getIn().setBody("{\"id\":\"42\"}");
+
+            try (QueuedFutureKafkaProducer kafkaProducer = new QueuedFutureKafkaProducer(Arrays.asList())) {
+                setField(producer, "kafkaProducer", kafkaProducer);
+                try {
+                    invokeProcessSingle(producer, exchange, exchange.getIn(), "orders");
+                    Assert.fail("expected the registry outage to fail the message");
+                } catch (Exception e) {
+                    Assert.assertTrue(e.getMessage(), e.getMessage().startsWith("Failed to send message to"));
+                    Assert.assertEquals(KafkaErrorHelper.Classification.RETRIABLE, KafkaErrorHelper.classify(e));
+                    Assert.assertEquals(CpiKafkaPlusErrorCode.KP_SR_001, CpiKafkaPlusErrorCode.fromThrowable(e));
+                }
+                Assert.assertEquals(0, kafkaProducer.sendCalls());
+                Assert.assertEquals(2, registry.getRequestCount());
+            }
+        }
+    }
+
+    @Test
+    public void aSchemaErrorIsNotRetried() throws Exception {
+        try (DefaultCamelContext ctx = new DefaultCamelContext();
+             MockWebServer registry = new MockWebServer()) {
+            ctx.start();
+            registry.enqueue(new MockResponse().setResponseCode(404).setBody("{\"error_code\":40401}"));
+            CpiKafkaPlusProducer producer = newRetryingProducer(ctx);
+            useAvro(producer, registry);
+            Exchange exchange = new DefaultExchange(ctx);
+            exchange.getIn().setBody("{\"id\":\"42\"}");
+
+            try (QueuedFutureKafkaProducer kafkaProducer = new QueuedFutureKafkaProducer(Arrays.asList())) {
+                setField(producer, "kafkaProducer", kafkaProducer);
+                try {
+                    invokeProcessSingle(producer, exchange, exchange.getIn(), "orders");
+                    Assert.fail("expected the missing subject to fail the message");
+                } catch (RuntimeException e) {
+                    Assert.assertTrue(e.getMessage(),
+                            e.getMessage().contains("Schema subject 'orders-value' not found in Schema Registry"));
+                }
+                Assert.assertEquals(1, registry.getRequestCount());
+                Assert.assertNull(exchange.getIn().getHeader("CamelKafkaPlusRetryAttempts"));
+            }
+        }
+    }
+
+    @Test
+    public void aRegistryThatDoesNotAnswerIsRetried() throws Exception {
+        try (DefaultCamelContext ctx = new DefaultCamelContext();
+             MockWebServer registry = new MockWebServer()) {
+            ctx.start();
+            CpiKafkaPlusProducer producer = newRetryingProducer(ctx);
+            useAvro(producer, registry);
+            registry.shutdown(); // connection refused
+            Exchange exchange = new DefaultExchange(ctx);
+            exchange.getIn().setBody("{\"id\":\"42\"}");
+
+            try (QueuedFutureKafkaProducer kafkaProducer = new QueuedFutureKafkaProducer(Arrays.asList())) {
+                setField(producer, "kafkaProducer", kafkaProducer);
+                try {
+                    invokeProcessSingle(producer, exchange, exchange.getIn(), "orders");
+                    Assert.fail("expected the unreachable registry to fail the message");
+                } catch (Exception e) {
+                    // The send path, not the serialization failure thrown before it, failed the message.
+                    Assert.assertTrue(e.getMessage(), e.getMessage().startsWith("Failed to send message to"));
+                    Assert.assertEquals(KafkaErrorHelper.Classification.RETRIABLE, KafkaErrorHelper.classify(e));
+                    Assert.assertEquals(CpiKafkaPlusErrorCode.KP_SR_001, CpiKafkaPlusErrorCode.fromThrowable(e));
+                }
+                Assert.assertEquals(0, kafkaProducer.sendCalls());
+            }
+        }
+    }
+
+    @Test
+    public void aRejectedRegistryLoginIsNotRetried() throws Exception {
+        // A send a few seconds later gets the same 401; the sender, reading much later, does retry it.
+        try (DefaultCamelContext ctx = new DefaultCamelContext();
+             MockWebServer registry = new MockWebServer()) {
+            ctx.start();
+            registry.enqueue(new MockResponse().setResponseCode(401).setBody("{\"error_code\":40101}"));
+            CpiKafkaPlusProducer producer = newRetryingProducer(ctx);
+            useAvro(producer, registry);
+            Exchange exchange = new DefaultExchange(ctx);
+            exchange.getIn().setBody("{\"id\":\"42\"}");
+
+            try (QueuedFutureKafkaProducer kafkaProducer = new QueuedFutureKafkaProducer(Arrays.asList())) {
+                setField(producer, "kafkaProducer", kafkaProducer);
+                try {
+                    invokeProcessSingle(producer, exchange, exchange.getIn(), "orders");
+                    Assert.fail("expected the rejected login to fail the message");
+                } catch (Exception e) {
+                    Assert.assertNotEquals(KafkaErrorHelper.Classification.RETRIABLE, KafkaErrorHelper.classify(e));
+                }
+                Assert.assertEquals(1, registry.getRequestCount());
+                Assert.assertNull(exchange.getIn().getHeader("CamelKafkaPlusRetryAttempts"));
+            }
+        }
+    }
+
+    @Test
+    public void aBodyThatDoesNotFitTheSchemaIsNotRetried() throws Exception {
+        try (DefaultCamelContext ctx = new DefaultCamelContext();
+             MockWebServer registry = new MockWebServer()) {
+            ctx.start();
+            registry.enqueue(latestSchema());
+            CpiKafkaPlusProducer producer = newRetryingProducer(ctx);
+            useAvro(producer, registry);
+            Exchange exchange = new DefaultExchange(ctx);
+            exchange.getIn().setBody("{\"id\":42}");
+
+            try (QueuedFutureKafkaProducer kafkaProducer = new QueuedFutureKafkaProducer(Arrays.asList())) {
+                setField(producer, "kafkaProducer", kafkaProducer);
+                try {
+                    invokeProcessSingle(producer, exchange, exchange.getIn(), "orders");
+                    Assert.fail("expected the mismatching body to fail the message");
+                } catch (Exception e) {
+                    Assert.assertNotEquals(KafkaErrorHelper.Classification.RETRIABLE, KafkaErrorHelper.classify(e));
+                }
+                Assert.assertEquals(0, kafkaProducer.sendCalls());
+                Assert.assertEquals(1, registry.getRequestCount());
+                Assert.assertNull(exchange.getIn().getHeader("CamelKafkaPlusRetryAttempts"));
+            }
+        }
+    }
+
+    private static void useAvro(CpiKafkaPlusProducer producer, MockWebServer registry) throws Exception {
+        CpiKafkaPlusEndpoint endpoint = (CpiKafkaPlusEndpoint) getField(producer, "endpoint");
+        endpoint.setSchemaRegistryEnabled(true);
+        endpoint.setAvroValueSerialization(true);
+        endpoint.setSchemaRegistryUrl(registry.url("/").toString());
+        endpoint.setSubjectNameStrategy("TopicNameStrategy");
+        setField(producer, "avroHelper", new AvroSerializerHelper(endpoint));
+    }
+
+    private static MockResponse latestSchema() {
+        String schema = "{\\\"type\\\":\\\"record\\\",\\\"name\\\":\\\"Order\\\",\\\"fields\\\":"
+                + "[{\\\"name\\\":\\\"id\\\",\\\"type\\\":\\\"string\\\"}]}";
+        return new MockResponse().setResponseCode(200)
+                .setHeader("Content-Type", "application/vnd.schemaregistry.v1+json")
+                .setBody("{\"subject\":\"orders-value\",\"version\":1,\"id\":7,\"schema\":\"" + schema + "\"}");
     }
 
     /** Outer retry on (2 attempts, no delay), rebuild side effects suppressed. */

@@ -98,6 +98,56 @@ public class ProducerBatchHelperTest {
     }
 
     @Test
+    public void aRegistryOutageFailsTheBatchAsTransientAndASchemaErrorAsData() {
+        // #308: the registry being down says nothing about the records.
+        for (int status : new int[] {503, 429}) {
+            Exception failure = serializeFailure(status);
+            Assert.assertEquals("HTTP " + status, KafkaErrorHelper.Classification.RETRIABLE,
+                    KafkaErrorHelper.classify(failure));
+            Assert.assertEquals(CpiKafkaPlusErrorCode.KP_SR_001, CpiKafkaPlusErrorCode.fromThrowable(failure));
+        }
+        Exception noAnswer = serializeFailure(new SchemaRegistryHttpClient.SchemaRegistryException(
+                "GET /subjects/orders-value/versions/latest", new java.net.ConnectException("Connection refused")));
+        Assert.assertEquals(KafkaErrorHelper.Classification.RETRIABLE, KafkaErrorHelper.classify(noAnswer));
+
+        for (int status : new int[] {401, 408}) {
+            Assert.assertEquals("HTTP " + status, KafkaErrorHelper.Classification.FATAL_DATA_ERROR,
+                    KafkaErrorHelper.classify(serializeFailure(status)));
+        }
+        Exception incompatible = serializeFailure(422);
+        Assert.assertEquals(KafkaErrorHelper.Classification.FATAL_DATA_ERROR, KafkaErrorHelper.classify(incompatible));
+        Assert.assertEquals(CpiKafkaPlusErrorCode.KP_PROD_004, CpiKafkaPlusErrorCode.fromThrowable(incompatible));
+        Exception unreadable = serializeFailure(new org.apache.avro.AvroTypeException("Expected string. Got VALUE_NUMBER_INT"));
+        Assert.assertEquals(KafkaErrorHelper.Classification.FATAL_DATA_ERROR, KafkaErrorHelper.classify(unreadable));
+    }
+
+    private static Exception serializeFailure(int registryStatus) {
+        return serializeFailure(new SchemaRegistryHttpClient.SchemaRegistryException(
+                "GET /subjects/orders-value/versions/latest", registryStatus, ""));
+    }
+
+    private static Exception serializeFailure(Exception cause) {
+        StubProducer producer = new StubProducer();
+        try {
+            ProducerBatchHelper.sendBatch(
+                    producer,
+                    Arrays.asList(new BatchRecord("k1", "v1"), new BatchRecord("k2", "v2")),
+                    "orders", null, null, null, null, null,
+                    (topic, data) -> {
+                        throw new RuntimeException("Avro serialization failed: " + cause.getMessage(), cause);
+                    },
+                    null,
+                    ProducerSendGuard.of(SHORT_BUDGET_MS, "SASL_SSL"),
+                    ProducerPath.SHARED, "test-client-id");
+            throw new AssertionError("expected the serializer failure");
+        } catch (Exception e) {
+            Assert.assertTrue("nothing may reach the producer", producer.sentRecords.isEmpty());
+            Assert.assertTrue(e.getMessage(), e.getMessage().contains("record index 0 (phase=SERIALIZE)"));
+            return e;
+        }
+    }
+
+    @Test
     public void stalledRecordRaisesSendStalledException() throws Exception {
         StubProducer producer = new StubProducer(new CompletableFuture<RecordMetadata>());
 
