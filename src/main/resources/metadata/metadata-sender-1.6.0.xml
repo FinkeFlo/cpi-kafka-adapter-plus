@@ -331,7 +331,7 @@
                 </AttributeReference>
                 <AttributeReference>
                     <ReferenceName>avroOutputFormat</ReferenceName>
-                    <description>Format for deserialized Avro records delivered to the IFlow. JSON: Avro records converted to JSON. XML: Avro records converted to XML.</description>
+                    <description>Format for deserialized Avro records delivered to the IFlow. JSON: Avro records converted to JSON. XML: Avro records converted to XML. Applies to Avro values only: a value whose registry schema is a JSON Schema is always delivered as JSON; for XML, add a JSON to XML Converter to the IFlow.</description>
                     <EditCondition>
                         <AttributeName>schemaRegistryEnabled</AttributeName>
                         <AttributeValue>true</AttributeValue>
