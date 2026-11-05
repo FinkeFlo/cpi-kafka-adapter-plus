@@ -122,6 +122,22 @@ The same `group.instance.id` is also why two integration flows must not share a
 
 ---
 
+## Consumer — Schema Registry
+
+### Why do I get JSON although *Avro Output Format* is `XML`?
+
+*Avro Output Format* (`avroOutputFormat`) applies to **Avro** values only. With **Deserialize Values
+via Schema Registry** on, the adapter asks the registry for the schema type of each value's schema ID:
+an Avro value is converted to JSON or XML, a JSON Schema value (`"schemaType": "JSON"`) is passed on as
+JSON, only without the 5-byte Confluent header. The sender logs this once per consumer as ERROR
+`consumer.config.ineffective parameter=avroOutputFormat value=XML … schemaType=JSON`.
+
+To get XML from a JSON Schema topic, add a *JSON to XML Converter* after the sender in the integration
+flow, and set *Avro Output Format* back to `JSON` to drop the log line. See
+[Avro & Schema Registry](features/avro-schema-registry.md#json-schema-values-via-the-schema-registry).
+
+---
+
 ## Producer
 
 ### Can I override the target topic or partition at runtime?

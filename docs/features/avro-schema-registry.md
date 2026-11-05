@@ -17,7 +17,7 @@ When working with Avro-encoded Kafka topics, the adapter can automatically deser
 | `schemaRegistryCredentialAlias` | — | Credential alias for Schema Registry authentication (from CPI Secure Store) |
 | `autoRegisterSchemas` | `false` | Automatically register schemas when producing |
 | `subjectNameStrategy` | `TopicNameStrategy` | Subject naming strategy for Producer (Receiver) serialization |
-| `avroOutputFormat` | `JSON` | Deserialized output format: `JSON` or `XML` |
+| `avroOutputFormat` | `JSON` | Output format of deserialized **Avro** values: `JSON` or `XML`. JSON Schema values stay JSON, see [JSON Schema values](#json-schema-values-via-the-schema-registry) |
 | `avroValueDeserialization` | `true` | Deserialize message values via the Schema Registry when consuming: Avro and JSON Schema |
 | `registrySchemaValidation` | `false` | Sender: validate JSON Schema values against their registry schema (metadata version 1.6) |
 | `avroValueSerialization` | `true` | Serialize message values to Avro when producing |
@@ -30,7 +30,7 @@ To consume Avro-encoded messages:
 2. Keep **Avro Value Deserialization** (`avroValueDeserialization`) enabled
 3. Configure **Schema Registry URL** (`schemaRegistryUrl`) with your Schema Registry endpoint
 4. Set `schemaRegistryCredentialAlias` if authentication is required
-5. Choose `avroOutputFormat` (`JSON` or `XML`) for the deserialized output
+5. Choose `avroOutputFormat` (`JSON` or `XML`) for the deserialized Avro output; it has no effect on JSON Schema values
 
 | Parameter | Value |
 |---|---|
