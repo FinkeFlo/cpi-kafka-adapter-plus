@@ -637,6 +637,25 @@ public class RecordProcessorProgressTest {
         Assert.assertEquals(3L, committed(consumer, P0));
     }
 
+    /** A failed batch rewinds its partition; the invalid record after it must not be reported each time (#230). */
+    @Test
+    public void theSchemaFilterDoesNotRunAheadOfAFailedBatch() throws Exception {
+        failing.add("0:0-1");
+        MockConsumer<byte[], byte[]> consumer =
+                consumerWith(P0, "{\"id\":\"a\"}", "{\"id\":\"b\"}", "{}", "{\"id\":\"d\"}");
+        CpiKafkaPlusEndpoint endpoint = batchEndpoint(false, SCHEMA);
+        endpoint.setBatchSize(2);
+        RecordProcessor processor = processor(endpoint, null, null);
+
+        PollProgress progress = processBatch(processor, consumer);
+
+        Assert.assertEquals(Collections.singletonList("0:0-1"), invoked);
+        Assert.assertEquals(Collections.singletonList(
+                "iFlow processing failed for batch of 2 Kafka records from partition 0"), handledReported);
+        Assert.assertTrue(progress.isBlocked(P0));
+        Assert.assertEquals(0L, consumer.position(P0));
+    }
+
     // --- commitStrategy=AUTO: the adapter commits nothing, and a resolved record is not rewound ---
 
     @Test

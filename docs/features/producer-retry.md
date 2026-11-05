@@ -124,7 +124,9 @@ worstCase    = maxAttempts x perAttempt + (maxAttempts - 1) x producerRetryDelay
 If `worstCase` exceeds `producerRetryTotalBudgetSeconds`, the channel **fails to start** with a
 message naming both numbers. A retry configuration that could never reach its second attempt is a
 promise to operations that the adapter cannot keep, and a warning would only be discovered during
-the outage it was configured for.
+the outage it was configured for. Paths that never retry are not checked: non-transactional batches,
+and single messages with `enableIdempotence=false`. For them the start logs
+`producer.config.ineffective` instead.
 
 With `producerRetryDelaySeconds=2`:
 

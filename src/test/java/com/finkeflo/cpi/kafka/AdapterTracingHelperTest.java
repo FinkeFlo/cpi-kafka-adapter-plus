@@ -561,6 +561,15 @@ public class AdapterTracingHelperTest {
     }
 
     @Test
+    public void theComponentIdCarriesTheReleaseOfTheBundleVersion() {
+        String prefix = "ctype::Adapter/cname::kafkaAdapterPlus/vendor::FinkeFlo/version::";
+        Assert.assertEquals(prefix + "1.4.1", AdapterTracingHelper.componentId("1.4.1"));
+        Assert.assertEquals(prefix + "1.5.0", AdapterTracingHelper.componentId("1.5.0.preview-20261104"));
+        Assert.assertEquals(prefix + "0.0.0", AdapterTracingHelper.componentId(null));
+        Assert.assertEquals(prefix + "0.0.0", AdapterTracingHelper.componentId("snapshot"));
+    }
+
+    @Test
     public void theMplAttachmentHoldsTheFailedDlqWriteNextToTheOriginalFailure() throws Exception {
         java.lang.reflect.Method build = AdapterTracingHelper.class.getDeclaredMethod("buildFullDiagnostic",
                 Exception.class, String.class, java.util.Map.class, Throwable.class);

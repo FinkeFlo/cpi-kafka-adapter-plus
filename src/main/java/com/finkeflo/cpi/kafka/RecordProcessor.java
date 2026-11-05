@@ -181,10 +181,7 @@ final class RecordProcessor {
                 records.count(), byPartition.size());
 
         IdentityHashMap<byte[], DecodedValue> cache = new IdentityHashMap<>();
-        int[] filterCounts = filterInvalidRecords(kafkaConsumer, byPartition, cache, progress);
-        int schemaValidationFailures = filterCounts[0];
-        int dlqCount = filterCounts[1];
-
+        boolean filtering = jsonSchemaValidator != null || registrySchemaValidationActive();
         int batchSize = endpoint.getBatchSize();
         int totalProcessed = 0;
 
@@ -195,22 +192,35 @@ final class RecordProcessor {
             LOG.debug("[CPI-KAFKA-PLUS-DIAG] processBatch: partition {} has {} records",
                     tp, partitionRecords.size());
 
-            if (partitionRecords.isEmpty()) {
-                continue;
-            }
-
-            for (int i = 0; i < partitionRecords.size(); i += batchSize) {
-                List<ConsumerRecord<byte[], byte[]>> batch = partitionRecords.subList(
-                        i, Math.min(i + batchSize, partitionRecords.size()));
-                // A block set by the schema filter still lets the valid records before it run.
-                Long blockedAt = progress.blockedOffset(tp);
-                if (stopRequested(progress) || (blockedAt != null && batch.get(0).offset() >= blockedAt)
-                        || outOfTime(progress, batch.get(0))) {
+            int next = 0;
+            while (next < partitionRecords.size()) {
+                if (stopRequested(progress) || progress.isBlocked(tp)
+                        || outOfTime(progress, partitionRecords.get(next))) {
                     break;
                 }
-
-                totalProcessed += processOneBatch(kafkaConsumer, batch, commitAfterSuccess,
-                        schemaValidationFailures, dlqCount, cache, progress);
+                // The schema filter runs right before each batch, not over the whole poll: a batch
+                // that fails rewinds the partition, and the records after it would otherwise be
+                // reported or dead-lettered again with every retry (#230).
+                // counts: {schemaValidationFailures, dlqCount} of the records taken out of this batch
+                int[] counts = new int[2];
+                List<ConsumerRecord<byte[], byte[]>> batch = new ArrayList<>(Math.min(batchSize,
+                        partitionRecords.size() - next));
+                while (batch.size() < batchSize && next < partitionRecords.size()) {
+                    ConsumerRecord<byte[], byte[]> record = partitionRecords.get(next++);
+                    FilterOutcome outcome = filtering
+                            ? filterRecord(kafkaConsumer, tp, record, cache, progress, counts)
+                            : FilterOutcome.VALID;
+                    if (outcome == FilterOutcome.VALID) {
+                        batch.add(record);
+                    } else if (outcome == FilterOutcome.BLOCKED) {
+                        // The valid records before the blocked one still run.
+                        next = partitionRecords.size();
+                    }
+                }
+                if (!batch.isEmpty()) {
+                    totalProcessed += processOneBatch(kafkaConsumer, batch, commitAfterSuccess,
+                            counts[0], counts[1], cache, progress);
+                }
             }
         }
 
@@ -228,116 +238,107 @@ final class RecordProcessor {
         return totalProcessed;
     }
 
+    /** What the schema filter did with a record of a batch. */
+    private enum FilterOutcome {
+        /** Passed the filter; goes into the batch. */
+        VALID,
+        /** Invalid, and dead-lettered or skipped; not in the batch. */
+        RESOLVED,
+        /** Invalid and to be retried: nothing after it in the partition may run. */
+        BLOCKED
+    }
+
     /**
-     * Pre-filters records that fail JSON Schema validation. Invalid records are routed
-     * to DLQ (if enabled), reported to MPL, and removed from the partition lists.
+     * Checks one record against the JSON Schema or the registry schema. An invalid record is sent
+     * to the DLQ (if enabled) and reported to the MPL.
      *
-     * <p>Nothing is committed here: the filter runs before any batch of the poll, and committing an
-     * invalid record's offset would commit past the earlier records of its partition before they
-     * were processed (#173). The filtered records are resolved in {@code progress} and committed
-     * together with the batches around them. A record whose DLQ write fails blocks its partition:
-     * only the valid records before it stay in the list.
+     * <p>Nothing is committed here: committing an invalid record's offset could commit past
+     * earlier records of its partition before they were processed (#173). The record is resolved
+     * in {@code progress} and committed together with the batches around it. A record whose DLQ
+     * write fails blocks its partition.
      *
-     * @return int[2] with {schemaValidationFailures, dlqCount}
+     * @param counts incremented in place: {@code [0]} schema validation failures, {@code [1]} records
+     *               sent to the DLQ
      */
-    private int[] filterInvalidRecords(
+    private FilterOutcome filterRecord(
             Consumer<byte[], byte[]> kafkaConsumer,
-            Map<TopicPartition, List<ConsumerRecord<byte[], byte[]>>> byPartition,
+            TopicPartition tp,
+            ConsumerRecord<byte[], byte[]> record,
             IdentityHashMap<byte[], DecodedValue> cache,
-            PollProgress progress) {
-        if (jsonSchemaValidator == null && !registrySchemaValidationActive()) {
-            return new int[]{0, 0};
+            PollProgress progress,
+            int[] counts) {
+        progress.processing(tp, record.offset());
+        DecodedValue decoded;
+        try {
+            decoded = decodeValue(record.topic(), record.value(), cache);
+        } catch (Exception deserErr) {
+            // Committed with the batches around it, never from here.
+            handleDeserializationFailure(kafkaConsumer, record, deserErr, false, progress);
+            return progress.isBlocked(tp) ? FilterOutcome.BLOCKED : FilterOutcome.RESOLVED;
         }
-
-        int schemaValidationFailures = 0;
-        int dlqCount = 0;
-
-        for (Map.Entry<TopicPartition, List<ConsumerRecord<byte[], byte[]>>> entry : byPartition.entrySet()) {
-            TopicPartition tp = entry.getKey();
-            List<ConsumerRecord<byte[], byte[]>> partitionRecords = entry.getValue();
-            List<ConsumerRecord<byte[], byte[]>> validRecords = new ArrayList<>();
-
-            for (ConsumerRecord<byte[], byte[]> record : partitionRecords) {
-                progress.processing(tp, record.offset());
-                DecodedValue decoded;
-                try {
-                    decoded = decodeValue(record.topic(), record.value(), cache);
-                } catch (Exception deserErr) {
-                    // Committed with the batches around it, never from here.
-                    handleDeserializationFailure(kafkaConsumer, record, deserErr, false, progress);
-                    if (progress.isBlocked(tp)) {
-                        break;
-                    }
-                    continue;
+        String value = decoded.payload();
+        if (value != null) {
+            String validationError = validationError(decoded);
+            if (validationError != null) {
+                counts[0]++;
+                LOG.warn("[CPI-KAFKA-PLUS-DIAG] JSON Schema validation failed for record at offset={} partition={}: {}",
+                        record.offset(), record.partition(), validationError);
+                if (endpoint.isJsonSchemaReportError()) {
+                    reportValidationErrorToMpl(value, validationError, record);
                 }
-                String value = decoded.payload();
-                if (value != null) {
-                    String validationError = validationError(decoded);
-                    if (validationError != null) {
-                        schemaValidationFailures++;
-                        LOG.warn("[CPI-KAFKA-PLUS-DIAG] JSON Schema validation failed for record at offset={} partition={}: {}",
-                                record.offset(), record.partition(), validationError);
-                        if (endpoint.isJsonSchemaReportError()) {
-                            reportValidationErrorToMpl(value, validationError, record);
-                        }
-                        RecordFailurePolicy.Action action = failurePolicy.forSchemaViolation();
-                        boolean dlqFailed = false;
-                        Exception dlqFailure = null;
-                        if (action == RecordFailurePolicy.Action.DEAD_LETTER) {
-                            try {
-                                dlqHelper.sendToDlq(record, new RuntimeException(validationError), 0);
-                                dlqCount++;
-                            } catch (Exception dlqEx) {
-                                AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("dlq.send.failed")
-                                        .with("trigger", "schemaValidation")
-                                        .with("mode", "batch")
-                                        .with("topic", record.topic())
-                                        .with("partition", record.partition())
-                                        .with("offset", record.offset())
-                                        .with("dlqTopic", endpoint.getDlqTopic())
-                                        .with("consequence", "offset not committed, record will be retried"), dlqEx);
-                                dlqFailed = true;
-                                dlqFailure = dlqEx;
-                            }
-                        }
-                        String message = "JSON Schema validation failed at offset " + record.offset();
-                        if (dlqFailed) {
-                            reportDlqSendFailed(record, new RuntimeException(validationError),
-                                    CpiKafkaPlusErrorCode.KP_CFG_002.code(), dlqFailure, schemaContext(record));
-                            callback.handleReportedException(message, callback.createExchange(),
-                                    new RuntimeException(validationError));
-                        } else {
-                            RuntimeException validationFailure = new RuntimeException(validationError);
-                            java.util.Map<String, String> context = schemaContext(record);
-                            context.put("validationError", validationError);
-                            Exchange errorExchange;
-                            if (action == RecordFailurePolicy.Action.DEAD_LETTER) {
-                                context.put("dlqOutcome", "MOVED");
-                                context.put("dlqTopic", endpoint.getDlqTopic());
-                                errorExchange = newDlqMplExchange(record);
-                            } else {
-                                errorExchange = callback.createExchange();
-                                errorExchange.getIn().setHeader("SAP_Sender", record.topic());
-                            }
-                            tracingHelper.traceError(errorExchange, validationFailure, context, true);
-                            tracingHelper.reportFailure(errorExchange, validationFailure,
-                                    CpiKafkaPlusErrorCode.KP_CFG_002.code(), context, true);
-                            callback.handleReportedException(message, errorExchange, validationFailure);
-                        }
-                        if (dlqFailed || action == RecordFailurePolicy.Action.BLOCK) {
-                            progress.blocked(tp, record.offset());
-                            break;
-                        }
-                        progress.resolved(tp, record.offset());
-                        continue;
+                RecordFailurePolicy.Action action = failurePolicy.forSchemaViolation();
+                boolean dlqFailed = false;
+                Exception dlqFailure = null;
+                if (action == RecordFailurePolicy.Action.DEAD_LETTER) {
+                    try {
+                        dlqHelper.sendToDlq(record, new RuntimeException(validationError), 0);
+                        counts[1]++;
+                    } catch (Exception dlqEx) {
+                        AdapterDiagnostics.error(LOG, AdapterDiagnostics.event("dlq.send.failed")
+                                .with("trigger", "schemaValidation")
+                                .with("mode", "batch")
+                                .with("topic", record.topic())
+                                .with("partition", record.partition())
+                                .with("offset", record.offset())
+                                .with("dlqTopic", endpoint.getDlqTopic())
+                                .with("consequence", "offset not committed, record will be retried"), dlqEx);
+                        dlqFailed = true;
+                        dlqFailure = dlqEx;
                     }
                 }
-                validRecords.add(record);
+                String message = "JSON Schema validation failed at offset " + record.offset();
+                if (dlqFailed) {
+                    reportDlqSendFailed(record, new RuntimeException(validationError),
+                            CpiKafkaPlusErrorCode.KP_CFG_002.code(), dlqFailure, schemaContext(record));
+                    callback.handleReportedException(message, callback.createExchange(),
+                            new RuntimeException(validationError));
+                } else {
+                    RuntimeException validationFailure = new RuntimeException(validationError);
+                    java.util.Map<String, String> context = schemaContext(record);
+                    context.put("validationError", validationError);
+                    Exchange errorExchange;
+                    if (action == RecordFailurePolicy.Action.DEAD_LETTER) {
+                        context.put("dlqOutcome", "MOVED");
+                        context.put("dlqTopic", endpoint.getDlqTopic());
+                        errorExchange = newDlqMplExchange(record);
+                    } else {
+                        errorExchange = callback.createExchange();
+                        errorExchange.getIn().setHeader("SAP_Sender", record.topic());
+                    }
+                    tracingHelper.traceError(errorExchange, validationFailure, context, true);
+                    tracingHelper.reportFailure(errorExchange, validationFailure,
+                            CpiKafkaPlusErrorCode.KP_CFG_002.code(), context, true);
+                    callback.handleReportedException(message, errorExchange, validationFailure);
+                }
+                if (dlqFailed || action == RecordFailurePolicy.Action.BLOCK) {
+                    progress.blocked(tp, record.offset());
+                    return FilterOutcome.BLOCKED;
+                }
+                progress.resolved(tp, record.offset());
+                return FilterOutcome.RESOLVED;
             }
-            entry.setValue(validRecords);
         }
-
-        return new int[]{schemaValidationFailures, dlqCount};
+        return FilterOutcome.VALID;
     }
 
     int processSingleRecords(Consumer<byte[], byte[]> kafkaConsumer,

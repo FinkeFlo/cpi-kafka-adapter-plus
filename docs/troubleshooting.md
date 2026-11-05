@@ -505,6 +505,9 @@ the same. `parameter` names the setting and `reason` says why:
 * `producerRetryMaxAttempts` above 1 with transactional batching and 1 *Max Concurrent Transactions*:
   a retry holds the only transaction slot for up to *Total Retry Budget (Seconds)* and blocks every
   other send on the node meanwhile.
+* `producerRetryMaxAttempts` above 1 with *Batch Send Mode* `NONE` and *Enable Idempotence* off: without
+  idempotence a retry could duplicate the message, so single messages are not retried. Up to 1.6.0 this
+  combination failed the start check when its worst case exceeded the retry budget.
 * `securityProtocol` empty, as an externalized value can be: the Kafka client connects with `PLAINTEXT`,
   without TLS and without authentication, which works against a `PLAINTEXT` listener only. Up to 1.4.1
   this was not logged.
@@ -540,6 +543,12 @@ logged once, as ERROR, at deployment unless stated otherwise, and the channel st
 * `consumer.config.clamped`: with **Auto-Pause on Errors**, a *Consecutive Error Threshold* or an
   *Initial Pause Duration (sec)* below 1 is used as 1, and an *Initial Pause Duration (sec)* above 900
   as 900, the longest pause there is. Up to 1.4.1 a value above 900 was cut without a line.
+
+### `consumer.autopause.activated`
+
+**Auto-Pause on Errors** paused the sender after `consecutiveFailures` failures in a row, for
+`pauseSeconds`; `pauseCount` counts the pauses since the last success, each doubling the pause up to
+900 s. One ERROR line per pause, so it reaches the tenant trace. Up to 1.6.0 this was a WARN line.
 
 ### `consumer.poll.timeLimit` and `consumer.retry.deferred`
 

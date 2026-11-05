@@ -13,6 +13,13 @@ iFlow compatibility.
 
 ### Changed
 - Receiver: `traceparent` and `tracestate` are written to the record whatever a non-empty **Allowed Headers** (`allowedHeaders`) says, so the trace survives the Kafka hop also with a list such as `orderId`. An empty **Allowed Headers** still forwards no header, and `sap-passport`, which can carry the original user, still needs **Allowed Headers** to let it through (the default `*` does). In batch mode, a trace context header given per record in the payload replaces the exchange's header of that name in any letter case instead of being sent next to it. This applies to every metadata version, since the runtime is shared. See issue #168.
+- Sender in batch mode: the schema filter checks the records of each batch right before it, no longer the whole poll at once. A failed batch that is retried no longer reports or dead-letters the invalid records after it again with every retry. `CpiKafkaPlusDlqCount` and `CpiKafkaPlusSchemaValidationFailures` count the records taken out of the batch at hand, not those of the whole poll. See issue #230.
+- Sender: an **Auto-Pause on Errors** pause is logged as ERROR (`consumer.autopause.activated`), so it reaches the tenant trace; it was WARN. See issue #230.
+- Receiver: with *Batch Send Mode* `NONE` and *Enable Idempotence* off, *Send Attempts* above 1 no longer fails the start check through its worst case, since such messages are never retried; `producer.config.ineffective` says so instead. See issue #230.
+- The MPL shows the adapter's own version in its component ID instead of `0.0.1`. See issue #230.
+
+### Fixed
+- Receiver in batch mode without transactions: a record Kafka rejects before sending it, such as one above *Max Request Size*, stops the batch. Up to 1.6.0 the records after it were still sent, and a retry of the caller duplicated them. This applies to every metadata version, since the runtime is shared. See issue #230.
 
 ## [1.6.0] - 2026-11-03
 ### Added

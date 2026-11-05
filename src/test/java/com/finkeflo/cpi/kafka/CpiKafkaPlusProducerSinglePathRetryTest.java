@@ -20,7 +20,6 @@
  */
 package com.finkeflo.cpi.kafka;
 
-import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
@@ -143,7 +142,7 @@ public class CpiKafkaPlusProducerSinglePathRetryTest {
             in.setBody("payload");
 
             try (QueuedFutureKafkaProducer kafkaProducer = new QueuedFutureKafkaProducer(Arrays.asList(
-                    kafkaFutureFailure(new org.apache.kafka.common.errors.TimeoutException(
+                    KafkaFutures.failedBeforeBuffering(new org.apache.kafka.common.errors.TimeoutException(
                             "Topic orders not present in metadata after 2000 ms.")),
                     CompletableFuture.completedFuture(new RecordMetadata(
                             new TopicPartition("orders", 0), 5L, 0, 1L, 0, 0))))) {
@@ -164,7 +163,7 @@ public class CpiKafkaPlusProducerSinglePathRetryTest {
         // it, every single-path retry silently stops — this test makes the upgrade fail instead.
         Class.forName(ProducerRetryPolicy.KAFKA_FUTURE_FAILURE_CLASS);
         Assert.assertTrue(ProducerRetryPolicy.failedBeforeBuffering(
-                kafkaFutureFailure(new org.apache.kafka.common.errors.TimeoutException("t"))));
+                KafkaFutures.failedBeforeBuffering(new org.apache.kafka.common.errors.TimeoutException("t"))));
     }
 
     @Test
@@ -195,13 +194,6 @@ public class CpiKafkaPlusProducerSinglePathRetryTest {
         return producer;
     }
 
-    @SuppressWarnings("unchecked")
-    private static Future<RecordMetadata> kafkaFutureFailure(Exception e) throws Exception {
-        Constructor<?> ctor = Class.forName(ProducerRetryPolicy.KAFKA_FUTURE_FAILURE_CLASS)
-                .getDeclaredConstructor(Exception.class);
-        ctor.setAccessible(true);
-        return (Future<RecordMetadata>) ctor.newInstance(e);
-    }
 
     private static Object getField(Object target, String name) throws Exception {
         Field field = target.getClass().getDeclaredField(name);
