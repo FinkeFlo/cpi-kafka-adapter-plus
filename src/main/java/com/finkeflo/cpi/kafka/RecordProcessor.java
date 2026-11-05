@@ -508,12 +508,12 @@ final class RecordProcessor {
                 if (batch.size() == 1) {
                     // Running the one record again would only repeat this call (#289): the batch
                     // run is its first attempt.
-                    LOG.info("[CPI-KAFKA-PLUS-DIAG] processOneBatch: DLQ enabled, batch of one record failed, "
+                    LOG.info("[CPI-KAFKA-PLUS-DIAG] processOneBatch: batch of one record failed, "
                             + "continuing with its retries");
                     return processRecordWithRetry(kafkaConsumer, batch.get(0), commitAfterSuccess, true,
                             progress, e);
                 }
-                LOG.info("[CPI-KAFKA-PLUS-DIAG] processOneBatch: DLQ enabled, retrying batch records individually");
+                LOG.info("[CPI-KAFKA-PLUS-DIAG] processOneBatch: retrying batch records individually");
                 return processRecordsIndividually(kafkaConsumer, batch, commitAfterSuccess, progress);
             }
             progress.failed();

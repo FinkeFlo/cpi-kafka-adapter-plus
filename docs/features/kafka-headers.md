@@ -45,7 +45,8 @@ With **Batch Mode** (`batchMode=true`) the adapter delivers up to `batchSize` re
 | `CpiKafkaPlusDlqCount` | `Integer` | Number of records the schema filter routed to the DLQ instead of into this batch, i.e. between the previous batch of the partition and this one *(only when DLQ is enabled)* |
 | `CpiKafkaPlusSchemaValidationFailures` | `Integer` | Number of records that failed schema validation instead of joining this batch, counted like `CpiKafkaPlusDlqCount` *(only when JSON Schema validation or Validate with Registry Schema is enabled)* |
 
-With a DLQ enabled, a batch that fails is processed again record by record (see
+With a DLQ enabled, or with **Error Handling** *Skip Failed Message* without a DLQ, a batch that fails
+is processed again record by record (see
 [Dead Letter Queue](dead-letter-queue.md#batch-mode-behavior)). Each of these messages is a batch of
 one record in the same envelope, with the headers above (`CpiKafkaPlusRecordCount` = 1,
 `CpiKafkaPlusDlqCount` and `CpiKafkaPlusSchemaValidationFailures` = 0) and two more:

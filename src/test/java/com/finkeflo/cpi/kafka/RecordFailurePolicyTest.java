@@ -152,23 +152,25 @@ public class RecordFailurePolicyTest {
     }
 
     @Test
-    public void withoutADlqAnErrorWhileFormattingEscapesAndAnyOtherFailureIsLeftToErrorHandling() {
+    public void withoutADlqAnErrorWhileFormattingEscapesAndSkipIsolatesTheFailingRecord() {
         Exception formatFailure = new IllegalArgumentException("Unknown magic byte!");
         Error error = new NoClassDefFoundError("io/confluent/kafka/schemaregistry/ParsedSchema");
         Assert.assertEquals(Action.BLOCK,
                 policy(NO_DLQ, 3, ONLY_TRANSIENT, RETRY).forBatchFormatFailure(formatFailure));
-        Assert.assertEquals(Action.SKIP, policy(NO_DLQ, 3, ONLY_TRANSIENT, SKIP).forBatchFormatFailure(formatFailure));
+        Assert.assertEquals("only the failing record is skipped (#305)", Action.PROCESS_INDIVIDUALLY,
+                policy(NO_DLQ, 3, ONLY_TRANSIENT, SKIP).forBatchFormatFailure(formatFailure));
         Assert.assertEquals(Action.ESCAPE, policy(NO_DLQ, 3, ONLY_TRANSIENT, RETRY).forBatchFormatFailure(error));
         Assert.assertEquals("an Error is not skipped",
                 Action.ESCAPE, policy(NO_DLQ, 3, ONLY_TRANSIENT, SKIP).forBatchFormatFailure(error));
     }
 
     @Test
-    public void aBatchTheRouteFailedForIsProcessedRecordByRecordOrLeftToErrorHandlingAsAWhole() {
+    public void aBatchTheRouteFailedForIsBlockedAsAWholeOnlyWithRetryAndNoDlq() {
         Assert.assertEquals(Action.PROCESS_INDIVIDUALLY, policy(DLQ, 3, ONLY_TRANSIENT, RETRY).forBatchRouteFailure());
         Assert.assertEquals(Action.PROCESS_INDIVIDUALLY, policy(DLQ, 3, ONLY_TRANSIENT, SKIP).forBatchRouteFailure());
         Assert.assertEquals(Action.BLOCK, policy(NO_DLQ, 3, ONLY_TRANSIENT, RETRY).forBatchRouteFailure());
-        Assert.assertEquals(Action.SKIP, policy(NO_DLQ, 3, ONLY_TRANSIENT, SKIP).forBatchRouteFailure());
+        Assert.assertEquals("only the failing record is skipped (#305)", Action.PROCESS_INDIVIDUALLY,
+                policy(NO_DLQ, 3, ONLY_TRANSIENT, SKIP).forBatchRouteFailure());
     }
 
     // --- the settings are read per decision ---

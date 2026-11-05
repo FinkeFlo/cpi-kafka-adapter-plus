@@ -368,7 +368,7 @@
                 </GuiLabels>
                 <AttributeReference>
                     <ReferenceName>errorHandling</ReferenceName>
-                    <description>What happens to a message whose processing fails when no Dead Letter Queue is enabled. Retry Failed Message (default) retries the same offset until it succeeds: the partition waits, every attempt writes a failed message processing log, and nothing is lost. Skip Failed Message continues with the next offset; the failed message is lost (at-most-once). With Auto-Pause enabled every retry counts as a failure, so a message that can never succeed pauses the whole consumer: use a Dead Letter Queue for such messages. With a Dead Letter Queue, failed messages go there instead and this setting has no effect.</description>
+                    <description>What happens to a message whose processing fails when no Dead Letter Queue is enabled. Retry Failed Message (default) retries the same offset until it succeeds: the partition waits, every attempt writes a failed message processing log, and nothing is lost. Skip Failed Message continues with the next offset; the failed message is lost (at-most-once). In batch mode a failed batch is first processed record by record, so only the record that fails again is lost. With Auto-Pause enabled every retry counts as a failure, so a message that can never succeed pauses the whole consumer: use a Dead Letter Queue for such messages. With a Dead Letter Queue, failed messages go there instead and this setting has no effect.</description>
                     <EditCondition>
                         <AttributeName>dlqEnabled</AttributeName>
                         <AttributeValue>false</AttributeValue>
@@ -440,7 +440,7 @@
                 </AttributeReference>
                 <AttributeReference>
                     <ReferenceName>autoPauseErrorThreshold</ReferenceName>
-                    <description>Number of consecutive failed records (or failed batches without a Dead Letter Queue) before the consumer pauses. A record counts once after its last attempt, also when it is then written to the Dead Letter Queue; with Retry Failed Message, every new attempt on a later poll counts again. Records that fail JSON Schema validation do not count, and a successful record or batch resets the count. Default: 5.</description>
+                    <description>Number of consecutive failed records (or failed batches without a Dead Letter Queue and with Retry Failed Message) before the consumer pauses. A record counts once after its last attempt, also when it is then written to the Dead Letter Queue; with Retry Failed Message, every new attempt on a later poll counts again. Records that fail JSON Schema validation do not count, and a successful record or batch resets the count. Default: 5.</description>
                     <ErrorMessage>Please enter a positive number (e.g. 5)</ErrorMessage>
                     <EditCondition>
                         <AttributeName>autoPauseEnabled</AttributeName>
