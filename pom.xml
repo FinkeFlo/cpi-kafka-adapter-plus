@@ -127,7 +127,7 @@
              CVE-2025-12183 and CVE-2025-66566 and is not maintained any more (#240). The 1.10.2
              that kafka-clients 4.3.1 asked for is affected by GHSA-mcr4-qmvw-px4g (CVE-2026-106451)
              and five lesser advisories, which 1.11.4 fixes. kafka-clients 4.4.0 asks for 1.11.2;
-             the adapter declares the newer 1.12.1. The fork's
+             the adapter declares the newer 1.13.0. The fork's
              own OSGi manifest does not resolve on CPI (it imports java.* packages), so it must
              never ship as a bundle of its own: Embed-Dependency puts it on the Bundle-ClassPath of
              the adapter bundle, where its manifest is not read, at.yawk.lz4 is in the
@@ -136,7 +136,7 @@
         <dependency>
             <groupId>at.yawk.lz4</groupId>
             <artifactId>lz4-java</artifactId>
-            <version>1.12.1</version>
+            <version>1.13.0</version>
             <scope>runtime</scope>
         </dependency>
 
