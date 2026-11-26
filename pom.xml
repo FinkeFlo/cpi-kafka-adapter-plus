@@ -29,7 +29,7 @@
         <adk.version>2.3.0</adk.version>
         <kafka.version>4.4.0</kafka.version>
         <avro.version>1.12.2</avro.version>
-        <jackson.version>2.22.4</jackson.version>
+        <jackson.version>2.23.0</jackson.version>
         <!-- Shared by the runtime linux_amd64 zstd-jni dependency and the test-only darwin_aarch64
              one in the zstd-darwin-aarch64 profile; both must stay on the same version. -->
         <zstd-jni.version>1.5.7-25</zstd-jni.version>
@@ -127,7 +127,7 @@
              CVE-2025-12183 and CVE-2025-66566 and is not maintained any more (#240). The 1.10.2
              that kafka-clients 4.3.1 asked for is affected by GHSA-mcr4-qmvw-px4g (CVE-2026-106451)
              and five lesser advisories, which 1.11.4 fixes. kafka-clients 4.4.0 asks for 1.11.2;
-             the adapter declares the newer 1.12.1. The fork's
+             the adapter declares the newer 1.14.1. The fork's
              own OSGi manifest does not resolve on CPI (it imports java.* packages), so it must
              never ship as a bundle of its own: Embed-Dependency puts it on the Bundle-ClassPath of
              the adapter bundle, where its manifest is not read, at.yawk.lz4 is in the
@@ -136,7 +136,7 @@
         <dependency>
             <groupId>at.yawk.lz4</groupId>
             <artifactId>lz4-java</artifactId>
-            <version>1.12.1</version>
+            <version>1.14.1</version>
             <scope>runtime</scope>
         </dependency>
 
@@ -215,13 +215,13 @@
         <dependency>
             <groupId>io.confluent</groupId>
             <artifactId>kafka-schema-registry-client</artifactId>
-            <version>7.9.10</version>
+            <version>7.9.11</version>
             <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>io.confluent</groupId>
             <artifactId>kafka-avro-serializer</artifactId>
-            <version>7.9.10</version>
+            <version>7.9.11</version>
             <scope>test</scope>
             <exclusions>
                 <exclusion>
@@ -259,7 +259,7 @@
         <dependency>
             <groupId>org.apache.commons</groupId>
             <artifactId>commons-lang3</artifactId>
-            <version>3.21.0</version>
+            <version>3.22.0</version>
             <scope>test</scope>
         </dependency>
         <dependency>
@@ -301,7 +301,7 @@
             <plugin>
                 <groupId>org.codehaus.mojo</groupId>
                 <artifactId>license-maven-plugin</artifactId>
-                <version>2.7.1</version>
+                <version>2.9.0</version>
                 <configuration>
                     <licenseName>agpl_v3</licenseName>
                     <licenseFile>${project.basedir}/LICENSE</licenseFile>
